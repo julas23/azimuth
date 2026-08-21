@@ -1,0 +1,17 @@
+[Unit]
+Description=VPN Bridge — daemon de gestão WireGuard/NFTables via Unix socket
+After=wg-quick@wg0.service nftables.service
+Requires=wg-quick@wg0.service nftables.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/ubuntu/vpn-bridge/bridge.py
+Restart=on-failure
+RestartSec=5s
+RuntimeDirectory=vpn-bridge
+RuntimeDirectoryMode=0750
+RuntimeDirectoryGroup=vpnbridge
+ExecStartPost=/bin/chown root:vpnbridge /run/vpn-bridge
+
+[Install]
+WantedBy=multi-user.target

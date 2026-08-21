@@ -1,0 +1,378 @@
+#!/usr/bin/env python3
+"""fwctl — o unico componente do fwadmin que roda como root.
+
+A interface web roda sem privilegio e nunca toca em /etc. Quando ela quer
+mudar alguma coisa, grava a proposta em /etc/fwadmin/config.pending.yaml e
+chama `sudo fwctl apply`. Este script le apenas caminhos fixos: nada que venha
+da UI vira caminho, argumento de shell ou nome de arquivo.
+
+    fwctl check      valida a config pendente e mostra o que mudaria
+    fwctl apply      aplica, recarrega e arma o rollback automatico
+    fwctl confirm    confirma o apply e grava no git
+    fwctl rollback   desfaz o ultimo apply
+    fwctl status     mostra se ha apply aguardando confirmacao
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, os.environ.get("FWADMIN_CODE", "/opt/fwadmin"))
+
+from fwadmin import paths  # noqa: E402
+from fwadmin.apply import (  # noqa: E402
+    ApplyError,
+    Plan,
+    State,
+    arm_watchdog,
+    build_plan,
+    disarm_watchdog,
+    install,
+    restore,
+    rollback_reloads,
+    run,
+)
+from fwadmin.render import TARGETS, dump, load  # noqa: E402
+
+BOLD, RED, GREEN, YELLOW, DIM, OFF = (
+    ("\033[1m", "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m")
+    if sys.stdout.isatty()
+    else ("", "", "", "", "", "")
+)
+
+
+def say(msg: str = "") -> None:
+    print(msg, flush=True)
+
+
+def fail(msg: str) -> int:
+    say(f"{RED}erro:{OFF} {msg}")
+    return 1
+
+
+def require_root() -> None:
+    if os.geteuid() != 0 and not paths.sandboxed():
+        raise SystemExit("fwctl precisa rodar como root (use sudo)")
+
+
+# ---------------------------------------------------------------------------
+# planejamento
+# ---------------------------------------------------------------------------
+
+
+def load_configs(source: Path) -> tuple[object, object]:
+    """Le a config proposta e a atualmente aplicada."""
+    if not source.exists():
+        raise ApplyError(f"nada para aplicar: {source} nao existe")
+    proposed = load(source)
+    current = load(paths.CONFIG) if paths.CONFIG.exists() else None
+    return proposed, current
+
+
+def show_plan(plan: Plan) -> None:
+    if not plan.changed:
+        say(f"{GREEN}nada a fazer{OFF} — /etc ja esta igual a config")
+        return
+
+    say(f"{BOLD}arquivos que mudam ({len(plan.changed)}){OFF}")
+    for name in plan.changed:
+        say(f"  {name:22s} {DIM}->{OFF} {TARGETS[name]}")
+
+    say()
+    say(f"{BOLD}validacao de sintaxe{OFF}")
+    for check in plan.checks:
+        mark = f"{GREEN}OK{OFF}" if check.ok else f"{RED}FALHOU{OFF}"
+        say(f"  [{mark}] {check.command}")
+        if not check.ok:
+            for line in check.output.splitlines():
+                say(f"       {RED}{line}{OFF}")
+
+    if plan.reloads:
+        say()
+        say(f"{BOLD}recargas{OFF}")
+        for action in plan.reloads:
+            flag = f" {YELLOW}(derruba trafego){OFF}" if action.disruptive else ""
+            say(f"  {action.label}{flag}")
+
+
+# ---------------------------------------------------------------------------
+# comandos
+# ---------------------------------------------------------------------------
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    source = paths.PENDING if paths.PENDING.exists() else paths.CONFIG
+    proposed, current = load_configs(source)
+    say(f"{DIM}config: {source}{OFF}\n")
+    plan = build_plan(proposed, current, paths.STAGING)
+    show_plan(plan)
+    if not plan.valid:
+        return fail("a config nao passou na validacao de sintaxe — apply bloqueado")
+    return 0
+
+
+def cmd_apply(args: argparse.Namespace) -> int:
+    require_root()
+
+    if (state := State.load()) is not None:
+        return fail(
+            f"ja existe um apply aguardando confirmacao ({state.remaining}s restantes).\n"
+            "       Rode 'fwctl confirm' ou 'fwctl rollback' antes de aplicar de novo."
+        )
+
+    source = paths.PENDING if paths.PENDING.exists() else paths.CONFIG
+    proposed, current = load_configs(source)
+    plan = build_plan(proposed, current, paths.STAGING)
+
+    show_plan(plan)
+    if not plan.changed:
+        paths.PENDING.unlink(missing_ok=True)
+        return 0
+    if not plan.valid:
+        return fail("validacao de sintaxe falhou — nada foi tocado em /etc")
+
+    if plan.disruptive and not (args.yes or args.force):
+        say()
+        return fail(
+            "este apply derruba trafego (interface ou PPPoE reiniciam).\n"
+            "       Confirme com 'fwctl apply --yes'."
+        )
+
+    # ---- a partir daqui /etc e' tocado -----------------------------------
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup = paths.BACKUPS / stamp
+    say()
+    say(f"{BOLD}aplicando{OFF} (backup em {backup})")
+
+    if paths.CONFIG.exists():
+        backup.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(paths.CONFIG, backup / "config.yaml")
+
+    installed = install(paths.STAGING, backup, plan.changed)
+    for name in installed:
+        say(f"  instalado {TARGETS[name]}")
+
+    paths.CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    paths.CONFIG.write_text(
+        dump(
+            proposed,
+            header="# Config VIVA do fwadmin. Alterada pela UI; versionada em git.\n",
+        )
+    )
+    paths.PENDING.unlink(missing_ok=True)
+
+    say()
+    for action in plan.reloads:
+        result = run(*action.argv, timeout=120)
+        mark = f"{GREEN}OK{OFF}" if result.ok else f"{RED}FALHOU{OFF}"
+        say(f"  [{mark}] {action.label}")
+        if not result.ok and result.output:
+            for line in result.output.splitlines()[:5]:
+                say(f"       {RED}{line}{OFF}")
+
+    timeout = proposed.system.confirm_timeout
+    state = State(
+        backup=str(backup),
+        at=time.time(),
+        timeout=timeout,
+        files=installed,
+        reloads=[a.label for a in plan.reloads],
+        note=args.note or read_note(),
+    )
+    state.save()
+
+    if args.no_watchdog:
+        say(f"\n{YELLOW}watchdog desarmado por --no-watchdog{OFF}")
+    else:
+        armed = arm_watchdog(timeout)
+        if not armed.ok:
+            say(f"\n{RED}nao consegui armar o watchdog{OFF}: {armed.output}")
+            say("Confirme ou reverta manualmente — nao ha rede de seguranca ativa.")
+        else:
+            say()
+            say(f"{YELLOW}{BOLD}CONFIRME EM {timeout}s{OFF}{YELLOW} ou tudo volta sozinho.{OFF}")
+            say(f"  {BOLD}fwctl confirm{OFF}   mantem as mudancas")
+            say(f"  {BOLD}fwctl rollback{OFF}  desfaz agora")
+    return 0
+
+
+def cmd_confirm(args: argparse.Namespace) -> int:
+    require_root()
+    state = State.load()
+    if state is None:
+        say("nada aguardando confirmacao")
+        return 0
+
+    disarm_watchdog()
+    State.clear()
+    say(f"{GREEN}confirmado{OFF} — {len(state.files)} arquivos mantidos")
+
+    git_commit(state.note or "apply via fwadmin")
+    return 0
+
+
+def cmd_rollback(args: argparse.Namespace) -> int:
+    require_root()
+    state = State.load()
+    if state is None:
+        say("nada para reverter")
+        return 0
+
+    backup = Path(state.backup)
+    if not (backup / "MANIFEST.json").exists():
+        return fail(f"backup {backup} incompleto — reverta a mao")
+
+    reason = "watchdog (apply nao confirmado)" if args.auto else "pedido manual"
+    say(f"{YELLOW}revertendo{OFF} — {reason}")
+
+    restored = restore(backup)
+    for name in restored:
+        say(f"  restaurado {name}")
+
+    saved = backup / "config.yaml"
+    if saved.exists():
+        shutil.copy2(saved, paths.CONFIG)
+
+    # Recarrega tudo que o apply havia mexido, para o /etc restaurado valer.
+    # Se a config restaurada nao carregar, ainda assim recarregamos o que da:
+    # os arquivos ja estao de volta no lugar, o que importa e' os daemons verem.
+    try:
+        previous = load(paths.CONFIG) if paths.CONFIG.exists() else None
+    except Exception as exc:  # noqa: BLE001
+        say(f"  {YELLOW}config restaurada nao valida ({exc}){OFF} — recarga parcial")
+        previous = None
+
+    for action in rollback_reloads(state.files, previous):
+        result = run(*action.argv, timeout=120)
+        mark = f"{GREEN}OK{OFF}" if result.ok else f"{RED}FALHOU{OFF}"
+        say(f"  [{mark}] {action.label}")
+
+    disarm_watchdog()
+    State.clear()
+
+    if args.auto:
+        run("logger", "-t", "fwadmin", "apply revertido pelo watchdog: nao foi confirmado")
+    say(f"{GREEN}rollback concluido{OFF}")
+    return 0
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    state = State.load()
+    if state is None:
+        say(f"{GREEN}estavel{OFF} — nenhum apply aguardando confirmacao")
+    else:
+        when = datetime.fromtimestamp(state.at).strftime("%H:%M:%S")
+        say(f"{YELLOW}aguardando confirmacao{OFF} desde {when}")
+        say(f"  restam {state.remaining}s antes do rollback automatico")
+        say(f"  arquivos: {', '.join(state.files)}")
+        say(f"  backup:   {state.backup}")
+
+    say()
+    say(f"config viva:   {paths.CONFIG}{'' if paths.CONFIG.exists() else '  (ausente)'}")
+    if paths.PENDING.exists():
+        say(f"{YELLOW}config pendente:{OFF} {paths.PENDING}  (nao aplicada)")
+    return 0
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    source = paths.PENDING if paths.PENDING.exists() else paths.CONFIG
+    proposed, current = load_configs(source)
+    plan = build_plan(proposed, current, paths.STAGING)
+    if not plan.changed:
+        say("sem diferencas")
+        return 0
+    import difflib
+
+    for name in plan.changed:
+        target = paths.sys_path(TARGETS[name])
+        old = target.read_text().splitlines() if target.exists() else []
+        new = plan.rendered[name].splitlines()
+        say(f"{BOLD}--- {TARGETS[name]}{OFF}")
+        for line in difflib.unified_diff(old, new, lineterm="", n=2):
+            color = GREEN if line.startswith("+") else RED if line.startswith("-") else DIM
+            say(f"{color}{line}{OFF}")
+        say()
+    return 0
+
+
+def read_note() -> str:
+    """Mensagem deixada pela UI para o commit deste apply.
+
+    Vem por arquivo, nao por argumento, para o sudoers poder listar comandos
+    exatos em vez de terminar em curinga.
+    """
+    try:
+        note = paths.NOTE.read_text().strip()
+    except OSError:
+        return ""
+    paths.NOTE.unlink(missing_ok=True)
+    return note[:200].replace("\n", " ")
+
+
+def git_commit(message: str) -> None:
+    """Versiona a config viva. O historico e' o rollback de longo prazo."""
+    repo = paths.ETC
+    # O diretorio pertence ao netadm, que precisa gravar a proposta; o git aqui
+    # roda como root. Sem safe.directory o git recusa o repositorio.
+    base = ["git", "-c", f"safe.directory={repo}", "-C", str(repo)]
+
+    if not (repo / ".git").exists():
+        run(*base, "init", "-q")
+    run(*base, "add", "config.yaml")
+    result = run(
+        *base,
+        "-c",
+        "user.name=fwadmin",
+        "-c",
+        "user.email=fwadmin@localhost",
+        "commit",
+        "-q",
+        "-m",
+        message,
+    )
+    if result.ok:
+        say(f"{DIM}versionado: {message}{OFF}")
+
+
+# ---------------------------------------------------------------------------
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="fwctl", description=__doc__)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("check", help="valida e mostra o que mudaria").set_defaults(fn=cmd_check)
+    sub.add_parser("status", help="mostra apply pendente").set_defaults(fn=cmd_status)
+    sub.add_parser("diff", help="diff dos arquivos gerados").set_defaults(fn=cmd_diff)
+
+    p_apply = sub.add_parser("apply", help="aplica a config pendente")
+    p_apply.add_argument("--yes", action="store_true", help="aceita recargas que derrubam trafego")
+    p_apply.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
+    p_apply.add_argument("--no-watchdog", action="store_true", help="nao arma o rollback automatico")
+    p_apply.add_argument("--note", default="", help="mensagem do commit")
+    p_apply.set_defaults(fn=cmd_apply)
+
+    p_confirm = sub.add_parser("confirm", help="confirma o apply e versiona")
+    p_confirm.set_defaults(fn=cmd_confirm)
+
+    p_rb = sub.add_parser("rollback", help="desfaz o ultimo apply")
+    p_rb.add_argument("--auto", action="store_true", help="chamado pelo watchdog")
+    p_rb.set_defaults(fn=cmd_rollback)
+
+    args = parser.parse_args()
+    try:
+        return args.fn(args)
+    except ApplyError as exc:
+        return fail(str(exc))
+    except Exception as exc:  # noqa: BLE001 — root: melhor mensagem que traceback
+        return fail(f"{type(exc).__name__}: {exc}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

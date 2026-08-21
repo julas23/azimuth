@@ -1,0 +1,24 @@
+# /etc/sudoers.d/fwadmin — instalar com modo 0440 e validar com visudo -c
+#
+# O usuario da interface web pode chamar exatamente estes comandos e mais
+# nenhum. Repare que NAO ha curinga em lugar nenhum: '*' no sudoers casa
+# atraves de argumentos, e e' assim que se escapa de um sudoers restrito.
+# Por isso a mensagem do commit vai por arquivo (/etc/fwadmin/apply-note),
+# e nao como argumento do apply.
+#
+# Tambem nao esta liberado o 'fwctl apply --no-watchdog': a interface web
+# nunca pode aplicar sem a rede de seguranca do rollback automatico.
+
+Cmnd_Alias FWADMIN_RO = /usr/local/sbin/fwctl check, \
+                        /usr/local/sbin/fwctl status, \
+                        /usr/local/sbin/fwctl diff
+
+Cmnd_Alias FWADMIN_RW = /usr/local/sbin/fwctl apply, \
+                        /usr/local/sbin/fwctl apply --yes, \
+                        /usr/local/sbin/fwctl confirm, \
+                        /usr/local/sbin/fwctl rollback
+
+netadm ALL=(root) NOPASSWD: FWADMIN_RO, FWADMIN_RW
+
+Defaults!FWADMIN_RO !requiretty
+Defaults!FWADMIN_RW !requiretty

@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Editar {{ target.name }} — Admin{% endblock %}
+{% block content %}
+<div class="max-w-xl mx-auto px-4 py-10">
+
+  <div class="mb-6">
+    <a href="/admin/users" class="text-sm text-gray-500 hover:text-indigo-600">← Usuários</a>
+    <h1 class="text-2xl font-bold text-gray-900 mt-1">Editar usuário</h1>
+    <p class="text-sm text-gray-500 mt-0.5">ID: <span class="font-mono">{{ target.id }}</span></p>
+  </div>
+
+  {% if error %}
+  <div class="mb-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
+    {{ error }}
+  </div>
+  {% endif %}
+
+  {% if success %}
+  <div class="mb-4 bg-green-50 border border-green-200 text-green-700 rounded-lg px-4 py-3 text-sm">
+    Dados salvos com sucesso.
+  </div>
+  {% endif %}
+
+  <div class="bg-white rounded-2xl border border-gray-200 p-6">
+    <form method="post" action="/admin/users/{{ target.id }}/edit" class="space-y-4">
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Nome</label>
+        <input type="text" name="name" value="{{ target.name }}" required
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
+        <input type="email" name="email" value="{{ target.email }}" required
+               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+      </div>
+
+      <div class="flex items-center gap-6 pt-2">
+        <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+          <input type="checkbox" name="is_active" value="1"
+                 {% if target.is_active %}checked{% endif %}
+                 class="w-4 h-4 rounded border-gray-300 text-indigo-600">
+          Conta ativa
+        </label>
+        <label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+          <input type="checkbox" name="is_admin" value="1"
+                 {% if target.is_admin %}checked{% endif %}
+                 class="w-4 h-4 rounded border-gray-300 text-indigo-600">
+          Administrador
+        </label>
+      </div>
+
+      <div class="pt-2 flex gap-3">
+        <button type="submit"
+                class="bg-indigo-600 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition">
+          Salvar
+        </button>
+        <a href="/admin/users"
+           class="px-6 py-2 rounded-lg text-sm font-medium border border-gray-300 text-gray-600 hover:bg-gray-50 transition">
+          Cancelar
+        </a>
+      </div>
+
+    </form>
+  </div>
+
+  <!-- Assinatura -->
+  <div class="mt-6 bg-white rounded-2xl border border-gray-200 p-6">
+    <h2 class="font-bold text-gray-800 mb-4">📋 Assinatura e plano</h2>
+
+    {% if sub %}
+    <div class="mb-4 text-sm space-y-1 text-gray-600">
+      <div class="flex justify-between">
+        <span>Plano atual</span>
+        <span class="font-medium text-gray-900">{{ sub.plan_id | capitalize }}</span>
+      </div>
+      <div class="flex justify-between">
+        <span>Status</span>
+        <span class="font-medium
+          {% if sub.status == 'active' %}text-green-600
+          {% elif sub.status == 'trialing' %}text-blue-600
+          {% elif sub.status == 'past_due' %}text-yellow-600
+          {% else %}text-red-500{% endif %}">
+          {{ sub.status }}
+        </span>
+      </div>
+      {% if sub.current_period_end %}
+      <div class="flex justify-between">
+        <span>Vigência até</span>
+        <span>{{ sub.current_period_end | fmt_date }}</span>
+      </div>
+      {% endif %}
+      {% if peer %}
+      <div class="flex justify-between">
+        <span>IP VPN</span>
+        <span class="font-mono text-xs">{{ peer.ip_address }}</span>
+      </div>
+      {% endif %}
+      {% if sub.stripe_subscription_id.startswith('manual_') %}
+      <div class="flex justify-between">
+        <span>Origem</span>
+        <span class="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded">Manual (sem Stripe)</span>
+      </div>
+      {% endif %}
+    </div>
+    {% else %}
+    <p class="text-sm text-gray-400 mb-4">Nenhuma assinatura ativa.</p>
+    {% endif %}
+
+    <!-- Selecionar / mudar plano -->
+    <form method="post" action="/admin/users/{{ target.id }}/set-plan" class="flex items-end gap-3">
+      <div class="flex-1">
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          {% if sub %}Mudar para{% else %}Atribuir plano{% endif %}
+        </label>
+        <select name="plan_id"
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          {% for p in plans %}
+          <option value="{{ p.id }}"
+            {% if sub and sub.plan_id == p.id %}selected{% endif %}>
+            {{ p.name }} — {{ p.bandwidth_mbps }} Mbps
+            {% if p.quota_gb == 0 %}/ Ilimitado{% else %}/ {{ p.quota_gb }} GB{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <button type="submit"
+              class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition whitespace-nowrap">
+        {% if sub %}Mudar plano{% else %}Ativar assinatura{% endif %}
+      </button>
+    </form>
+    <p class="text-xs text-gray-400 mt-2">
+      {% if sub %}
+        Mudar o plano atualiza a velocidade imediatamente via TC.
+        O cliente mantém o mesmo IP e configuração WireGuard.
+      {% else %}
+        Cria uma assinatura manual (sem cobrança Stripe) e provisiona o peer VPN.
+        As credenciais serão enviadas por e-mail.
+      {% endif %}
+    </p>
+  </div>
+
+  <!-- Zona de perigo -->
+  <div class="mt-6 border border-red-200 rounded-2xl p-6">
+    <h2 class="font-bold text-red-700 mb-1">⚠ Zona de perigo</h2>
+    <p class="text-sm text-gray-500 mb-4">
+      Deleta permanentemente o usuário, assinatura, peer VPN e histórico de uso.
+      Esta ação não pode ser desfeita.
+    </p>
+    <form method="post" action="/admin/users/{{ target.id }}/delete"
+          onsubmit="return confirm('Deletar {{ target.name }} ({{ target.email }}) permanentemente? Esta ação não pode ser desfeita.')">
+      <button type="submit"
+              class="bg-red-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-red-700 transition">
+        Deletar usuário
+      </button>
+    </form>
+  </div>
+
+  <!-- Info extra -->
+  <div class="mt-4 bg-gray-50 rounded-xl border border-gray-200 p-4 text-sm text-gray-500 space-y-1">
+    <div class="flex justify-between">
+      <span>Cadastro</span>
+      <span>{{ target.created_at | fmt_date }}</span>
+    </div>
+    <div class="flex justify-between">
+      <span>Último login</span>
+      <span>{{ target.last_login | fmt_date }}</span>
+    </div>
+    <div class="flex justify-between">
+      <span>Stripe Customer</span>
+      <span class="font-mono text-xs">{{ target.stripe_customer_id or '—' }}</span>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

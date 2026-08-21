@@ -1,0 +1,21 @@
+<div id="domains-list">
+  {% if domains %}
+  <ul class="space-y-2 mb-2">
+    {% for d in domains %}
+    <li class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
+      <span class="font-mono text-gray-800">{{ d.domain }}</span>
+      <button hx-delete="/dashboard/_domains/{{ d.id }}"
+              hx-confirm="{{ t.dom_remove_confirm | replace('{domain}', d.domain) }}"
+              hx-target="#domains-list"
+              hx-swap="outerHTML"
+              class="text-red-400 hover:text-red-600 text-xs ml-4">
+        {{ t.dom_remove }}
+      </button>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="text-xs text-gray-400">{{ t.dom_count | replace('{n}', domains|length|string) | replace('{max}', plan.custom_domains_limit|string) }}</p>
+  {% else %}
+  <p class="text-sm text-gray-400 italic">{{ t.dom_empty }}</p>
+  {% endif %}
+</div>

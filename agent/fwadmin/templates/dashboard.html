@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Painel{% endblock %}
+{% block body %}
+
+<h1>Painel</h1>
+<p class="lede">{{ system.hostname }} · {{ system.kernel }} · no ar há {{ system.uptime }}</p>
+
+<h2>Links de saída</h2>
+{% include "_wans.html" %}
+
+<h2>Sistema</h2>
+<div class="grid">
+  <div class="card stat"><div class="k">Carga</div><div class="v">{{ system.load.split()[0] if system.load else '—' }}</div><div class="sub">{{ system.load }}</div></div>
+  <div class="card stat"><div class="k">Memória</div><div class="v">{{ system.memory.split('/')[0] if system.memory else '—' }}</div><div class="sub">de {{ system.memory.split('/')[1] if system.memory else '—' }}</div></div>
+  <div class="card stat"><div class="k">Disco</div><div class="v">{{ system.disk.split('/')[0] if system.disk else '—' }}</div><div class="sub">de {{ system.disk.split('/')[1] if system.disk else '—' }}</div></div>
+  <div class="card stat"><div class="k">Leases ativos</div><div class="v">{{ leases | length }}</div><div class="sub">{{ cfg.dhcp.reservations | length }} reservas fixas</div></div>
+</div>
+
+<h2>Serviços</h2>
+<div class="card">
+  <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+    {% for svc in services %}
+      <span class="pill {{ 'ok' if svc.ok else ('bad' if svc.active == 'failed' else 'warn') }}">
+        <span class="dot"></span>{{ svc.unit }}
+      </span>
+    {% endfor %}
+  </div>
+</div>
+
+<h2>Rede local</h2>
+<div class="grid">
+  <div class="card stat">
+    <div class="k">LAN</div>
+    <div class="v" style="font-size:1.15rem">{{ cfg.lan.ipv4.address }}</div>
+    <div class="sub">{{ cfg.lan.device }} · domínio {{ cfg.dns.domain }}</div>
+  </div>
+  <div class="card stat">
+    <div class="k">Faixa DHCP</div>
+    <div class="v" style="font-size:1.15rem">{{ cfg.dhcp.range.start }} → {{ cfg.dhcp.range.end }}</div>
+    <div class="sub">lease de {{ cfg.dhcp.range.lease }}</div>
+  </div>
+  <div class="card stat">
+    <div class="k">Registros DNS</div>
+    <div class="v">{{ cfg.hosts | selectattr('dns') | list | length }}</div>
+    <div class="sub">{{ cfg.hosts | map(attribute='services') | map('length') | sum }} serviços publicados</div>
+  </div>
+</div>
+
+<h2>Leases ativos</h2>
+<div class="tablewrap">
+  <table>
+    <thead><tr><th>IP</th><th>Nome</th><th>MAC</th><th>Expira</th><th></th></tr></thead>
+    <tbody>
+      {% for lease in leases %}
+        <tr>
+          <td class="mono nowrap">{{ lease.ip }}</td>
+          <td>{{ lease.hostname or '—' }}</td>
+          <td class="mono nowrap">{{ lease.mac }}</td>
+          <td class="nowrap">{{ lease.expires_in }}</td>
+          <td class="right">{% if lease.reserved %}<span class="pill">reserva</span>{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" style="color:var(--text-faint)">Nenhum lease ativo — ou o arquivo de leases não está acessível.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

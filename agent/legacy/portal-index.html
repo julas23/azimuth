@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portal · Serviços da Casa</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --bg-soft: #151a21;
+    --card: #1a2029;
+    --card-hover: #212934;
+    --border: #2a323d;
+    --text: #e6edf3;
+    --text-dim: #8b98a8;
+    --text-faint: #5d6875;
+    --hp: #f59e0b;
+    --dell: #4a9eff;
+    --lenovo: #22c55e;
+    --warn: #f87171;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f6f9;
+      --bg-soft: #eaeef3;
+      --card: #ffffff;
+      --card-hover: #f8fafc;
+      --border: #d7dee7;
+      --text: #16202b;
+      --text-dim: #5a6875;
+      --text-faint: #8996a5;
+      --hp: #b45309;
+      --dell: #1d6fd0;
+      --lenovo: #15803d;
+      --warn: #c0392b;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 2.5rem 1.5rem 4rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  .wrap { max-width: 1400px; margin: 0 auto; }
+
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 1rem 1.5rem;
+    margin-bottom: 2.5rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--border);
+  }
+  h1 { margin: 0; font-size: 1.6rem; font-weight: 650; letter-spacing: -0.02em; }
+  .sub { color: var(--text-dim); font-size: 0.9rem; }
+
+  #filter {
+    margin-left: auto;
+    padding: 0.55rem 0.9rem;
+    min-width: 240px;
+    background: var(--bg-soft);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.9rem;
+    font-family: inherit;
+  }
+  #filter:focus { outline: 2px solid var(--dell); outline-offset: -1px; }
+  #filter::placeholder { color: var(--text-faint); }
+
+  section { margin-bottom: 2.75rem; }
+
+  h2 {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin: 0 0 1rem;
+    font-size: 0.8rem;
+    font-weight: 650;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+  h2::before {
+    content: "";
+    width: 10px; height: 10px;
+    border-radius: 3px;
+    background: var(--accent);
+  }
+  h2 .meta {
+    font-weight: 400;
+    letter-spacing: 0;
+    text-transform: none;
+    color: var(--text-faint);
+    font-size: 0.8rem;
+  }
+
+  table.grid { width: 100%; border-collapse: separate; border-spacing: 14px; table-layout: fixed; margin: -14px; }
+  table.grid td { width: 25%; padding: 0; vertical-align: top; }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    height: 100%;
+    padding: 1rem 1.1rem 1.05rem;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.14s, transform 0.14s, border-color 0.14s;
+  }
+  .card:hover, .card:focus-visible {
+    background: var(--card-hover);
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    outline: none;
+  }
+
+  .card .top { display: flex; align-items: center; gap: 0.6rem; }
+  .card .ico { font-size: 1.25rem; line-height: 1; }
+  .card .name { font-weight: 600; font-size: 1.02rem; letter-spacing: -0.01em; }
+  .card .desc { color: var(--text-dim); font-size: 0.86rem; flex: 1; }
+  .card .url {
+    color: var(--text-faint);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.76rem;
+    word-break: break-all;
+  }
+
+  .tag {
+    align-self: flex-start;
+    margin-top: 0.15rem;
+    padding: 0.12rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    background: var(--bg-soft);
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+  .tag.open { color: var(--warn); border-color: var(--warn); }
+
+  .apis { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 1.1rem 1.3rem; }
+  .apis ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.55rem 1.5rem; }
+  .apis li { display: flex; justify-content: space-between; gap: 1rem; font-size: 0.85rem; border-bottom: 1px dashed var(--border); padding-bottom: 0.45rem; }
+  .apis .k { color: var(--text-dim); white-space: nowrap; }
+  .apis .v { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; color: var(--text-faint); text-align: right; word-break: break-all; }
+
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--border); color: var(--text-faint); font-size: 0.8rem; }
+  footer p { margin: 0.35rem 0; }
+  .empty-msg { display: none; color: var(--text-dim); padding: 2rem 0; }
+
+  @media (max-width: 1100px) {
+    table.grid, table.grid tbody { display: block; }
+    table.grid tr { display: grid; grid-template-columns: 1fr 1fr; }
+    table.grid td { display: block; width: auto; }
+  }
+  @media (max-width: 640px) {
+    body { padding: 1.75rem 1rem 3rem; }
+    table.grid tr { grid-template-columns: 1fr; }
+    #filter { margin-left: 0; width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>Home.Lan Portal</h1>
+      <div class="sub">Serviços da rede local · <code>10.0.0.0/24</code></div>
+    </div>
+    <input id="filter" type="search" placeholder="Filtrar serviços…" autocomplete="off" autofocus>
+  </header>
+
+  <section style="--accent: var(--lenovo)">
+    <h2>Lenovo ThinkStation P720 <span class="meta">· AI Lab · 10.0.0.3</span></h2>
+    <table class="grid">
+      <tbody>
+        <tr>
+          <td>
+            <a class="card" href="https://ai.home.lan/">
+              <div class="top"><span class="ico">💬</span><span class="name">OpenWebUI</span></div>
+              <div class="desc">Chat com os modelos locais e Claude</div>
+              <div class="url">https://ai.home.lan/</div>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="https://ai.home.lan/claude/">
+              <div class="top"><span class="ico">🤖</span><span class="name">Claude Code</span></div>
+              <div class="desc">WebShell do agente no terminal</div>
+              <div class="url">https://ai.home.lan/claude/</div>
+              <span class="tag open">sem auth</span>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="https://ai.home.lan/opencode/">
+              <div class="top"><span class="ico">⌨️</span><span class="name">opencode</span></div>
+              <div class="desc">Agente TUI com qwen3:8b local</div>
+              <div class="url">https://ai.home.lan/opencode/</div>
+              <span class="tag open">sem auth</span>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="https://ai.home.lan/aider/">
+              <div class="top"><span class="ico">✏️</span><span class="name">Aider</span></div>
+              <div class="desc">Editor de código com qwen2.5-coder</div>
+              <div class="url">https://ai.home.lan/aider/</div>
+              <span class="tag open">sem auth</span>
+            </a>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <a class="card" href="http://ai.home.lan:4000/ui/">
+              <div class="top"><span class="ico">🔀</span><span class="name">LiteLLM</span></div>
+              <div class="desc">Gateway de modelos · logs de request</div>
+              <div class="url">http://ai.home.lan:4000/ui/</div>
+              <span class="tag">admin</span>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="http://ai.home.lan:7860">
+              <div class="top"><span class="ico">🎨</span><span class="name">ComfyUI</span></div>
+              <div class="desc">Stable Diffusion XL na P5000</div>
+              <div class="url">http://ai.home.lan:7860</div>
+              <span class="tag open">sem auth</span>
+            </a>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section style="--accent: var(--dell)">
+    <h2>Dell T430 <span class="meta">· Proxmox · 10.0.0.2 · LXCs e VMs</span></h2>
+    <table class="grid">
+      <tbody>
+        <tr>
+          <td>
+            <a class="card" href="https://pve.home.lan:8006">
+              <div class="top"><span class="ico">🖥️</span><span class="name">Proxmox VE</span></div>
+              <div class="desc">Hypervisor · LXCs, VMs e ZFS</div>
+              <div class="url">https://pve.home.lan:8006</div>
+              <span class="tag">root</span>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="http://immich.home.lan:2283">
+              <div class="top"><span class="ico">📷</span><span class="name">Immich</span></div>
+              <div class="desc">Fotos · 112k itens, GPU RTX 3050</div>
+              <div class="url">http://immich.home.lan:2283</div>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="http://jellyfin.home.lan:8096">
+              <div class="top"><span class="ico">🎬</span><span class="name">Jellyfin</span></div>
+              <div class="desc">Filmes e séries</div>
+              <div class="url">http://jellyfin.home.lan:8096</div>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="http://navidrome.home.lan:4533">
+              <div class="top"><span class="ico">🎵</span><span class="name">Navidrome</span></div>
+              <div class="desc">Streaming de música</div>
+              <div class="url">http://navidrome.home.lan:4533</div>
+            </a>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <a class="card" href="http://nextcloud.home.lan">
+              <div class="top"><span class="ico">☁️</span><span class="name">Nextcloud</span></div>
+              <div class="desc">Arquivos, sync e compartilhamento</div>
+              <div class="url">http://nextcloud.home.lan</div>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="http://gitlab.home.lan">
+              <div class="top"><span class="ico">🦊</span><span class="name">GitLab</span></div>
+              <div class="desc">Repositórios Git e CI</div>
+              <div class="url">http://gitlab.home.lan</div>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="http://grafana.home.lan:3000">
+              <div class="top"><span class="ico">📊</span><span class="name">Grafana</span></div>
+              <div class="desc">Logs (Loki) e métricas (Zabbix)</div>
+              <div class="url">http://grafana.home.lan:3000</div>
+              <span class="tag">admin</span>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="http://zabbix.home.lan/zabbix/">
+              <div class="top"><span class="ico">📡</span><span class="name">Zabbix</span></div>
+              <div class="desc">Monitoramento de 10 hosts</div>
+              <div class="url">http://zabbix.home.lan/zabbix/</div>
+            </a>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <a class="card" href="http://repos.home.lan">
+              <div class="top"><span class="ico">📦</span><span class="name">Repositório</span></div>
+              <div class="desc">Pacotes Deb, RPM, Arch e Nix</div>
+              <div class="url">http://repos.home.lan</div>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="http://puter.lan">
+              <div class="top"><span class="ico">🪟</span><span class="name">Puter · JUX</span></div>
+              <div class="desc">WebOS self-hosted · thin clients PXE</div>
+              <div class="url">http://puter.lan</div>
+            </a>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section style="--accent: var(--hp)">
+    <h2>HP Microserver <span class="meta">· Firewall · 10.0.0.1</span></h2>
+    <table class="grid">
+      <tbody>
+        <tr>
+          <td>
+            <a class="card" href="http://fw.home.lan:9090">
+              <div class="top"><span class="ico">🎛️</span><span class="name">Cockpit</span></div>
+              <div class="desc">Gerenciamento geral do firewall</div>
+              <div class="url">http://fw.home.lan:9090</div>
+              <span class="tag">root</span>
+            </a>
+          </td>
+          <td>
+            <a class="card" href="https://fw.home.lan:10000">
+              <div class="top"><span class="ico">🛡️</span><span class="name">Webmin</span></div>
+              <div class="desc">Administração · nftables, dnsmasq</div>
+              <div class="url">https://fw.home.lan:10000</div>
+              <span class="tag">root</span>
+            </a>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <p class="empty-msg" id="empty">Nenhum serviço corresponde ao filtro.</p>
+
+  <section>
+    <h2 style="--accent: var(--text-faint)">Endpoints sem interface web</h2>
+    <div class="apis">
+      <ul>
+        <li><span class="k">Ollama API</span><span class="v">http://ai.home.lan:11434</span></li>
+        <li><span class="k">LiteLLM API</span><span class="v">http://ai.home.lan:4000</span></li>
+        <li><span class="k">Jarvis · TTS/STT</span><span class="v">http://ai.home.lan:8000/v1</span></li>
+        <li><span class="k">Loki</span><span class="v">http://grafana.home.lan:3100</span></li>
+        <li><span class="k">k3s API</span><span class="v">https://k3os0.home.lan:6443</span></li>
+        <li><span class="k">PostgreSQL</span><span class="v">postgres.home.lan:5432</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <p>Os links usam nomes <code>.home.lan</code> resolvidos pelo dnsmasq do firewall — sobrevivem a troca de IP.</p>
+    <p>Proxmox, Webmin e o nginx do AI Lab usam certificados self-signed: o navegador vai pedir exceção na primeira visita.</p>
+  </footer>
+
+</div>
+
+<script>
+  const filter = document.getElementById('filter');
+  const empty = document.getElementById('empty');
+  const cards = [...document.querySelectorAll('.card')];
+
+  filter.addEventListener('input', () => {
+    const q = filter.value.trim().toLowerCase();
+    let hits = 0;
+
+    for (const card of cards) {
+      const match = !q || card.textContent.toLowerCase().includes(q);
+      card.parentElement.style.display = match ? '' : 'none';
+      if (match) hits++;
+    }
+
+    // esconde a seção inteira quando nenhum card dela sobrou
+    for (const section of document.querySelectorAll('section')) {
+      const own = [...section.querySelectorAll('.card')];
+      if (!own.length) continue;
+      const visible = own.some(c => c.parentElement.style.display !== 'none');
+      section.style.display = visible ? '' : 'none';
+    }
+
+    empty.style.display = hits ? 'none' : 'block';
+  });
+
+  // "/" foca o filtro, Esc limpa
+  document.addEventListener('keydown', e => {
+    if (e.key === '/' && document.activeElement !== filter) {
+      e.preventDefault();
+      filter.focus();
+    } else if (e.key === 'Escape' && document.activeElement === filter) {
+      filter.value = '';
+      filter.dispatchEvent(new Event('input'));
+      filter.blur();
+    }
+  });
+</script>
+</body>
+</html>

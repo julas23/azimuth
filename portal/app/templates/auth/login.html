@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ t.page_title_login }}{% endblock %}
+
+{% block content %}
+<div class="min-h-[80vh] flex items-center justify-center px-4 py-12">
+  <div class="w-full max-w-md">
+    <div class="text-center mb-8">
+      <h1 class="text-3xl font-bold text-gray-900">{{ t.login_title }}</h1>
+      <p class="text-gray-600 mt-2">{{ t.login_subtitle }}</p>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+      {% if request.query_params.get('verified') %}
+      <div class="bg-green-50 border border-green-200 text-green-700 rounded-lg p-3 mb-6 text-sm">
+        {{ t.verify_success }}
+      </div>
+      {% endif %}
+      {% if error %}
+      <div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 mb-6 text-sm">
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="post" action="/login" class="space-y-5">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">{{ t.login_email_label }}</label>
+          <input type="email" name="email" required autofocus
+                 class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm
+                        focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                 placeholder="seu@email.com">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">{{ t.login_pass_label }}</label>
+          <input type="password" name="password" required
+                 class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm
+                        focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                 placeholder="••••••••">
+        </div>
+        <button type="submit"
+                class="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 transition">
+          {{ t.login_button }}
+        </button>
+      </form>
+
+      <p class="text-center text-sm text-gray-500 mt-6">
+        {{ t.login_no_account }}
+        <a href="/register" class="text-indigo-600 font-medium hover:underline">{{ t.login_register_link }}</a>
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

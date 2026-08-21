@@ -1,0 +1,72 @@
+#!/usr/sbin/nft -f
+# ATENCAO: arquivo gerado pelo fwadmin a partir de /etc/fwadmin/config.yaml.
+# Edicoes manuais sao perdidas no proximo apply. Edite o config.yaml.
+
+# Recria somente as tabelas que gerenciamos. NAO usar "flush ruleset": isso
+# apagaria as tabelas de terceiros e todos os IPs banidos a cada reload.
+{% for t in firewall.preserve_tables %}
+# preservada: {{ t }}
+{% endfor %}
+table inet filter
+delete table inet filter
+table ip nat
+delete table ip nat
+
+define WAN = {{ wan_devices | nft_set }}
+
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy {{ firewall.input_policy.value }};
+
+{% for rule in firewall.input_rules %}
+{% for line in rule_to_nft(rule) %}
+        {{ line }}
+{% endfor %}
+{% endfor %}
+    }
+
+    chain forward {
+        type filter hook forward priority 0; policy {{ firewall.forward_policy.value }};
+
+        # trafego de volta e ajuste de MSS: precisam vir antes das regras
+        ct state established,related accept
+        tcp flags syn tcp option maxseg size set rt mtu
+
+{% for rule in firewall.forward_rules %}
+{% for line in rule_to_nft(rule) %}
+        {{ line }}
+{% endfor %}
+{% endfor %}
+{% for pf in firewall.port_forwards %}
+{% if pf.enabled %}
+{% for proto in (['tcp','udp'] if pf.proto == 'tcp/udp' else [pf.proto]) %}
+        iifname "{{ cfg.iface(pf.interface).ppp_device }}" ip daddr {{ pf.to_ip }} {{ proto }} dport {{ pf.to_port }} counter accept comment "fwd: {{ pf.description or pf.wan_port }}"
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+}
+
+table ip nat {
+{% if firewall.port_forwards %}
+    chain prerouting {
+        type nat hook prerouting priority -100; policy accept;
+
+{% for pf in firewall.port_forwards %}
+{% if pf.enabled %}
+{% for proto in (['tcp','udp'] if pf.proto == 'tcp/udp' else [pf.proto]) %}
+        iifname "{{ cfg.iface(pf.interface).ppp_device }}"{% if pf.source_filter %} ip saddr {{ pf.source_filter }}{% endif %} {{ proto }} dport {{ pf.wan_port }} counter dnat to {{ pf.to_ip }}:{{ pf.to_port }} comment "{{ pf.description or 'port-forward' }}"
+{% endfor %}
+{% endif %}
+{% endfor %}
+    }
+
+{% endif %}
+    chain postrouting {
+        type nat hook postrouting priority 100; policy accept;
+
+{% for name in firewall.masquerade %}
+        oifname "{{ cfg.iface(name).ppp_device }}" masquerade comment "NAT {{ name }}"
+{% endfor %}
+    }
+}

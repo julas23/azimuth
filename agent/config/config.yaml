@@ -1,0 +1,624 @@
+# Config VIVA do fwadmin. Alterada pela UI; versionada em git.
+version: 1
+system:
+  hostname: fw
+  timezone: America/Sao_Paulo
+  admin_cidr: 10.0.0.0/24
+  confirm_timeout: 90
+interfaces:
+- name: lan
+  device: enp2s0
+  role: lan
+  description: LAN 10GbE
+  ipv4:
+    mode: static
+    address: 10.0.0.1/24
+- name: wan_star
+  device: enp3s0
+  role: wan
+  description: Starlink
+  ipv4:
+    mode: dhcp
+- name: wan_vivo
+  device: enp4s0
+  role: wan
+  description: Vivo Fibra (PPPoE)
+  ipv4:
+    mode: pppoe
+  pppoe:
+    peer: vivo
+    username: usuario@provedor
+    password_ref: vivo
+    mtu: 1492
+    mru: 1492
+    lcp_echo_interval: 20
+    lcp_echo_failure: 3
+    holdoff: 5
+routing:
+  primary: wan_vivo
+  backup: wan_star
+  failover:
+    enabled: true
+    interval_seconds: 60
+    threshold: 3
+    ping_targets:
+    - 8.8.8.8
+    ping_count: 2
+    ping_timeout: 2
+dns:
+  domain: home.lan
+  expand_hosts: true
+  local_only: true
+  bind_interfaces: true
+  upstream:
+  - 8.8.8.8
+  - 1.1.1.1
+dhcp:
+  enabled: true
+  interface: lan
+  range:
+    start: 10.0.0.10
+    end: 10.0.0.200
+    netmask: 255.255.255.0
+    lease: 12h
+  router: 10.0.0.1
+  dns_servers:
+  - 10.0.0.1
+  reservations:
+  - mac: 02:00:00:00:00:11
+    ip: 10.0.0.11
+    name: desk1
+    description: ''
+  - mac: 02:00:00:00:00:02
+    ip: 10.0.0.12
+    name: desk2
+    description: ''
+  - mac: 02:00:00:00:00:04
+    ip: 10.0.0.13
+    name: desk3
+    description: ''
+  - mac: 02:00:00:00:00:12
+    ip: 10.0.0.14
+    name: desk4
+    description: ''
+  - mac: 02:00:00:00:00:16
+    ip: 10.0.0.15
+    name: board1
+    description: ''
+  - mac: 02:00:00:00:00:03
+    ip: 10.0.0.16
+    name: board2
+    description: ''
+  - mac: 02:00:00:00:00:06
+    ip: 10.0.0.21
+    name: ap1
+    description: ''
+  - mac: 02:00:00:00:00:09
+    ip: 10.0.0.22
+    name: ap2
+    description: ''
+  - mac: 02:00:00:00:00:1d
+    ip: 10.0.0.23
+    name: ap3
+    description: ''
+  - mac: 02:00:00:00:00:07
+    ip: 10.0.0.24
+    name: ap4
+    description: ''
+  - mac: 02:00:00:00:00:1c
+    ip: 10.0.0.25
+    name: ap5
+    description: ''
+  - mac: 02:00:00:00:00:08
+    ip: 10.0.0.26
+    name: ap6
+    description: ''
+  - mac: 02:00:00:00:00:13
+    ip: 10.0.0.31
+    name: cam1
+    description: ''
+  - mac: 02:00:00:00:00:0a
+    ip: 10.0.0.32
+    name: cam2
+    description: ''
+  - mac: 02:00:00:00:00:17
+    ip: 10.0.0.33
+    name: cam3
+    description: ''
+  - mac: 02:00:00:00:00:05
+    ip: 10.0.0.34
+    name: cam4
+    description: ''
+  - mac: 02:00:00:00:00:1b
+    ip: 10.0.0.35
+    name: cam5
+    description: ''
+  - mac: 02:00:00:00:00:19
+    ip: 10.0.0.36
+    name: cam6
+    description: ''
+  - mac: 02:00:00:00:00:18
+    ip: 10.0.0.37
+    name: cam7
+    description: ''
+  - mac: 02:00:00:00:00:1a
+    ip: 10.0.0.38
+    name: cam8
+    description: ''
+  - mac: 02:00:00:00:00:0b
+    ip: 10.0.0.41
+    name: phone1
+    description: ''
+  - mac: 02:00:00:00:00:0f
+    ip: 10.0.0.42
+    name: tv1
+    description: ''
+  - mac: 02:00:00:00:00:0c
+    ip: 10.0.0.43
+    name: tv2
+    description: ''
+  - mac: 02:00:00:00:00:0d
+    ip: 10.0.0.44
+    name: tablet1
+    description: ''
+  - mac: 02:00:00:00:00:10
+    ip: 10.0.0.45
+    name: phone2
+    description: ''
+  - mac: 02:00:00:00:00:14
+    ip: 10.0.0.46
+    name: phone3
+    description: ''
+  - mac: 02:00:00:00:00:15
+    ip: 10.0.0.50
+    name: iot1
+    description: ''
+  - mac: 02:00:00:00:00:0e
+    ip: 10.0.0.51
+    name: iot2
+    description: ''
+  - mac: 02:00:00:00:00:01
+    ip: 10.0.0.100
+    name: lxc-template
+    description: ''
+hosts:
+- name: fw
+  ip: 10.0.0.1
+  group: desk3
+  description: ''
+  dns: true
+  services:
+  - name: Cockpit
+    url: http://fw.home.lan:9090
+    description: Gerenciamento geral do firewall
+    icon: 🎛️
+    tag: root
+    tag_style: ''
+  - name: Webmin
+    url: https://fw.home.lan:10000
+    description: Administração · nftables, dnsmasq
+    icon: 🛡️
+    tag: root
+    tag_style: ''
+- name: portal
+  ip: 10.0.0.1
+  description: ''
+  dns: true
+  services: []
+- name: pve
+  ip: 10.0.0.2
+  group: dell
+  description: ''
+  dns: true
+  services:
+  - name: Proxmox VE
+    url: https://pve.home.lan:8006
+    description: Hypervisor · LXCs, VMs e ZFS
+    icon: 🖥️
+    tag: root
+    tag_style: ''
+- name: ai
+  ip: 10.0.0.3
+  group: lenovo
+  description: ''
+  dns: true
+  services:
+  - name: OpenWebUI
+    url: https://ai.home.lan/
+    description: Chat com os modelos locais e Claude
+    icon: 💬
+    tag: ''
+    tag_style: ''
+  - name: Claude Code
+    url: https://ai.home.lan/claude/
+    description: WebShell do agente no terminal
+    icon: 🤖
+    tag: sem auth
+    tag_style: open
+  - name: opencode
+    url: https://ai.home.lan/opencode/
+    description: Agente TUI com qwen3:8b local
+    icon: ⌨️
+    tag: sem auth
+    tag_style: open
+  - name: Aider
+    url: https://ai.home.lan/aider/
+    description: Editor de código com qwen2.5-coder
+    icon: ✏️
+    tag: sem auth
+    tag_style: open
+  - name: LiteLLM
+    url: http://ai.home.lan:4000/ui/
+    description: Gateway de modelos · logs de request
+    icon: 🔀
+    tag: admin
+    tag_style: ''
+  - name: ComfyUI
+    url: http://ai.home.lan:7860
+    description: Stable Diffusion XL na P5000
+    icon: 🎨
+    tag: sem auth
+    tag_style: open
+- name: idrac
+  ip: 10.0.0.4
+  description: ''
+  dns: true
+  services: []
+- name: desk2
+  ip: 10.0.0.12
+  description: ''
+  dns: true
+  services: []
+- name: desk3
+  ip: 10.0.0.13
+  description: ''
+  dns: true
+  services: []
+- name: desk4
+  ip: 10.0.0.14
+  description: ''
+  dns: true
+  services: []
+- name: board1
+  ip: 10.0.0.15
+  description: ''
+  dns: true
+  services: []
+- name: board2
+  ip: 10.0.0.16
+  description: ''
+  dns: true
+  services: []
+- name: deco1
+  ip: 10.0.0.21
+  description: ''
+  dns: true
+  services: []
+- name: deco2
+  ip: 10.0.0.22
+  description: ''
+  dns: true
+  services: []
+- name: deco3
+  ip: 10.0.0.23
+  description: ''
+  dns: true
+  services: []
+- name: deco4
+  ip: 10.0.0.24
+  description: ''
+  dns: true
+  services: []
+- name: deco5
+  ip: 10.0.0.25
+  description: ''
+  dns: true
+  services: []
+- name: deco6
+  ip: 10.0.0.26
+  description: ''
+  dns: true
+  services: []
+- name: cam1
+  ip: 10.0.0.31
+  description: ''
+  dns: true
+  services: []
+- name: cam2
+  ip: 10.0.0.32
+  description: ''
+  dns: true
+  services: []
+- name: cam3
+  ip: 10.0.0.33
+  description: ''
+  dns: true
+  services: []
+- name: cam4
+  ip: 10.0.0.34
+  description: ''
+  dns: true
+  services: []
+- name: cam5
+  ip: 10.0.0.35
+  description: ''
+  dns: true
+  services: []
+- name: cam6
+  ip: 10.0.0.36
+  description: ''
+  dns: true
+  services: []
+- name: cam7
+  ip: 10.0.0.37
+  description: ''
+  dns: true
+  services: []
+- name: cam8
+  ip: 10.0.0.38
+  description: ''
+  dns: true
+  services: []
+- name: phone1
+  ip: 10.0.0.41
+  description: ''
+  dns: true
+  services: []
+- name: tv1
+  ip: 10.0.0.42
+  description: ''
+  dns: true
+  services: []
+- name: tv2
+  ip: 10.0.0.43
+  description: ''
+  dns: true
+  services: []
+- name: tablet1
+  ip: 10.0.0.44
+  description: ''
+  dns: true
+  services: []
+- name: phone2
+  ip: 10.0.0.45
+  description: ''
+  dns: true
+  services: []
+- name: phone3
+  ip: 10.0.0.46
+  description: ''
+  dns: true
+  services: []
+- name: iot1
+  ip: 10.0.0.50
+  description: ''
+  dns: true
+  services: []
+- name: iot2
+  ip: 10.0.0.51
+  description: ''
+  dns: true
+  services: []
+- name: zabbix
+  ip: 10.0.0.101
+  group: dell
+  description: ''
+  dns: true
+  services:
+  - name: Zabbix
+    url: http://zabbix.home.lan/zabbix/
+    description: Monitoramento de 10 hosts
+    icon: 📡
+    tag: ''
+    tag_style: ''
+- name: postgres
+  ip: 10.0.0.102
+  description: ''
+  dns: true
+  services: []
+- name: gitlab
+  ip: 10.0.0.103
+  group: dell
+  description: ''
+  dns: true
+  services:
+  - name: GitLab
+    url: http://gitlab.home.lan
+    description: Repositórios Git e CI
+    icon: 🦊
+    tag: ''
+    tag_style: ''
+- name: repos
+  ip: 10.0.0.104
+  group: dell
+  description: ''
+  dns: true
+  services:
+  - name: Repositório
+    url: http://repos.home.lan
+    description: Pacotes Deb, RPM, Arch e Nix
+    icon: 📦
+    tag: ''
+    tag_style: ''
+- name: nextcloud
+  ip: 10.0.0.105
+  group: dell
+  description: ''
+  dns: true
+  services:
+  - name: Nextcloud
+    url: http://nextcloud.home.lan
+    description: Arquivos, sync e compartilhamento
+    icon: ☁️
+    tag: ''
+    tag_style: ''
+- name: immich
+  ip: 10.0.0.106
+  group: dell
+  description: ''
+  dns: true
+  services:
+  - name: Immich
+    url: http://immich.home.lan:2283
+    description: Fotos · 112k itens, GPU RTX 3050
+    icon: 📷
+    tag: ''
+    tag_style: ''
+- name: jellyfin
+  ip: 10.0.0.107
+  group: dell
+  description: ''
+  dns: true
+  services:
+  - name: Jellyfin
+    url: http://jellyfin.home.lan:8096
+    description: Filmes e séries
+    icon: 🎬
+    tag: ''
+    tag_style: ''
+- name: grafana
+  ip: 10.0.0.108
+  group: dell
+  description: ''
+  dns: true
+  services:
+  - name: Grafana
+    url: http://grafana.home.lan:3000
+    description: Logs (Loki) e métricas (Zabbix)
+    icon: 📊
+    tag: admin
+    tag_style: ''
+- name: navidrome
+  ip: 10.0.0.109
+  group: dell
+  description: ''
+  dns: true
+  services:
+  - name: Navidrome
+    url: http://navidrome.home.lan:4533
+    description: Streaming de música
+    icon: 🎵
+    tag: ''
+    tag_style: ''
+- name: ltsp
+  ip: 10.0.0.201
+  description: ''
+  dns: true
+  services: []
+- name: puter.lan
+  ip: 10.0.0.201
+  group: dell
+  description: ''
+  dns: true
+  services:
+  - name: Puter · JUX
+    url: http://puter.lan
+    description: WebOS self-hosted · thin clients PXE
+    icon: 🪟
+    tag: ''
+    tag_style: ''
+- name: k3os0
+  ip: 10.0.0.202
+  description: ''
+  dns: true
+  services: []
+- name: k3os1
+  ip: 10.0.0.203
+  description: ''
+  dns: true
+  services: []
+portal:
+  title: Home.Lan
+  subtitle: Servicos da rede local · 10.0.0.0/24
+  groups:
+  - id: lenovo
+    title: Lenovo ThinkStation P720
+    subtitle: AI Lab · 10.0.0.3
+    accent: '#22c55e'
+    accent_light: '#15803d'
+    order: 0
+  - id: dell
+    title: Dell T430
+    subtitle: Proxmox · 10.0.0.2 · LXCs e VMs
+    accent: '#4a9eff'
+    accent_light: '#1d6fd0'
+    order: 10
+  - id: desk3
+    title: HP Microserver
+    subtitle: Firewall · 10.0.0.1
+    accent: '#f59e0b'
+    accent_light: '#b45309'
+    order: 20
+  endpoints:
+  - name: Ollama API
+    address: http://ai.home.lan:11434
+  - name: LiteLLM API
+    address: http://ai.home.lan:4000
+  - name: Jarvis · TTS/STT
+    address: http://ai.home.lan:8000/v1
+  - name: Loki
+    address: http://grafana.home.lan:3100
+  - name: k3s API
+    address: https://k3os0.home.lan:6443
+  - name: PostgreSQL
+    address: postgres.home.lan:5432
+  notes:
+  - Os links usam nomes .home.lan resolvidos pelo dnsmasq do firewall — sobrevivem a troca de IP.
+  - 'Proxmox, Webmin e o nginx do AI Lab usam certificados self-signed: o navegador vai pedir exceção
+    na primeira visita.'
+firewall:
+  input_policy: accept
+  forward_policy: drop
+  input_rules:
+  - enabled: true
+    action: drop
+    description: SSH so LAN
+    proto: tcp
+    source: wan
+    destination: this
+    dest_ports: '22'
+    log: false
+    counter: true
+  - enabled: true
+    action: drop
+    description: Cockpit/Webmin so LAN
+    proto: tcp
+    source: wan
+    destination: this
+    dest_ports: 9090,10000
+    log: false
+    counter: true
+  - enabled: true
+    action: drop
+    description: Webmin UDP so LAN
+    proto: udp
+    source: wan
+    destination: this
+    dest_ports: '10000'
+    log: false
+    counter: true
+  - enabled: true
+    action: drop
+    description: Portal nginx so LAN
+    proto: tcp
+    source: wan
+    destination: this
+    dest_ports: 80,443
+    log: false
+    counter: true
+  forward_rules:
+  - enabled: true
+    action: accept
+    description: LAN sai para qualquer WAN
+    proto: any
+    source: lan
+    destination: wan
+    dest_ports: ''
+    log: false
+    counter: true
+  port_forwards: []
+  masquerade:
+  - wan_star
+  - wan_vivo
+  preserve_tables:
+  - inet f2b-table

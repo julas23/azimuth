@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+build/
+secrets.yaml
+
+# nunca versionar segredo de produção — use .env.example como modelo
+.env
+portal/cache/

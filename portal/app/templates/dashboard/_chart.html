@@ -1,0 +1,36 @@
+<div>
+  <canvas id="bwChart" height="160"></canvas>
+  <script>
+    (function() {
+      if (!window.Chart) return;
+      var ctx = document.getElementById('bwChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: {{ labels | safe }},
+          datasets: [
+            {
+              label: '{{ t.chart_dl_label }}',
+              data: {{ rx_data | safe }},
+              backgroundColor: 'rgba(99,102,241,0.7)',
+              borderRadius: 4,
+            },
+            {
+              label: '{{ t.chart_ul_label }}',
+              data: {{ tx_data | safe }},
+              backgroundColor: 'rgba(167,139,250,0.5)',
+              borderRadius: 4,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'bottom' } },
+          scales: {
+            y: { beginAtZero: true, title: { display: true, text: 'GB' } }
+          },
+        },
+      });
+    })();
+  </script>
+</div>

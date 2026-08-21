@@ -1,0 +1,30 @@
+{% if invoices %}
+<ul class="divide-y divide-gray-100">
+  {% for inv in invoices %}
+  <li class="flex items-center justify-between py-2 text-sm">
+    <div>
+      <span class="text-gray-700 font-medium">
+        {{ inv.period_start | fmt_timestamp if inv.period_start else 'Invoice' }}
+      </span>
+      <span class="text-xs text-gray-400 ml-2">
+        $ {{ "%.2f" | format(inv.amount_paid / 100) }}
+      </span>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="text-xs px-2 py-0.5 rounded-full
+        {% if inv.status == 'paid' %}bg-green-100 text-green-700
+        {% elif inv.status == 'open' %}bg-yellow-100 text-yellow-700
+        {% else %}bg-gray-100 text-gray-500{% endif %}">
+        {% if inv.status == 'paid' %}{{ t.inv_paid }}{% elif inv.status == 'open' %}{{ t.inv_open }}{% else %}{{ inv.status }}{% endif %}
+      </span>
+      {% if inv.invoice_pdf %}
+      <a href="{{ inv.invoice_pdf }}" target="_blank"
+         class="text-xs text-indigo-600 hover:underline">PDF</a>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="text-gray-400 text-sm italic">{{ t.inv_empty }}</p>
+{% endif %}

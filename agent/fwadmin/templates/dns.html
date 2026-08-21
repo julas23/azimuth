@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}DNS e DHCP{% endblock %}
+{% block body %}
+
+<h1>DNS e DHCP</h1>
+<p class="lede">Tudo isto vira o <code>/etc/dnsmasq.conf</code>. Os registros de host são os mesmos que alimentam a página de Serviços.</p>
+
+<h2>Configuração</h2>
+<div class="card">
+  <form method="post" action="/dns/settings">
+    <div class="fields">
+      <div>
+        <label>Domínio local</label>
+        <input type="text" name="domain" value="{{ cfg.dns.domain }}">
+      </div>
+      <div>
+        <label>Resolvedores upstream</label>
+        <input type="text" name="upstream" value="{{ cfg.dns.upstream | join(', ') }}">
+        <div class="hint">Vazio = herda o resolv.conf.</div>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="bind" name="bind_interfaces" value="1" {{ 'checked' if cfg.dns.bind_interfaces }}>
+        <label for="bind">Escutar só na LAN</label>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="dh" name="dhcp_enabled" value="1" {{ 'checked' if cfg.dhcp.enabled }}>
+        <label for="dh">Servir DHCP</label>
+      </div>
+      <div>
+        <label>Início da faixa</label>
+        <input type="text" name="range_start" value="{{ cfg.dhcp.range.start }}">
+      </div>
+      <div>
+        <label>Fim da faixa</label>
+        <input type="text" name="range_end" value="{{ cfg.dhcp.range.end }}">
+      </div>
+      <div>
+        <label>Lease</label>
+        <input type="text" name="lease" value="{{ cfg.dhcp.range.lease }}" placeholder="12h">
+      </div>
+    </div>
+    <div class="row"><button class="primary" type="submit">Salvar</button></div>
+  </form>
+</div>
+
+<h2>Reservas por MAC ({{ cfg.dhcp.reservations | length }})</h2>
+<div class="card">
+  <form method="post" action="/dns/reservation">
+    <div class="fields">
+      <div><label>MAC</label><input type="text" name="mac" placeholder="aa:bb:cc:dd:ee:ff" required></div>
+      <div><label>IP</label><input type="text" name="ip" placeholder="10.0.0.50" required></div>
+      <div><label>Nome</label><input type="text" name="name" placeholder="impressora" required></div>
+      <div><label>Descrição</label><input type="text" name="description"></div>
+    </div>
+    <div class="row"><button type="submit">Adicionar reserva</button></div>
+  </form>
+</div>
+
+<div class="tablewrap" style="margin-top:0.9rem">
+  <table>
+    <thead><tr><th>IP</th><th>Nome</th><th>MAC</th><th>Descrição</th><th class="right"></th></tr></thead>
+    <tbody>
+      {% for r in cfg.dhcp.reservations %}
+        <tr>
+          <td class="mono nowrap">{{ r.ip }}</td>
+          <td>{{ r.name }}</td>
+          <td class="mono nowrap">{{ r.mac }}</td>
+          <td style="color:var(--text-dim)">{{ r.description }}</td>
+          <td class="right">
+            <form method="post" action="/dns/reservation/{{ r.mac }}/delete">
+              <button class="tiny danger" type="submit">remover</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Registros de host ({{ cfg.hosts | selectattr('dns') | list | length }})</h2>
+<div class="card">
+  <form method="post" action="/dns/host">
+    <div class="fields">
+      <div><label>Nome</label><input type="text" name="name" placeholder="nas" required>
+        <div class="hint">Sem ponto vira <code>nome.{{ cfg.dns.domain }}</code>.</div></div>
+      <div><label>IP</label><input type="text" name="ip" placeholder="10.0.0.60" required></div>
+      <div>
+        <label>Grupo no portal</label>
+        <select name="group">
+          <option value="">nenhum</option>
+          {% for g in cfg.portal.groups %}<option value="{{ g.id }}">{{ g.title }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label>Descrição</label><input type="text" name="description"></div>
+    </div>
+    <div class="row"><button type="submit">Adicionar host</button></div>
+  </form>
+</div>
+
+<div class="tablewrap" style="margin-top:0.9rem">
+  <table>
+    <thead><tr><th>Nome</th><th>IP</th><th>Grupo</th><th>Serviços</th><th class="right"></th></tr></thead>
+    <tbody>
+      {% for h in cfg.hosts %}
+        <tr>
+          <td class="mono">{{ h.fqdn(cfg.dns.domain) }}{% if not h.dns %} <span class="pill">sem DNS</span>{% endif %}</td>
+          <td class="mono nowrap">{{ h.ip }}</td>
+          <td style="color:var(--text-dim)">{{ h.group or '—' }}</td>
+          <td>{{ h.services | length or '' }}</td>
+          <td class="right">
+            <form method="post" action="/dns/host/{{ h.name }}/delete">
+              <button class="tiny danger" type="submit">remover</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Leases ativos ({{ leases | length }})</h2>
+<div class="tablewrap">
+  <table>
+    <thead><tr><th>IP</th><th>Nome</th><th>MAC</th><th>Expira</th><th class="right"></th></tr></thead>
+    <tbody>
+      {% for lease in leases %}
+        <tr>
+          <td class="mono nowrap">{{ lease.ip }}</td>
+          <td>{{ lease.hostname or '—' }}</td>
+          <td class="mono nowrap">{{ lease.mac }}</td>
+          <td class="nowrap">{{ lease.expires_in }}</td>
+          <td class="right">{% if lease.reserved %}<span class="pill">reserva</span>{% endif %}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" style="color:var(--text-faint)">Nenhum lease ativo.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

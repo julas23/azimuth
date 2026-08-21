@@ -1,0 +1,30 @@
+{# gera /etc/network/interfaces #}
+# ATENCAO: arquivo gerado pelo fwadmin a partir de /etc/fwadmin/config.yaml.
+# Edicoes manuais sao perdidas no proximo apply. Edite o config.yaml.
+
+source /etc/network/interfaces.d/*
+
+auto lo
+iface lo inet loopback
+
+{% for i in cfg.interfaces %}
+# {{ i.name }}{% if i.description %} — {{ i.description }}{% endif %}
+
+{% if i.role.value != 'unused' %}
+auto {{ i.device }}
+{% endif %}
+{% if i.ipv4.mode == IPv4Mode.static %}
+iface {{ i.device }} inet static
+    address {{ i.ipv4.ip }}
+    netmask {{ i.ipv4.netmask }}
+{% if i.ipv4.gateway %}
+    gateway {{ i.ipv4.gateway }}
+{% endif %}
+{% elif i.ipv4.mode == IPv4Mode.dhcp %}
+iface {{ i.device }} inet dhcp
+{% else %}
+{# PPPoE: o ifupdown so levanta o link; quem configura o IP e' o pppd #}
+iface {{ i.device }} inet manual
+{% endif %}
+
+{% endfor %}

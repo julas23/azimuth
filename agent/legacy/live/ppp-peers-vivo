@@ -1,0 +1,18 @@
+plugin rp-pppoe.so
+enp4s0
+user "usuario@provedor"
+noipdefault
+hide-password
+noauth
+persist
+maxfail 0
+holdoff 5
+mtu 1492
+mru 1492
+noaccomp
+default-asyncmap
+nodefaultroute
+lcp-echo-interval 20
+lcp-echo-failure 3
+linkname vivo
+ipparam vivo

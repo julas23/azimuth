@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Admin — VPN Brasil{% endblock %}
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-8">
+
+  <!-- Header + nav -->
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Painel de Administração</h1>
+    <div class="flex gap-3 text-sm">
+      <a href="/admin/users"    class="text-indigo-600 hover:underline">Usuários</a>
+      <a href="/admin/peers"    class="text-indigo-600 hover:underline">Peers</a>
+      <a href="/admin/settings" class="text-indigo-600 hover:underline">Configurações</a>
+    </div>
+  </div>
+
+  <!-- Stats cards -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <div class="bg-white rounded-xl border border-gray-200 p-5">
+      <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">Usuários</p>
+      <p class="text-3xl font-bold text-gray-900">{{ stats.total_users }}</p>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-5">
+      <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">Assinaturas ativas</p>
+      <p class="text-3xl font-bold text-green-600">{{ stats.active_subs }}</p>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-5">
+      <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">Peers ativos</p>
+      <p class="text-3xl font-bold text-indigo-600">{{ stats.active_peers }}</p>
+    </div>
+    <div class="bg-white rounded-xl border border-gray-200 p-5">
+      <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">Tráfego {{ period }}</p>
+      <p class="text-3xl font-bold text-purple-600">{{ stats.bw_month | fmt_bytes }}</p>
+    </div>
+  </div>
+
+  <!-- Cadastros recentes -->
+  <div class="bg-white rounded-xl border border-gray-200">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+      <h2 class="font-semibold text-gray-800">Cadastros recentes</h2>
+      <a href="/admin/users" class="text-sm text-indigo-600 hover:underline">Ver todos →</a>
+    </div>
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
+        <tr>
+          <th class="px-6 py-3 text-left">Nome</th>
+          <th class="px-6 py-3 text-left">E-mail</th>
+          <th class="px-6 py-3 text-left">Cadastro</th>
+          <th class="px-6 py-3 text-left">Status</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for u in recent_users %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-6 py-3 font-medium">{{ u.name }}</td>
+          <td class="px-6 py-3 text-gray-600">{{ u.email }}</td>
+          <td class="px-6 py-3 text-gray-500">{{ u.created_at | fmt_date }}</td>
+          <td class="px-6 py-3">
+            {% if u.is_active %}
+              <span class="text-green-600 text-xs font-medium">● Ativo</span>
+            {% else %}
+              <span class="text-red-500 text-xs font-medium">● Suspenso</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+{% endblock %}

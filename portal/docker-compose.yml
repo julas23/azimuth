@@ -1,0 +1,42 @@
+services:
+  app:
+    build: ./app
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - /run/vpn-bridge:/run/vpn-bridge   # socket do bridge host
+      - ./cache:/app/cache                # dados persistentes (ex: cache de CIDRs)
+    group_add:
+      - "989"                              # GID do grupo vpnbridge no host
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vpnweb}
+      POSTGRES_USER: ${POSTGRES_USER:-vpnweb}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vpnweb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+
+networks:
+  internal:
+    driver: bridge

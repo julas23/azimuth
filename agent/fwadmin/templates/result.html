@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block body %}
+
+<h1>{{ title }}</h1>
+
+{% if ok %}
+  <div class="note ok"><b>Comando concluído</b>Veja a saída abaixo.</div>
+{% else %}
+  <div class="note bad"><b>O comando falhou</b>Nada foi deixado pela metade — o fwctl aborta antes de escrever quando algo não valida.</div>
+{% endif %}
+
+<pre class="out">{{ output }}</pre>
+
+<div class="row">
+  <a class="btn" href="/system">Voltar ao Sistema</a>
+  {% if 'CONFIRME' in output %}
+    <form method="post" action="/system/confirm"><button class="primary" type="submit">Confirmar agora</button></form>
+    <form method="post" action="/system/rollback"><button class="danger" type="submit">Reverter</button></form>
+  {% endif %}
+</div>
+
+{% endblock %}

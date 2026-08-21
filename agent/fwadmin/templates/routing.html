@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Roteamento{% endblock %}
+{% block body %}
+
+<h1>Roteamento</h1>
+<p class="lede">Qual link sai na frente e o que fazer quando ele cai.</p>
+
+<h2>Estado agora</h2>
+{% include "_wans.html" %}
+
+<h2>Link primário e failover</h2>
+<div class="card">
+  <form method="post" action="/routing">
+    <div class="fields">
+      <div>
+        <label>Link primário</label>
+        <select name="primary">
+          {% for wan in cfg.wans %}
+            <option value="{{ wan.name }}" {{ 'selected' if cfg.routing.primary == wan.name }}>
+              {{ wan.description or wan.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Link de backup</label>
+        <select name="backup">
+          <option value="">nenhum</option>
+          {% for wan in cfg.wans %}
+            <option value="{{ wan.name }}" {{ 'selected' if cfg.routing.backup == wan.name }}>
+              {{ wan.description or wan.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="fo" name="enabled" value="1" {{ 'checked' if cfg.routing.failover.enabled }}>
+        <label for="fo">Trocar automaticamente</label>
+      </div>
+      <div>
+        <label>Testar a cada (s)</label>
+        <input type="number" name="interval_seconds" value="{{ cfg.routing.failover.interval_seconds }}" min="10" max="3600">
+      </div>
+      <div>
+        <label>Falhas antes de trocar</label>
+        <input type="number" name="threshold" value="{{ cfg.routing.failover.threshold }}" min="1" max="20">
+      </div>
+      <div>
+        <label>Alvos de teste</label>
+        <input type="text" name="ping_targets" value="{{ cfg.routing.failover.ping_targets | join(', ') }}">
+        <div class="hint">IPs separados por vírgula.</div>
+      </div>
+    </div>
+    <div class="row"><button class="primary" type="submit">Salvar</button></div>
+  </form>
+</div>
+
+<div class="note">
+  <b>Por que testamos internet e não o gateway</b>
+  A Vivo entrega o link em bridge, sem gateway privado para pingar. O teste é
+  saída real por cada interface — por isso os alvos são IPs públicos.
+</div>
+
+<h2>Tabela de rotas</h2>
+<pre class="out">{{ routes or 'indisponível' }}</pre>
+
+{% endblock %}

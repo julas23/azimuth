@@ -1,0 +1,107 @@
+#!/bin/bash
+# ATENCAO: arquivo gerado pelo fwadmin a partir de /etc/fwadmin/config.yaml.
+# Edicoes manuais sao perdidas no proximo apply. Edite o config.yaml.
+#
+# Monitora a WAN primaria ({{ primary.name }}) e cai para a de backup
+# ({{ backup.name if backup else 'nenhuma' }}) depois de {{ routing.failover.threshold }} falhas seguidas.
+set -u
+
+STATE_FILE=/run/fwadmin/wan-state
+FAIL_FILE=/run/fwadmin/wan-fails
+mkdir -p /run/fwadmin
+
+{% if not routing.failover.enabled %}
+# Failover desligado no config: apenas garante a rota do link primario.
+{{ 'ip route replace default dev ' ~ primary.ppp_device if primary.ipv4.mode == IPv4Mode.pppoe else 'ip route replace default via ' ~ (primary.ipv4.gateway or '$(ip -4 route show default dev ' ~ primary.device ~ ' | awk "{print \$3}" | head -1)') ~ ' dev ' ~ primary.device }}
+exit 0
+{% else %}
+PRIMARY_IF="{{ primary.ppp_device }}"
+BACKUP_IF="{{ backup.ppp_device }}"
+TARGETS=({{ routing.failover.ping_targets | join(' ') }})
+THRESHOLD={{ routing.failover.threshold }}
+PING_COUNT={{ routing.failover.ping_count }}
+PING_TIMEOUT={{ routing.failover.ping_timeout }}
+
+# Descobre o gateway de um link que recebe rota por DHCP.
+gw_of() {
+    ip -4 route show default dev "$1" 2>/dev/null | awk '{print $3}' | head -1
+}
+
+# Testa saida real pela interface: em link PPPoE bridge nao ha gateway fixo
+# para pingar, entao validamos internet de verdade.
+link_ok() {
+    local ifname="$1" target
+    ip link show "$ifname" >/dev/null 2>&1 || return 1
+    for target in "${TARGETS[@]}"; do
+        if ping -c "$PING_COUNT" -W "$PING_TIMEOUT" -I "$ifname" "$target" >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+route_via() {
+    local ifname="$1" gw
+{% if primary.ipv4.mode == IPv4Mode.pppoe or (backup and backup.ipv4.mode == IPv4Mode.pppoe) %}
+    case "$ifname" in
+        ppp*) ip route replace default dev "$ifname" ; return $? ;;
+    esac
+{% endif %}
+    gw="$(gw_of "$ifname")"
+    if [ -z "$gw" ]; then
+        logger -t fwadmin-failover "sem gateway conhecido em $ifname — rota nao alterada"
+        return 1
+    fi
+    ip route replace default via "$gw" dev "$ifname"
+}
+
+# De onde vem o estado, em ordem: o arquivo novo; o arquivo do script antigo
+# (valores wan1/wan2), para o primeiro apply nao perder o estado; e por fim a
+# rota viva. Deduzir da rota e' o que evita ficar preso no backup: um state
+# file ausente nao pode virar "estou na primaria" quando a rota diz o
+# contrario, senao a restauracao (que so dispara em CURRENT != primary) nunca
+# acontece e a WAN primaria volta sem ninguem perceber.
+read_state() {
+    if [ -r "$STATE_FILE" ]; then
+        cat "$STATE_FILE"
+        return
+    fi
+    if [ -r /var/run/wan-state ]; then
+        case "$(cat /var/run/wan-state)" in
+            wan2|backup) echo backup ;;
+            *)           echo primary ;;
+        esac
+        return
+    fi
+    if [ "$(egress_dev)" = "$PRIMARY_IF" ]; then echo primary; else echo backup; fi
+}
+
+# Por qual interface a rota default sai agora.
+egress_dev() {
+    ip -4 route get "${TARGETS[0]}" 2>/dev/null \
+        | awk '{ for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit } }'
+}
+
+CURRENT="$(read_state)"
+FAILS="$(cat "$FAIL_FILE" 2>/dev/null || echo 0)"
+
+if link_ok "$PRIMARY_IF"; then
+    echo 0 > "$FAIL_FILE"
+    if [ "$CURRENT" != "primary" ]; then
+        if route_via "$PRIMARY_IF"; then
+            echo primary > "$STATE_FILE"
+            logger -t fwadmin-failover "RESTAURADO: {{ primary.name }} ($PRIMARY_IF) voltou"
+        fi
+    fi
+else
+    FAILS=$((FAILS + 1))
+    echo "$FAILS" > "$FAIL_FILE"
+    logger -t fwadmin-failover "{{ primary.name }} falhou ($FAILS/$THRESHOLD)"
+    if [ "$FAILS" -ge "$THRESHOLD" ] && [ "$CURRENT" = "primary" ]; then
+        if route_via "$BACKUP_IF"; then
+            echo backup > "$STATE_FILE"
+            logger -t fwadmin-failover "FAILOVER: usando {{ backup.name }} ($BACKUP_IF)"
+        fi
+    fi
+fi
+{% endif %}

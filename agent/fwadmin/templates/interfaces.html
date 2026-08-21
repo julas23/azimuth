@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Interfaces{% endblock %}
+{% block body %}
+
+<h1>Interfaces</h1>
+<p class="lede">Cada placa e o papel dela. Mudanças aqui reiniciam a interface no apply — a LAN inclusive, então o contador de confirmação existe justamente para isso.</p>
+
+{% for iface in cfg.interfaces %}
+  {% set link = links.get(iface.ppp_device) %}
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap;margin-bottom:0.9rem">
+      <h3 style="margin:0">{{ iface.name }}</h3>
+      <span class="pill">{{ iface.role.value }}</span>
+      <span class="pill">{{ iface.ipv4.mode.value }}</span>
+      {% if link and link.up %}
+        <span class="pill ok"><span class="dot"></span>{{ link.address or 'no ar' }}</span>
+      {% else %}
+        <span class="pill bad"><span class="dot"></span>fora</span>
+      {% endif %}
+      <span style="margin-left:auto;color:var(--text-faint)" class="mono">{{ iface.device }}{% if iface.ppp_device != iface.device %} → {{ iface.ppp_device }}{% endif %}</span>
+    </div>
+
+    <form method="post" action="/interfaces/{{ iface.name }}">
+      <div class="fields">
+        <div>
+          <label>Descrição</label>
+          <input type="text" name="description" value="{{ iface.description }}" maxlength="120">
+        </div>
+        <div>
+          <label>Modo IPv4</label>
+          <select name="mode">
+            {% for mode in ['static', 'dhcp', 'pppoe', 'manual'] %}
+              <option value="{{ mode }}" {{ 'selected' if iface.ipv4.mode.value == mode }}>{{ mode }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Endereço (CIDR)</label>
+          <input type="text" name="address" value="{{ iface.ipv4.address or '' }}"
+                 placeholder="10.0.0.1/24" {{ 'disabled' if iface.ipv4.mode.value != 'static' }}>
+          <div class="hint">Só em modo static.</div>
+        </div>
+        <div>
+          <label>Gateway</label>
+          <input type="text" name="gateway" value="{{ iface.ipv4.gateway or '' }}"
+                 placeholder="opcional" {{ 'disabled' if iface.ipv4.mode.value != 'static' }}>
+        </div>
+
+        {% if iface.pppoe %}
+          <div>
+            <label>Usuário PPPoE</label>
+            <input type="text" name="pppoe_username" value="{{ iface.pppoe.username }}">
+          </div>
+          <div>
+            <label>MTU / MRU</label>
+            <input type="number" name="pppoe_mtu" value="{{ iface.pppoe.mtu }}" min="576" max="1500">
+          </div>
+        {% endif %}
+      </div>
+
+      {% if iface.pppoe %}
+        <div class="hint" style="margin-top:0.7rem">
+          A senha do PPPoE não passa por esta tela: ela fica em <code>/etc/ppp/chap-secrets</code> (modo 0600).
+        </div>
+      {% endif %}
+
+      <div class="row"><button class="primary" type="submit">Salvar</button></div>
+    </form>
+  </div>
+{% endfor %}
+
+{% endblock %}

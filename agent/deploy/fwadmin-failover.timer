@@ -1,0 +1,11 @@
+[Unit]
+Description=fwadmin — dispara a checagem de failover das WANs
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Unit=fwadmin-failover.service
+
+[Install]
+WantedBy=timers.target

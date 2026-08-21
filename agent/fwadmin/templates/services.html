@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Serviços{% endblock %}
+{% block body %}
+
+<h1>Serviços</h1>
+<p class="lede">
+  O portal da casa, agora saindo do mesmo modelo do DNS: cadastrar um serviço aqui
+  cria o registro no dnsmasq <em>e</em> o card. Antes eram dois lugares para manter.
+</p>
+
+<input id="filtro" type="search" placeholder="Filtrar serviços…  (tecle / para focar)" autocomplete="off"
+       style="max-width:340px;margin-bottom:0.5rem">
+
+<div id="lista">
+{% for gid, (group, members) in grouped.items() %}
+  <div class="group" style="--group: {{ group.accent }}">
+    <div class="group-head">
+      <div>
+        <div class="t">{{ group.title }}</div>
+        {% if group.subtitle %}<div class="s">{{ group.subtitle }}</div>{% endif %}
+      </div>
+    </div>
+    <div class="services">
+      {% for host in members %}
+        {% for svc in host.services %}
+          <div class="svc" data-busca="{{ (svc.name ~ ' ' ~ svc.description ~ ' ' ~ svc.url ~ ' ' ~ host.name) | lower }}">
+            <div class="top">
+              <span>{{ svc.icon }}</span>
+              <a class="name" href="{{ svc.url }}" style="color:inherit;text-decoration:none">{{ svc.name }}</a>
+              <form method="post" action="/services/{{ host.name }}/{{ loop.index0 }}/delete" style="margin-left:auto">
+                <button class="tiny danger" type="submit" title="remover">×</button>
+              </form>
+            </div>
+            <div class="desc">{{ svc.description }}</div>
+            <div class="url">{{ svc.url }}</div>
+            {% if svc.tag %}<span class="pill {{ 'bad' if svc.tag_style == 'open' }}">{{ svc.tag }}</span>{% endif %}
+          </div>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+{% endfor %}
+
+{% if loose %}
+  <div class="group">
+    <div class="group-head"><div><div class="t">Sem grupo</div></div></div>
+    <div class="services">
+      {% for host in loose %}
+        {% for svc in host.services %}
+          <div class="svc" data-busca="{{ (svc.name ~ ' ' ~ svc.description ~ ' ' ~ svc.url) | lower }}">
+            <div class="top">
+              <span>{{ svc.icon }}</span>
+              <a class="name" href="{{ svc.url }}" style="color:inherit;text-decoration:none">{{ svc.name }}</a>
+              <form method="post" action="/services/{{ host.name }}/{{ loop.index0 }}/delete" style="margin-left:auto">
+                <button class="tiny danger" type="submit" title="remover">×</button>
+              </form>
+            </div>
+            <div class="desc">{{ svc.description }}</div>
+            <div class="url">{{ svc.url }}</div>
+          </div>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
+</div>
+
+<p id="vazio" style="display:none;color:var(--text-dim)">Nenhum serviço corresponde ao filtro.</p>
+
+<h2>Publicar um serviço</h2>
+<div class="card">
+  <form method="post" action="/services/add">
+    <div class="fields">
+      <div>
+        <label>Host</label>
+        <select name="host" required>
+          {% for h in cfg.hosts %}
+            <option value="{{ h.name }}">{{ h.fqdn(cfg.dns.domain) }} · {{ h.ip }}</option>
+          {% endfor %}
+        </select>
+        <div class="hint">Não achou? Cadastre em <a href="/dns">DNS e DHCP</a>.</div>
+      </div>
+      <div><label>Nome</label><input type="text" name="name" required></div>
+      <div><label>URL</label><input type="text" name="url" placeholder="http://nome.home.lan:8080" required></div>
+      <div><label>Descrição</label><input type="text" name="description"></div>
+      <div><label>Ícone</label><input type="text" name="icon" placeholder="📦" maxlength="8"></div>
+      <div><label>Selo</label><input type="text" name="tag" placeholder="admin, sem auth…" maxlength="24"></div>
+      <div>
+        <label>Estilo do selo</label>
+        <select name="tag_style"><option value="">neutro</option><option value="open">alerta</option></select>
+      </div>
+    </div>
+    <div class="row"><button class="primary" type="submit">Publicar</button></div>
+  </form>
+</div>
+
+{% if cfg.portal.endpoints %}
+  <h2>Endpoints sem interface web</h2>
+  <div class="tablewrap">
+    <table>
+      <tbody>
+        {% for ep in cfg.portal.endpoints %}
+          <tr><td>{{ ep.name }}</td><td class="mono" style="color:var(--text-faint)">{{ ep.address }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+<script>
+  // Mesmo comportamento do portal antigo: filtro incremental e "/" para focar.
+  const filtro = document.getElementById('filtro');
+  const vazio = document.getElementById('vazio');
+  const cards = [...document.querySelectorAll('.svc')];
+
+  filtro.addEventListener('input', () => {
+    const q = filtro.value.trim().toLowerCase();
+    let achou = 0;
+    for (const card of cards) {
+      const bate = !q || card.dataset.busca.includes(q);
+      card.style.display = bate ? '' : 'none';
+      if (bate) achou++;
+    }
+    for (const grupo of document.querySelectorAll('.group')) {
+      const meus = [...grupo.querySelectorAll('.svc')];
+      grupo.style.display = meus.some(c => c.style.display !== 'none') ? '' : 'none';
+    }
+    vazio.style.display = achou ? 'none' : 'block';
+  });
+
+  document.addEventListener('keydown', e => {
+    if (e.key === '/' && document.activeElement !== filtro) {
+      e.preventDefault();
+      filtro.focus();
+    } else if (e.key === 'Escape' && document.activeElement === filtro) {
+      filtro.value = '';
+      filtro.dispatchEvent(new Event('input'));
+      filtro.blur();
+    }
+  });
+</script>
+
+{% endblock %}

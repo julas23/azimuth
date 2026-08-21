@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ t.page_title_register }}{% endblock %}
+
+{% block content %}
+<div class="min-h-[80vh] flex items-center justify-center px-4 py-12">
+  <div class="w-full max-w-md">
+    <div class="text-center mb-8">
+      <h1 class="text-3xl font-bold text-gray-900">{{ t.reg_title }}</h1>
+      <p class="text-gray-600 mt-2">{{ t.reg_subtitle }}</p>
+    </div>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+      {% if error %}
+      <div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 mb-6 text-sm">
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="post" action="/register" class="space-y-5">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">{{ t.reg_name_label }}</label>
+          <input type="text" name="name" required autofocus
+                 class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm
+                        focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                 placeholder="João Silva">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">{{ t.reg_email_label }}</label>
+          <input type="email" name="email" required
+                 class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm
+                        focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                 placeholder="seu@email.com">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">{{ t.reg_pass_label }}</label>
+          <input type="password" name="password" required minlength="8"
+                 class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm
+                        focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                 placeholder="{{ t.reg_pass_placeholder }}">
+        </div>
+        <button type="submit"
+                class="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 transition">
+          {{ t.reg_button }}
+        </button>
+      </form>
+
+      <p class="text-center text-sm text-gray-500 mt-6">
+        {{ t.reg_has_account }}
+        <a href="/login" class="text-indigo-600 font-medium hover:underline">{{ t.reg_login_link }}</a>
+      </p>
+
+      <p class="text-center text-xs text-gray-400 mt-4">
+        {{ t.reg_terms }}
+        <a href="/terms" class="underline">{{ t.reg_terms_link }}</a>.
+      </p>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}fwadmin{% endblock %} · {{ cfg.system.hostname if cfg else 'fwadmin' }}</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/vendor/htmx.min.js" defer></script>
+</head>
+<body>
+<div class="shell">
+
+  <nav class="side">
+    <div class="brand">
+      <b>fwadmin</b>
+      <div>{{ cfg.system.hostname if cfg else '' }}{% if cfg %} · {{ cfg.lan.ipv4.ip }}{% endif %}</div>
+    </div>
+    {% for href, label, icon in nav %}
+      <a href="{{ href }}" class="{{ 'on' if path == href or (href != '/' and path.startswith(href)) }}">
+        <span class="ico">{{ icon }}</span>{{ label }}
+      </a>
+    {% endfor %}
+    <div class="foot">
+      <form method="post" action="/logout">
+        <button class="tiny" type="submit">sair · {{ user }}</button>
+      </form>
+    </div>
+  </nav>
+
+  <main>
+   <div class="page">
+    {% if pending and path != '/system' %}
+      <div class="note warn">
+        <b>Há alterações não aplicadas</b>
+        As mudanças estão gravadas como proposta e ainda não valem no firewall.
+        <div class="actions"><a class="btn" href="/system">Revisar e aplicar</a></div>
+      </div>
+    {% endif %}
+
+    {% if request.query_params.get('erro') %}
+      <div class="note bad"><b>Não deu para salvar</b>{{ request.query_params.get('erro') }}</div>
+    {% elif request.query_params.get('ok') %}
+      <div class="note ok"><b>Salvo como proposta</b>Revise em <a href="/system">Sistema</a> para aplicar.</div>
+    {% endif %}
+
+    {% block body %}{% endblock %}
+   </div>
+  </main>
+
+</div>
+</body>
+</html>

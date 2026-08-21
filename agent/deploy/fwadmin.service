@@ -1,0 +1,64 @@
+[Unit]
+Description=fwadmin — painel de administração do firewall
+Documentation=file:/opt/fwadmin/README.md
+After=network.target
+Wants=network.target
+
+[Service]
+Type=exec
+User=netadm
+Group=netadm
+WorkingDirectory=/opt/fwadmin
+Environment=PYTHONPATH=/opt/fwadmin
+ExecStart=/usr/bin/python3 -m uvicorn fwadmin.web:app \
+    --host 127.0.0.1 --port 8080 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=on-failure
+RestartSec=3
+
+# Escuta so no loopback: quem fala com a LAN e' o nginx, que aplica o filtro
+# de origem. Assim a porta 8080 nunca fica exposta nem por engano.
+
+# --- endurecimento ---------------------------------------------------------
+# NoNewPrivileges fica DESLIGADO de proposito: e' o unico jeito de este
+# servico chamar o sudo, que e' a ponte controlada para o fwctl. Todo o resto
+# do sandbox continua valendo, e o sudoers limita a lista de comandos.
+NoNewPrivileges=no
+
+# 'full' (e nao 'yes') monta /etc read-only, e o ReadWritePaths abaixo NAO
+# consegue reabrir: quando o mesmo caminho de topo aparece nos dois, o
+# read-only do ProtectSystem vence — so subcaminhos aninhados escapam. Com
+# 'yes', /usr e /boot seguem protegidos e /etc fica de fora, que e' do que o
+# apply precisa.
+ProtectSystem=yes
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+# AF_PACKET entra por causa do PPPoE: o rp-pppoe valida o nome da interface
+# abrindo um socket(PF_PACKET, SOCK_RAW), e o RestrictAddressFamilies e'
+# aplicado por seccomp, que os filhos do sudo herdam. Sem ele o 'pon' falha com
+# a mensagem enganosa "unrecognized option 'enp4s0'" e a WAN primaria nao volta
+# depois do apply (incidente de 2026-08-21).
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK AF_PACKET
+
+# O ProtectSystem monta caminhos do sistema como read-only DENTRO do namespace
+# deste servico. O sudo eleva privilegio mas NAO troca de namespace: o fwctl
+# chamado pela interface web herda essas montagens e, mesmo como root, leva
+# EROFS ao gravar. Por isso os alvos do apply precisam estar aqui — no caso,
+# o wan-failover.sh, que mora sob o /usr protegido.
+#
+# Isso nao afrouxa o modelo: o netadm continua sem permissao de escrita nesses
+# caminhos (todos de root), e quem grava de fato e' o fwctl via sudo, limitado
+# pelo sudoers. O que o sandbox bloqueava era justamente o unico processo que
+# precisa gravar.
+ReadWritePaths=/var/lib/fwadmin /etc /usr/local/bin
+
+MemoryMax=512M
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

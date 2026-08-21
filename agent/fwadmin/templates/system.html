@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Sistema{% endblock %}
+{% block body %}
+
+<h1>Sistema</h1>
+<p class="lede">Onde as propostas viram realidade — e onde dá para voltar atrás.</p>
+
+<h2>Estado do apply</h2>
+<div class="card">
+  <pre class="out" id="estado" hx-get="/system/state" hx-trigger="every 5s" hx-swap="innerHTML">{{ state }}</pre>
+
+  <div class="row">
+    {% if pending %}
+      <form method="post" action="/system/apply">
+        <input type="hidden" name="yes" value="1">
+        <button class="primary" type="submit">Aplicar alterações</button>
+      </form>
+      <form method="post" action="/system/discard">
+        <button type="submit">Descartar proposta</button>
+      </form>
+    {% endif %}
+    <form method="post" action="/system/confirm"><button type="submit">Confirmar</button></form>
+    <form method="post" action="/system/rollback"><button class="danger" type="submit">Reverter</button></form>
+    <a class="btn" href="/system/config">Baixar config.yaml</a>
+  </div>
+
+  <div class="note" style="margin:1rem 0 0">
+    <b>Como o apply protege você</b>
+    A config é validada pelo modelo, os arquivos são gerados fora de <code>/etc</code>
+    e passam por <code>nft -c</code>, <code>dnsmasq --test</code> e <code>ifquery</code>.
+    Só então são instalados atomicamente. Depois disso, você tem
+    {{ cfg.system.confirm_timeout }}s para confirmar — se a mudança derrubar a LAN,
+    ninguém confirma e o firewall volta sozinho.
+  </div>
+</div>
+
+{% if pending and diff %}
+  <h2>O que vai mudar</h2>
+  <pre class="out">{{ diff }}</pre>
+{% endif %}
+
+<h2>Histórico da configuração</h2>
+<div class="tablewrap">
+  <table>
+    <thead><tr><th>Commit</th><th>Quando</th><th>Mudança</th></tr></thead>
+    <tbody>
+      {% for entry in history %}
+        <tr>
+          <td class="mono">{{ entry.hash }}</td>
+          <td class="nowrap" style="color:var(--text-dim)">{{ entry.when }}</td>
+          <td>{{ entry.subject }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="3" style="color:var(--text-faint)">Nenhum commit ainda — o histórico começa no primeiro apply confirmado.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Auditoria</h2>
+<div class="tablewrap">
+  <table>
+    <thead><tr><th>Quando</th><th>Usuário</th><th>Origem</th><th>Ação</th></tr></thead>
+    <tbody>
+      {% for row in audit %}
+        <tr>
+          <td class="nowrap mono" style="color:var(--text-dim)">{{ row['at'] | int | timestamp }}</td>
+          <td>{{ row['username'] or '—' }}</td>
+          <td class="mono">{{ row['address'] or '—' }}</td>
+          <td>{{ row['action'] }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" style="color:var(--text-faint)">Sem registros.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<h2>Máquina</h2>
+<div class="grid">
+  <div class="card stat"><div class="k">Uptime</div><div class="v" style="font-size:1.1rem">{{ system.uptime }}</div></div>
+  <div class="card stat"><div class="k">Kernel</div><div class="v" style="font-size:1.1rem">{{ system.kernel }}</div></div>
+  <div class="card stat"><div class="k">Memória</div><div class="v" style="font-size:1.1rem">{{ system.memory }}</div></div>
+  <div class="card stat"><div class="k">Disco</div><div class="v" style="font-size:1.1rem">{{ system.disk }}</div></div>
+</div>
+
+{% endblock %}

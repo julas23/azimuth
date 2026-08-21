@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Peers — Admin{% endblock %}
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-8">
+
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <a href="/admin" class="text-sm text-gray-500 hover:text-indigo-600">← Admin</a>
+      <h1 class="text-2xl font-bold text-gray-900 mt-1">Peers Ativos</h1>
+    </div>
+    <span class="text-sm text-gray-500">Período: {{ period }}</span>
+  </div>
+
+  <div class="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 text-gray-500 text-xs uppercase">
+        <tr>
+          <th class="px-4 py-3 text-left">IP</th>
+          <th class="px-4 py-3 text-left">Usuário</th>
+          <th class="px-4 py-3 text-left">Plano</th>
+          <th class="px-4 py-3 text-left">Uso no mês</th>
+          <th class="px-4 py-3 text-left">Status</th>
+          <th class="px-4 py-3 text-left">Criado</th>
+          <th class="px-4 py-3 text-left">Ações</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for item in peers_data %}
+          {% set throttled = item.bw and item.bw.quota_notified_100 %}
+          {% include "admin/_peer_row.html" %}
+        {% else %}
+        <tr><td colspan="7" class="px-6 py-8 text-center text-gray-400">Nenhum peer ativo.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+{% endblock %}

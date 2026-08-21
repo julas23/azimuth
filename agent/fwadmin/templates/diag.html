@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Diagnóstico{% endblock %}
+{% block body %}
+
+<h1>Diagnóstico</h1>
+<p class="lede">Ferramentas de leitura. Nada aqui muda configuração.</p>
+
+<div class="card">
+  <form method="post" action="/diag">
+    <div class="fields">
+      <div>
+        <label>Ferramenta</label>
+        <select name="tool">
+          {% for value, rotulo in [('ping','ping'), ('traceroute','traceroute'), ('dns','consulta DNS'), ('routes','tabela de rotas'), ('nft','ruleset nftables'), ('journal','journal do systemd')] %}
+            <option value="{{ value }}" {{ 'selected' if tool == value }}>{{ rotulo }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Alvo</label>
+        <input type="text" name="target" value="{{ target or '' }}" placeholder="8.8.8.8, nome.home.lan, dnsmasq…">
+        <div class="hint">Para o journal, o alvo é o nome da unidade.</div>
+      </div>
+      <div>
+        <label>Sair pela interface</label>
+        <select name="iface">
+          <option value="">padrão</option>
+          {% for iface in cfg.interfaces %}
+            <option value="{{ iface.ppp_device }}">{{ iface.name }} ({{ iface.ppp_device }})</option>
+          {% endfor %}
+        </select>
+        <div class="hint">Só vale para o ping.</div>
+      </div>
+    </div>
+    <div class="row"><button class="primary" type="submit">Executar</button></div>
+  </form>
+</div>
+
+{% if result %}
+  <h2>Resultado</h2>
+  {% if result.command %}
+    <p style="color:var(--text-faint);margin:0 0 0.5rem" class="mono">$ {{ result.command }}</p>
+  {% endif %}
+  <pre class="out">{{ result.output }}</pre>
+{% endif %}
+
+{% endblock %}

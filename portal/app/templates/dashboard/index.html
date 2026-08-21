@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+{% block title %}{{ t.page_title_dashboard }}{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-10 space-y-6">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">{{ t.nav_dashboard }}, {{ user.name.split()[0] }}!</h1>
+      <p class="text-sm text-gray-500 mt-0.5">{{ t.dash_subtitle }}</p>
+    </div>
+    {% if subscription %}
+    <span class="px-3 py-1 rounded-full text-sm font-medium
+      {% if subscription.status == 'active' %}bg-green-100 text-green-700
+      {% elif subscription.status == 'trialing' %}bg-blue-100 text-blue-700
+      {% elif subscription.status == 'past_due' %}bg-yellow-100 text-yellow-700
+      {% else %}bg-red-100 text-red-700{% endif %}">
+      {% if subscription.status == 'active' %}{{ t.status_active }}
+      {% elif subscription.status == 'trialing' %}{{ t.status_trialing }}
+      {% elif subscription.status == 'past_due' %}{{ t.status_past_due }}
+      {% else %}{{ t.status_inactive }}{% endif %}
+    </span>
+    {% endif %}
+  </div>
+
+  {% if peer and peer.config_stale %}
+  <div class="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex items-start gap-3">
+    <span class="text-amber-500 text-xl mt-0.5">⚠</span>
+    <div class="flex-1">
+      <p class="font-semibold text-amber-800">{{ t.stale_title }}</p>
+      <p class="text-sm text-amber-700 mt-0.5">{{ t.stale_desc }}</p>
+    </div>
+    <div class="flex gap-2 shrink-0">
+      <a href="/peers/conf" class="bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition">{{ t.stale_download }}</a>
+      <a href="/dashboard" hx-get="/peers/qr" hx-target="#qr-img" hx-swap="outerHTML" class="bg-white border border-amber-400 text-amber-700 text-sm font-medium px-4 py-2 rounded-lg hover:bg-amber-50 transition">{{ t.stale_qr }}</a>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if not subscription %}
+  <!-- No subscription -->
+  <div class="bg-white rounded-2xl border border-gray-200 p-12 text-center">
+    <div class="text-5xl mb-4">🔌</div>
+    <h2 class="text-xl font-bold mb-2">{{ t.no_sub_title }}</h2>
+    <p class="text-gray-600 mb-6">{{ t.no_sub_desc }}</p>
+    <a href="/plans" class="bg-indigo-600 text-white font-bold px-8 py-3 rounded-xl hover:bg-indigo-700 transition">
+      {{ t.no_sub_cta }}
+    </a>
+  </div>
+
+  {% else %}
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- Subscription info -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6">
+      <h2 class="font-bold text-gray-800 mb-4">{{ t.sub_card_title }}</h2>
+      <dl class="space-y-3 text-sm">
+        <div class="flex justify-between">
+          <dt class="text-gray-500">{{ t.sub_plan }}</dt>
+          <dd class="font-medium">{{ plan.name if plan else '—' }}</dd>
+        </div>
+        <div class="flex justify-between">
+          <dt class="text-gray-500">{{ t.sub_speed }}</dt>
+          <dd class="font-medium">{{ plan.bandwidth_mbps }} Mbps</dd>
+        </div>
+        <div class="flex justify-between">
+          <dt class="text-gray-500">{{ t.sub_quota }}</dt>
+          <dd class="font-medium">
+            {% if plan.quota_gb == 0 %}{{ t.unlimited }}{% else %}{{ plan.quota_gb }} GB/{{ t.per_month | replace('/', '') }}{% endif %}
+          </dd>
+        </div>
+        {% if subscription.current_period_end %}
+        <div class="flex justify-between">
+          <dt class="text-gray-500">{% if subscription.cancel_at_period_end %}{{ t.sub_until }}{% else %}{{ t.sub_next_charge }}{% endif %}</dt>
+          <dd class="font-medium {% if subscription.cancel_at_period_end %}text-red-500{% endif %}">
+            {{ subscription.current_period_end | fmt_date }}
+          </dd>
+        </div>
+        {% endif %}
+      </dl>
+
+      <!-- Cancel / Reactivate -->
+      <div class="mt-4 pt-4 border-t border-gray-100" x-data="{ loading: false, msg: '' }">
+        {% if not subscription.cancel_at_period_end %}
+        <button @click="
+            if (!confirm('{{ t.cancel_confirm }}')) return;
+            loading = true;
+            fetch('/checkout/cancel', {method:'POST', headers:{Authorization:'Bearer '+document.cookie.split('access_token=')[1]?.split(';')[0]}})
+              .then(r=>r.json()).then(d=>{ msg=d.message||d.detail; loading=false; location.reload(); })
+              .catch(()=>{ msg='{{ t.error_short }}'; loading=false; })"
+                :disabled="loading"
+                class="text-sm text-red-500 hover:text-red-700 disabled:opacity-50">
+          <span x-text="loading ? '{{ t.wait }}' : '{{ t.cancel_btn }}'"></span>
+        </button>
+        {% else %}
+        <div class="flex items-center justify-between">
+          <span class="text-sm text-red-500 font-medium">{{ t.cancels_on }} {{ subscription.current_period_end | fmt_date }}</span>
+          <button @click="
+              loading = true;
+              fetch('/checkout/reactivate', {method:'POST', headers:{Authorization:'Bearer '+document.cookie.split('access_token=')[1]?.split(';')[0]}})
+                .then(r=>r.json()).then(d=>{ msg=d.message||d.detail; loading=false; location.reload(); })
+                .catch(()=>{ msg='{{ t.error_short }}'; loading=false; })"
+                  :disabled="loading"
+                  class="text-sm text-green-600 hover:text-green-700 font-medium disabled:opacity-50">
+            <span x-text="loading ? '{{ t.wait }}' : '{{ t.keep_btn }}'"></span>
+          </button>
+        </div>
+        {% endif %}
+        <p x-show="msg" x-text="msg" class="text-xs text-gray-500 mt-1"></p>
+      </div>
+    </div>
+
+    <!-- Bandwidth -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6">
+      <h2 class="font-bold text-gray-800 mb-4">{{ t.bw_title }}</h2>
+      {% if bandwidth %}
+        {% set total_bytes = bandwidth.bytes_rx + bandwidth.bytes_tx %}
+        {% if plan.quota_gb > 0 %}
+          {% set quota_bytes = plan.quota_gb * 1073741824 %}
+          {% set pct = [(total_bytes / quota_bytes * 100), 100] | min | int %}
+        {% else %}
+          {% set pct = 0 %}
+        {% endif %}
+
+        <dl class="space-y-2 text-sm mb-4">
+          <div class="flex justify-between">
+            <dt class="text-gray-500">{{ t.bw_download }}</dt>
+            <dd class="font-medium">{{ bandwidth.bytes_rx | fmt_bytes }}</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-gray-500">{{ t.bw_upload }}</dt>
+            <dd class="font-medium">{{ bandwidth.bytes_tx | fmt_bytes }}</dd>
+          </div>
+          <div class="flex justify-between border-t pt-2">
+            <dt class="text-gray-700 font-medium">{{ t.bw_total }}</dt>
+            <dd class="font-bold">{{ total_bytes | fmt_bytes }}</dd>
+          </div>
+        </dl>
+
+        {% if plan.quota_gb > 0 %}
+        <div>
+          <div class="flex justify-between text-xs text-gray-500 mb-1">
+            <span>{{ pct }}{{ t.bw_used_pct }}</span>
+            <span>{{ plan.quota_gb }} GB</span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-2.5">
+            <div class="h-2.5 rounded-full transition-all
+              {% if pct >= 90 %}bg-red-500{% elif pct >= 70 %}bg-yellow-500{% else %}bg-green-500{% endif %}"
+              style="width: {{ pct }}%"></div>
+          </div>
+        </div>
+        {% else %}
+        <p class="text-sm text-green-600 font-medium mt-2">{{ t.bw_unlimited }}</p>
+        {% endif %}
+      {% else %}
+        <p class="text-gray-500 text-sm">{{ t.bw_no_data }}</p>
+      {% endif %}
+    </div>
+
+  </div>
+
+  <!-- Peer / Config -->
+  {% if peer %}
+  <div class="bg-white rounded-2xl border border-gray-200 p-6" x-data="{ showQR: false, regenerating: false, newConf: null }">
+    <h2 class="font-bold text-gray-800 mb-4">{{ t.config_title }}</h2>
+
+    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm mb-6">
+      <div class="bg-gray-50 rounded-lg p-3">
+        <dt class="text-gray-500 text-xs mb-1">{{ t.config_ip }}</dt>
+        <dd class="font-mono font-bold text-gray-800">{{ peer.ip_address }}</dd>
+      </div>
+      <div class="bg-gray-50 rounded-lg p-3">
+        <dt class="text-gray-500 text-xs mb-1">{{ t.config_pubkey }}</dt>
+        <dd class="font-mono text-xs text-gray-600 truncate">{{ peer.public_key[:24] }}…</dd>
+      </div>
+    </dl>
+
+    <!-- Action buttons -->
+    <div class="flex flex-wrap gap-3 mb-6">
+      {% if peer.private_key %}
+      <a href="/peers/conf"
+         class="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-700 transition">
+        {{ t.btn_download_conf }}
+      </a>
+
+      <button @click="showQR = !showQR"
+              class="flex items-center gap-2 border border-indigo-600 text-indigo-600 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-indigo-50 transition">
+        📱 <span x-text="showQR ? '{{ t.btn_qr_close }}' : '{{ t.btn_qr_open }}'"></span>
+      </button>
+      {% else %}
+      <div class="bg-yellow-50 border border-yellow-200 text-yellow-700 rounded-lg p-3 text-sm w-full">
+        {{ t.config_no_key }}
+      </div>
+      {% endif %}
+
+      <button x-on:click="
+        if (!confirm('{{ t.regen_confirm }}')) return;
+        regenerating = true;
+        fetch('/peers/regenerate', {method:'POST', headers:{Authorization:'Bearer '+document.cookie.split('access_token=')[1]?.split(';')[0]}})
+          .then(r => r.json())
+          .then(d => { if(d.ok) { newConf = d.conf; regenerating = false; } else alert(d.detail || '{{ t.error_short }}') })
+          .catch(() => alert('{{ t.error_short }}'))
+      "
+              :disabled="regenerating"
+              class="flex items-center gap-2 border border-gray-300 text-gray-600 px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-gray-50 transition disabled:opacity-50">
+        <span x-text="regenerating ? '{{ t.btn_regenerating }}' : '{{ t.btn_regen }}'"></span>
+      </button>
+    </div>
+
+    <!-- QR Code (lazy loaded via HTMX) -->
+    <div x-show="showQR" x-cloak class="border border-gray-200 rounded-xl p-6 text-center"
+         hx-get="/dashboard/_qr" hx-trigger="intersect once" hx-target="this" hx-swap="innerHTML">
+      <div class="htmx-indicator">
+        <div class="animate-spin h-8 w-8 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto"></div>
+      </div>
+    </div>
+
+    <!-- New conf after regeneration -->
+    <div x-show="newConf" x-cloak class="mt-4">
+      <div class="bg-green-50 border border-green-200 text-green-700 rounded-lg p-3 text-sm mb-3">
+        {{ t.regen_success }}
+      </div>
+      <button @click="
+        const blob = new Blob([newConf], {type:'text/plain'});
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+        a.download = 'vpn.conf'; a.click();
+      "
+              class="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition">
+        {{ t.btn_download_new_conf }}
+      </button>
+      <p class="text-xs text-gray-500 mt-2">{{ t.regen_reload }}</p>
+    </div>
+
+  </div>
+
+  <!-- Custom Domains -->
+  {% if plan and plan.custom_domains_limit > 0 %}
+  <div class="bg-white rounded-2xl border border-gray-200 p-6">
+    <h2 class="font-bold text-gray-800 mb-1">{{ t.domains_title }}</h2>
+    <p class="text-sm text-gray-500 mb-4">
+      {{ t.domains_desc | replace('{n}', plan.custom_domains_limit | string) }}
+    </p>
+
+    <div id="domains-list"
+         hx-get="/dashboard/_domains"
+         hx-trigger="load"
+         hx-target="#domains-list"
+         hx-swap="innerHTML">
+      <div class="htmx-indicator text-gray-400 text-sm">{{ t.domains_loading }}</div>
+    </div>
+
+    <form hx-post="/dashboard/_domains"
+          hx-target="#domains-list"
+          hx-swap="outerHTML"
+          hx-on::after-request="this.reset()"
+          class="mt-4 flex gap-2"
+          id="domain-form">
+      <input type="text" name="domain" placeholder="{{ t.domain_placeholder }}" required
+             pattern="[a-zA-Z0-9][a-zA-Z0-9\-\.]{1,252}"
+             class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+      <button type="submit"
+              class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition">
+        {{ t.domain_add }}
+      </button>
+    </form>
+    <p class="text-xs text-gray-400 mt-2">{{ t.domain_note }}</p>
+  </div>
+  {% endif %}
+
+  {% else %}
+  <!-- No peer yet -->
+  <div class="bg-white rounded-2xl border border-gray-200 p-8 text-center">
+    <div class="text-4xl mb-3">⏳</div>
+    <h3 class="font-bold text-lg mb-2">{{ t.no_peer_title }}</h3>
+    <p class="text-gray-600 text-sm">{{ t.no_peer_desc }}</p>
+  </div>
+  {% endif %}
+
+  {% endif %} {# end if subscription #}
+
+  {% if subscription %}
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+    <!-- Chart -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6">
+      <h2 class="font-bold text-gray-800 mb-4">{{ t.chart_title }}</h2>
+      <div hx-get="/dashboard/_chart"
+           hx-trigger="load"
+           hx-target="this"
+           hx-swap="innerHTML">
+        <div class="flex items-center justify-center h-32 text-gray-400 text-sm">
+          <div class="htmx-indicator animate-spin h-5 w-5 border-2 border-indigo-500 border-t-transparent rounded-full mr-2"></div>
+          {{ t.chart_loading }}
+        </div>
+      </div>
+    </div>
+
+    <!-- Invoices -->
+    <div class="bg-white rounded-2xl border border-gray-200 p-6">
+      <h2 class="font-bold text-gray-800 mb-4">{{ t.inv_title }}</h2>
+      <div hx-get="/dashboard/_invoices"
+           hx-trigger="load"
+           hx-target="this"
+           hx-swap="innerHTML">
+        <p class="text-gray-400 text-sm">{{ t.inv_loading }}</p>
+      </div>
+    </div>
+
+  </div>
+  {% endif %}
+
+  <!-- Security -->
+  <div class="bg-white rounded-2xl border border-gray-200 p-6 flex items-center justify-between">
+    <div>
+      <h2 class="font-bold text-gray-800">{{ t.security_title }}</h2>
+      <p class="text-sm text-gray-500 mt-0.5">{{ t.security_desc }}</p>
+    </div>
+    <a href="/account/password"
+       class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition">
+      {{ t.security_btn }}
+    </a>
+  </div>
+
+</div>
+{% endblock %}

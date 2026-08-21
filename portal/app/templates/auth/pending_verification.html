@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ t.page_title_pending }}{% endblock %}
+
+{% block content %}
+<div class="min-h-[80vh] flex items-center justify-center px-4 py-12">
+  <div class="w-full max-w-md text-center">
+
+    <div class="text-6xl mb-6">✉️</div>
+    <h1 class="text-3xl font-bold text-gray-900 mb-2">{{ t.pending_title }}</h1>
+    <p class="text-gray-600 mb-8">{{ t.pending_subtitle }}</p>
+
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+      {% if smtp_configured %}
+      <p class="text-gray-700 text-sm leading-relaxed">
+        {{ t.pending_msg | replace("{email}", email) | safe }}
+      </p>
+      {% else %}
+      <p class="text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+        {{ t.pending_no_smtp }}
+      </p>
+      {% endif %}
+    </div>
+
+    <a href="/login" class="inline-block mt-6 text-sm text-indigo-600 hover:underline">
+      {{ t.pending_back }}
+    </a>
+
+  </div>
+</div>
+{% endblock %}

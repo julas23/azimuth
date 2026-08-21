@@ -1,0 +1,79 @@
+<tr class="hover:bg-gray-50">
+  <td class="px-6 py-3 font-medium">
+    <a href="/admin/users/{{ item.user.id }}/edit"
+       class="hover:text-indigo-600 hover:underline">{{ item.user.name }}</a>
+  </td>
+  <td class="px-6 py-3 text-gray-600">{{ item.user.email }}</td>
+  <td class="px-6 py-3 text-gray-500">
+    {% if item.sub %}
+      <span class="text-xs font-medium
+        {% if item.sub.status == 'active' %}text-green-600
+        {% elif item.sub.status == 'trialing' %}text-blue-600
+        {% else %}text-yellow-600{% endif %}">
+        {{ item.sub.plan_id | capitalize }} / {{ item.sub.status }}
+      </span>
+    {% else %}
+      <span class="text-gray-400 text-xs">Sem assinatura</span>
+    {% endif %}
+  </td>
+  <td class="px-6 py-3 text-gray-500">{{ item.user.created_at | fmt_date }}</td>
+  <td class="px-6 py-3 text-gray-500">{{ item.user.last_login | fmt_date }}</td>
+  <td class="px-6 py-3">
+    {% if item.user.email_verified_at %}
+      <span class="text-green-600 text-xs font-medium">● Verificado</span>
+    {% else %}
+      <span class="text-amber-500 text-xs font-medium">⏳ Pendente</span>
+    {% endif %}
+  </td>
+  <td class="px-6 py-3">
+    {% if item.user.is_active %}
+      <span class="text-green-600 text-xs font-medium">● Ativo</span>
+    {% else %}
+      <span class="text-red-500 text-xs font-medium">● Inativo</span>
+    {% endif %}
+    {% if item.user.must_change_password %}
+      <span class="block text-amber-600 text-xs font-medium mt-0.5"
+            title="Senha temporária emitida pelo admin — o usuário precisa trocá-la no próximo acesso">
+        ⚠ Troca de senha pendente
+      </span>
+    {% endif %}
+  </td>
+  <td class="px-6 py-3">
+    <div class="flex items-center gap-2 flex-wrap">
+      {% if not item.user.email_verified_at %}
+      <button hx-post="/admin/users/{{ item.user.id }}/verify-email"
+              hx-target="closest tr" hx-swap="outerHTML"
+              hx-confirm="Verificar e-mail de {{ item.user.email }} manualmente?"
+              class="text-xs px-2 py-1 rounded border border-blue-300 text-blue-700 hover:bg-blue-50">
+        Verificar e-mail
+      </button>
+      {% endif %}
+      <button hx-post="/admin/users/{{ item.user.id }}/toggle"
+              hx-target="closest tr" hx-swap="outerHTML"
+              hx-confirm="{% if item.user.is_active %}Suspender {{ item.user.email }}?{% else %}Reativar {{ item.user.email }}?{% endif %}"
+              class="text-xs px-2 py-1 rounded border
+                {% if item.user.is_active %}border-red-300 text-red-600 hover:bg-red-50
+                {% else %}border-green-300 text-green-600 hover:bg-green-50{% endif %}">
+        {% if item.user.is_active %}Suspender{% else %}Reativar{% endif %}
+      </button>
+      <button hx-post="/admin/users/{{ item.user.id }}/reset-password"
+              hx-target="closest tr" hx-swap="outerHTML"
+              hx-confirm="Resetar a senha de {{ item.user.email }}? Uma senha temporária será gerada e exibida uma única vez."
+              class="text-xs px-2 py-1 rounded border border-yellow-300 text-yellow-700 hover:bg-yellow-50">
+        {% if temp_password %}✓ Resetada{% else %}Reset senha{% endif %}
+      </button>
+
+      {% if temp_password %}
+      <div class="w-full mt-1 bg-yellow-50 border border-yellow-300 rounded px-2 py-1.5">
+        <p class="text-[11px] font-medium text-yellow-800">
+          Senha temporária — copie agora, não será exibida novamente:
+        </p>
+        <code class="text-sm font-mono font-bold text-gray-900 select-all">{{ temp_password }}</code>
+        <p class="text-[11px] text-yellow-700 mt-0.5">
+          Expira em {{ temp_password_ttl }}h. O usuário define a senha definitiva no primeiro acesso.
+        </p>
+      </div>
+      {% endif %}
+    </div>
+  </td>
+</tr>

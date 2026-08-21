@@ -1,0 +1,12 @@
+[Unit]
+Description=fwadmin — verifica a WAN primária e troca de link se preciso
+Documentation=file:/opt/fwadmin/README.md
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/wan-failover.sh
+
+# O script e' gerado a partir do config.yaml. Substitui a entrada de crontab
+# que fazia isso antes: com timer, o estado fica visivel no systemctl e o
+# journal guarda o historico das trocas.

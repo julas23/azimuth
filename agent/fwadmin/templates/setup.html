@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Primeiro acesso · fwadmin</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="center">
+  <div class="card">
+    <h1>Primeiro acesso</h1>
+    <p class="lede">Não há nenhum usuário ainda. Crie o administrador do painel.</p>
+
+    {% if error %}<div class="note bad">{{ error }}</div>{% endif %}
+
+    <form method="post" action="/login">
+      <div style="margin-bottom:0.85rem">
+        <label for="u">Usuário</label>
+        <input id="u" name="username" type="text" autocomplete="username" required autofocus>
+      </div>
+      <div style="margin-bottom:1.1rem">
+        <label for="p">Senha</label>
+        <input id="p" name="password" type="password" autocomplete="new-password" required minlength="10">
+        <div class="hint">Mínimo de 10 caracteres. Guardada com argon2id.</div>
+      </div>
+      <button class="primary" type="submit" style="width:100%;justify-content:center">Criar e entrar</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>

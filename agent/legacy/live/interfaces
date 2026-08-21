@@ -1,0 +1,19 @@
+source /etc/network/interfaces.d/*
+
+auto lo
+iface lo inet loopback
+
+# LAN — gateway da rede local - 10Gbe
+auto enp2s0   
+iface enp2s0 inet static
+    address 10.0.0.1
+    netmask 255.255.255.0
+
+# WAN Startlink
+auto enp3s0
+iface enp3s0 inet dhcp
+
+# WAN Vivo
+auto enp4s0
+iface enp4s0 inet manual
+

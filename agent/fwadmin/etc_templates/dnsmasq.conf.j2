@@ -1,0 +1,43 @@
+{# gera /etc/dnsmasq.conf #}
+# ATENCAO: arquivo gerado pelo fwadmin a partir de /etc/fwadmin/config.yaml.
+# Edicoes manuais sao perdidas no proximo apply. Edite o config.yaml.
+
+# --- interface e dominio local ---------------------------------------------
+interface={{ lan.device }}
+{% if dns.bind_interfaces %}
+bind-interfaces
+{% endif %}
+domain={{ dns.domain }}
+{% if dns.expand_hosts %}
+expand-hosts
+{% endif %}
+{% if dns.local_only %}
+local=/{{ dns.domain }}/
+{% endif %}
+
+{% if dhcp.enabled %}
+# --- DHCP -------------------------------------------------------------------
+dhcp-range={{ dhcp.range.start }},{{ dhcp.range.end }},{{ dhcp.range.netmask }},{{ dhcp.range.lease }}
+dhcp-option=option:router,{{ dhcp.router or lan.ipv4.address.split('/')[0] }}
+dhcp-option=6,{{ (dhcp.dns_servers or [lan.ipv4.address.split('/')[0]]) | join(',') }}
+
+# --- reservas por MAC -------------------------------------------------------
+{% for r in dhcp.reservations %}
+dhcp-host={{ r.mac }},{{ r.ip }},{{ r.name }}{% if r.description %}  # {{ r.description }}{% endif %}
+
+{% endfor %}
+{% endif %}
+
+# --- registros de host ------------------------------------------------------
+{% for h in hosts %}
+{% if h.dns %}
+address=/{{ h.fqdn(dns.domain) }}/{{ h.ip }}
+{% endif %}
+{% endfor %}
+
+{% if dns.upstream %}
+# --- resolvedores upstream --------------------------------------------------
+{% for s in dns.upstream %}
+server={{ s }}
+{% endfor %}
+{% endif %}
