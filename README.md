@@ -77,11 +77,15 @@ Com o modem em bridge, o PPPoE muda de dono junto: sai do roteador da operadora 
 
 1. Baixar a ISO — **a mesma para todo mundo**
 2. Dar boot; uma única pergunta, qual disco apagar
-3. A instalação corre sozinha e exibe um **QR code**
-4. Ler o QR com o celular: ele traz o endereço do painel na LAN e a impressão digital do certificado
-5. Criar o administrador, responder o perfil e aplicar
+3. A instalação corre sozinha e termina mostrando o endereço do painel, um **QR code** e um **código curto**
+4. Abrir o endereço no navegador — ou ler o QR com o celular, que traz junto a impressão digital do certificado
+5. Digitar o código, criar o administrador, responder o perfil e aplicar
 
 A partir do passo 3, toda pergunta restante acontece no navegador, com teclado e tela de verdade — nunca no console. Não há conta para criar antes, nem nuvem no caminho: a instalação inteira acontece dentro de casa.
+
+O código existe porque uma caixa recém-ligada na rede, sem ele, pertence a quem chegar primeiro. Quem está configurando precisa estar vendo a tela.
+
+**A virada para o modo de borda é reversível.** Configurada a caixa, ainda falta a parte física: modem em bridge, roteador virando ponto de acesso, cabos mudando de lugar. Se depois disso a internet não voltar, a caixa retorna sozinha ao estado em que estava sendo configurada e mostra o endereço na tela outra vez — com tudo o que você já respondeu intacto.
 
 ---
 
