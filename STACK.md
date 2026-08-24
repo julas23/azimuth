@@ -46,9 +46,12 @@ WireGuard e fail2ban estão marcados 🟡 pelo mesmo motivo: rodam em produção
 motor transacional. Enquanto for assim, mudança neles não tem validação, nem manifesto,
 nem rollback.
 
-O `preserve_tables` do schema existe por causa do fail2ban: recarregar o nftables sem
-preservar a `inet f2b-table` apaga banimento ativo, e o serviço volta "ok" com a proteção
-desligada — exatamente a classe de falha que o projeto inteiro foi feito para não ter.
+O que protege o banimento ativo do fail2ban num reload de nftables é o gerador **não**
+usar `flush ruleset`: ele recria só as tabelas próprias, pelo idioma `table X; delete
+table X`. O campo `preserve_tables` do schema ainda não participa disso — hoje ele só
+rende linhas de comentário no arquivo gerado. Transformá-lo em verificação de verdade,
+conferindo depois do reload que cada tabela listada continua no ruleset, é o que fecha o
+teste que o PLAN tem em aberto.
 
 ---
 
@@ -94,7 +97,9 @@ precisa se justificar.
 |---|---|---|---|
 | **debian-installer (preseed)** | ISO com uma pergunta só | GPL-2.0 | ⬜ |
 | **GnuPG** | Assinatura do repositório APT | GPL-3.0 | ⬜ |
-| **reprepro** ou **aptly** | Repositório APT assinado | GPL-2.0 / MIT | 🔍 |
+| **aptly** | Repositório APT assinado, com snapshot por canal | MIT |  ⬜ |
+| **Distribution** (`registry:2`) | Registry de imagens do projeto, amd64 e arm64 | Apache-2.0 | ⬜ |
+| **skopeo** / **regclient** | Cópia curada de digest para o registry do projeto | Apache-2.0 | ⬜ |
 | **Avahi (mDNS)** | Achar o appliance sem monitor | LGPL-2.1 | ⬜ |
 
 ---
@@ -130,7 +135,7 @@ nenhuma chamada de modelo sai da conta do projeto.
 | **Navidrome** | Música | GPL-3.0 | ⬜ |
 | **PostgreSQL** | Banco das aplicações, instância separada por app | PostgreSQL License | ⬜ |
 | **Valkey** | Cache e lock, instância separada por app | BSD-3-Clause | ⬜ |
-| **Docker Compose** e **LXC** | Substratos, os dois | Apache-2.0 / GPL-2.0 | ⬜ |
+| **Docker Engine + Compose** | Substrato único das aplicações desta camada | Apache-2.0 | ⬜ |
 
 ---
 
@@ -152,6 +157,13 @@ mínimo; trocar por `PyJWT` ou `joserfc` é a saída melhor.
 **`passlib` está parado desde 2020.** O pin de `bcrypt==3.2.2` existe porque
 `passlib` 1.7.4 quebra com `bcrypt` 4.x. É dívida silenciosa: hash de senha preso a duas
 versões antigas por incompatibilidade, não por escolha.
+
+**O Docker disputa o firewall com o motor.** Ele escreve na tabela `ip nat`, que é a
+mesma que o gerador de nftables recria a cada apply — e a política `drop` da chain de
+forward do motor mata o tráfego dos containers mesmo quando o Docker aceita na chain
+dele. A saída registrada no PLAN é tirar o Docker do firewall (`"iptables": false`) e
+declarar a rede dos containers no schema. LXC ficou fora do v1: as aplicações desta
+camada são imagem OCI, e dois substratos dobrariam gerador, validador e prova de função.
 
 **Open WebUI não é mais BSD puro.** Ganhou cláusula de marca, que restringe remover ou
 alterar o branding em redistribuição. Usar na LAN do usuário é tranquilo; **empacotar
