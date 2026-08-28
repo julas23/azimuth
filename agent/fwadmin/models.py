@@ -50,6 +50,16 @@ def _ipv4_net(value: str) -> str:
     return str(iface)
 
 
+def _reject_dups(values: list[str], message: str) -> None:
+    """Sobe aqui, e nao no fim do arquivo: o default de Config.wireguard e'
+    construido na definicao da classe e ja precisa desta funcao existindo."""
+    seen: set[str] = set()
+    for v in values:
+        if v in seen:
+            raise ValueError(f"{message}: {v!r}")
+        seen.add(v)
+
+
 # ---------------------------------------------------------------------------
 # interfaces
 # ---------------------------------------------------------------------------
@@ -489,6 +499,100 @@ class Firewall(Base):
 
 
 # ---------------------------------------------------------------------------
+# wireguard
+# ---------------------------------------------------------------------------
+
+WGKEY_RE = re.compile(r"^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$")
+"""Chave de 32 bytes em base64. O ultimo caractere e' restrito porque os dois
+bits finais do quarto sexteto nao existem — 'AAAA...A=' nunca sai do wg."""
+
+
+class WGPeer(Base):
+    """Um cliente do tunel."""
+
+    name: Annotated[str, Field(pattern=HOSTLABEL_RE.pattern)]
+    public_key: Annotated[str, Field(pattern=WGKEY_RE.pattern)]
+    """Chave PUBLICA. A privada e' do cliente e nunca passa por aqui."""
+
+    allowed_ips: list[str] = []
+    """O que este peer pode usar como origem — e para onde roteamos por ele."""
+
+    endpoint: str | None = None
+    """Só para peer de saida fixa (site a site). Cliente movel nao tem."""
+
+    keepalive: Annotated[int, Field(ge=0, le=3600)] | None = None
+    description: Annotated[str, Field(max_length=120)] = ""
+
+    enabled: bool = True
+    """Revogacao e' declarativa: desligar tira o peer do arquivo gerado, e o
+    historico em git guarda quem era. Apagar a linha perderia o registro."""
+
+    @field_validator("allowed_ips")
+    @classmethod
+    def _check_allowed(cls, v: list[str]) -> list[str]:
+        return [str(ipaddress.ip_network(item, strict=False)) for item in v]
+
+    @field_validator("endpoint")
+    @classmethod
+    def _check_endpoint(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        host, _, port = v.rpartition(":")
+        if not host or not port.isdigit() or not 0 < int(port) < 65536:
+            raise ValueError(f"endpoint precisa ser host:porta — recebido {v!r}")
+        return v
+
+
+class WireGuard(Base):
+    """O tunel de acesso remoto. Desligado por padrao."""
+
+    enabled: bool = False
+    device: Annotated[str, Field(pattern=r"^[a-z][a-z0-9_-]{0,14}$")] = "wg0"
+    listen_port: Annotated[int, Field(ge=1, le=65535)] = 51820
+
+    address: str | None = None
+    """Endereco do servidor dentro do tunel, em CIDR: 10.9.0.1/24."""
+
+    mtu: Annotated[int, Field(ge=1280, le=1500)] | None = None
+
+    private_key_file: str = "/etc/wireguard/private.key"
+    """Caminho da chave privada, modo 0600 e dona do root.
+
+    A chave NAO entra no modelo nem no arquivo gerado: o wg0.conf traz um
+    'PostUp = wg set %i private-key <arquivo>' e o segredo fica so ali. Sem
+    isso a chave apareceria no staging, no backup, no 'fwctl diff' e na tela
+    de diagnostico — o mesmo motivo pelo qual a senha do PPPoE mora no
+    chap-secrets e nao no /etc/ppp/peers.
+    """
+
+    peers: list[WGPeer] = []
+
+    @field_validator("address")
+    @classmethod
+    def _check_address(cls, v: str | None) -> str | None:
+        return _ipv4_net(v) if v else None
+
+    @field_validator("private_key_file")
+    @classmethod
+    def _check_key_file(cls, v: str) -> str:
+        if not v.startswith("/") or not re.fullmatch(r"[A-Za-z0-9/._-]{2,128}", v):
+            raise ValueError(f"caminho de chave invalido: {v!r}")
+        return v
+
+    @model_validator(mode="after")
+    def _coerencia(self) -> WireGuard:
+        if self.enabled and not self.address:
+            raise ValueError("wireguard ligado exige 'address' (ex: 10.9.0.1/24)")
+        _reject_dups([p.name for p in self.peers], "peer de wireguard duplicado")
+        _reject_dups([p.public_key for p in self.peers], "chave publica repetida em dois peers")
+        return self
+
+    @property
+    def active_peers(self) -> list[WGPeer]:
+        return [p for p in self.peers if p.enabled]
+
+
+# ---------------------------------------------------------------------------
 # raiz
 # ---------------------------------------------------------------------------
 
@@ -520,6 +624,7 @@ class Config(Base):
     hosts: list[Host] = []
     portal: Portal = Portal()
     firewall: Firewall = Firewall()
+    wireguard: WireGuard = WireGuard()
 
     # -- indices de conveniencia -------------------------------------------
 
@@ -609,11 +714,3 @@ class Config(Base):
                     f"{by_name[r.name]}"
                 )
         return self
-
-
-def _reject_dups(values: list[str], message: str) -> None:
-    seen: set[str] = set()
-    for v in values:
-        if v in seen:
-            raise ValueError(f"{message}: {v!r}")
-        seen.add(v)

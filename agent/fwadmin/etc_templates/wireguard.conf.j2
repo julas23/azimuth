@@ -1,0 +1,32 @@
+{# gera /etc/wireguard/<device>.conf #}
+# ATENCAO: arquivo gerado pelo fwadmin a partir de /etc/fwadmin/config.yaml.
+# Edicoes manuais sao perdidas no proximo apply. Edite o config.yaml.
+#
+# A chave privada NAO fica aqui: o PostUp abaixo a carrega de
+# {{ wg.private_key_file }} (modo 0600, dona do root). E' o mesmo arranjo do
+# PPPoE, cuja senha mora no chap-secrets — segredo nunca entra em arquivo
+# gerado, porque arquivo gerado passa por staging, backup e 'fwctl diff'.
+[Interface]
+Address = {{ wg.address }}
+ListenPort = {{ wg.listen_port }}
+{% if wg.mtu %}
+MTU = {{ wg.mtu }}
+{% endif %}
+PostUp = wg set %i private-key {{ wg.private_key_file }}
+
+{% for p in wg.active_peers %}
+# {{ p.name }}{% if p.description %} — {{ p.description }}{% endif %}
+
+[Peer]
+PublicKey = {{ p.public_key }}
+{% if p.allowed_ips %}
+AllowedIPs = {{ p.allowed_ips | join(', ') }}
+{% endif %}
+{% if p.endpoint %}
+Endpoint = {{ p.endpoint }}
+{% endif %}
+{% if p.keepalive %}
+PersistentKeepalive = {{ p.keepalive }}
+{% endif %}
+
+{% endfor %}

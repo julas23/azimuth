@@ -316,6 +316,53 @@ def dns_lookup(name: str) -> Probe:
     return Probe(bool(output.strip()), output or "sem resposta do resolvedor local", " ".join(argv))
 
 
+@dataclass
+class WGState:
+    """O que se ve de um tunel vivo. Nunca guarda material de chave."""
+
+    up: bool = False
+    listen_port: int = 0
+    peers: int = 0
+    handshakes: int = 0
+    """Peers que ja fecharam handshake alguma vez."""
+
+    last_handshake: int = -1
+    """Segundos desde o handshake mais recente. -1 = nenhum peer conectou."""
+
+
+def wireguard(device: str) -> WGState | None:
+    """Le 'wg show <dev> dump'. None = nao deu para observar.
+
+    A PRIMEIRA COLUNA do dump e' a chave privada do dispositivo. Ela e' lida e
+    descartada aqui, e nada dela sai desta funcao — nem para prova, nem para
+    log, nem para tela.
+    """
+    if not _valid_target(device):
+        return None
+    raw = _run("wg", "show", device, "dump")
+    if not raw.strip():
+        return None
+
+    linhas = [linha.split("\t") for linha in raw.strip().splitlines()]
+    cabeca = linhas[0]
+    estado = WGState(up=True)
+    if len(cabeca) >= 3 and cabeca[2].isdigit():
+        estado.listen_port = int(cabeca[2])
+
+    agora = int(time.time())
+    for peer in linhas[1:]:
+        if len(peer) < 5:
+            continue
+        estado.peers += 1
+        quando = int(peer[4]) if peer[4].isdigit() else 0
+        if quando:
+            estado.handshakes += 1
+            idade = max(0, agora - quando)
+            if estado.last_handshake < 0 or idade < estado.last_handshake:
+                estado.last_handshake = idade
+    return estado
+
+
 def dns_answers(name: str, server: str = "127.0.0.1", timeout: float = 2.0) -> bool:
     """Pergunta um registro A direto ao resolvedor e diz se ele respondeu.
 
