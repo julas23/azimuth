@@ -1,0 +1,139 @@
+"""O registro de servicos.
+
+Antes deste modulo, acrescentar um servico tocava sete pontos: o modelo, o
+template, o dicionario de alvos, o de validadores, um 'if' novo na cadeia de
+recargas, uma sonda no status.py que ninguem chamava, e a tela. Agora e' um
+arquivo em services/ e uma linha aqui.
+
+O motor nao sabe nada sobre servico nenhum em particular: ele pergunta ao
+registro o que renderizar, o que validar, o que recarregar e o que provar.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from fwadmin import paths
+from fwadmin.command import Result, run
+from fwadmin.models import Config
+from fwadmin.services import dnsmasq, failover, interfaces, nftables, pppoe
+from fwadmin.services.base import Prova, Reload, ServiceModule
+
+REGISTRY: tuple[ServiceModule, ...] = tuple(
+    sorted(
+        (
+            nftables.SERVICE,
+            dnsmasq.SERVICE,
+            interfaces.SERVICE,
+            pppoe.SERVICE,
+            failover.SERVICE,
+        ),
+        key=lambda s: s.order,
+    )
+)
+
+__all__ = [
+    "REGISTRY",
+    "Prova",
+    "Reload",
+    "ServiceModule",
+    "executables",
+    "owner",
+    "provas",
+    "reloads",
+    "rollback_reloads",
+    "targets",
+    "template_for",
+    "context_for",
+    "validate_syntax",
+]
+
+
+def targets(cfg: Config) -> dict[str, str]:
+    """Todos os arquivos gerenciados: {nome_do_render: caminho_no_sistema}.
+
+    Derivado do config a cada chamada, nunca acumulado num global. O mapa
+    anterior era de modulo e crescia com 'setdefault' a cada peer de PPPoE
+    renderizado — um peer removido continuava no mapa pelo resto da vida do
+    processo, e o render seguinte procurava um template que nao existe.
+    """
+    out: dict[str, str] = {}
+    for service in REGISTRY:
+        out.update(service.targets(cfg))
+    return out
+
+
+def owner(name: str, cfg: Config) -> ServiceModule | None:
+    """Qual servico e' dono de um arquivo renderizado."""
+    for service in REGISTRY:
+        if name in service.targets(cfg):
+            return service
+    return None
+
+
+def executables(cfg: Config) -> set[str]:
+    out: set[str] = set()
+    for service in REGISTRY:
+        out |= set(service.executable)
+    return out
+
+
+def template_for(name: str, cfg: Config) -> str:
+    service = owner(name, cfg)
+    return service.template(name) if service else f"{name}.j2"
+
+
+def context_for(name: str, cfg: Config) -> dict:
+    service = owner(name, cfg)
+    return service.context(cfg, name) if service else {}
+
+
+def validate_syntax(staging: Path, names: list[str], cfg: Config) -> list[Result]:
+    """Passa cada arquivo gerado pela ferramenta nativa do servico dele."""
+    results = []
+    for name in names:
+        service = owner(name, cfg)
+        if service is None or service.validator is None:
+            continue
+        results.append(run(*service.validator, str(staging / name), mutating=False))
+    return results
+
+
+def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Reload]:
+    """As recargas do apply, na ordem declarada pelos modulos."""
+    out: list[Reload] = []
+    for service in REGISTRY:
+        out.extend(service.reloads(cfg, previous, changed))
+    return out
+
+
+def rollback_reloads(cfg: Config | None, files: list[str]) -> list[Reload]:
+    """As recargas do caminho de volta, na mesma ordem."""
+    out: list[Reload] = []
+    for service in REGISTRY:
+        out.extend(service.rollback(cfg, files))
+    return out
+
+
+def provas(cfg: Config, previous: Config | None, changed: list[str]) -> list[Prova]:
+    """A prova de funcao de cada servico mexido.
+
+    Em sandbox nada e' observado: as recargas nao rodaram, entao perguntar ao
+    sistema vivo mediria a maquina de quem esta testando. A prova aparece
+    como inconclusiva, para o exercicio mostrar que a fase existe.
+    """
+    out: list[Prova] = []
+    for service in REGISTRY:
+        if service.probe is None:
+            continue
+        if not set(service.targets(cfg)) & set(changed):
+            continue
+        if paths.sandboxed():
+            out.append(
+                Prova.inconclusiva(service.name, "prova de funcao", "sandbox: nao observado")
+            )
+            continue
+        prova = service.probe(cfg, previous, changed)
+        if prova is not None:
+            out.append(prova)
+    return out

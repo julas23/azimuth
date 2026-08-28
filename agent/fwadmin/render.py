@@ -14,19 +14,13 @@ from pathlib import Path
 import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+from fwadmin import services
 from fwadmin.models import Config, IPv4Mode, Proto, Rule, Zone
 
 TEMPLATE_DIR = Path(__file__).parent / "etc_templates"
 
-# Onde cada arquivo renderizado vai parar no sistema real.
-TARGETS: dict[str, str] = {
-    "dnsmasq.conf": "/etc/dnsmasq.conf",
-    "nftables.conf": "/etc/nftables.conf",
-    "interfaces": "/etc/network/interfaces",
-    "wan-failover.sh": "/usr/local/bin/wan-failover.sh",
-}
-
-EXECUTABLE = {"wan-failover.sh"}
+# Quais arquivos existem, para onde vao e com que template: pergunte ao
+# registro de servicos. Este modulo so sabe traduzir modelo em texto.
 
 
 # ---------------------------------------------------------------------------
@@ -143,16 +137,10 @@ def render_all(cfg: Config) -> dict[str, str]:
         "IPv4Mode": IPv4Mode,
     }
 
-    out = {name: env.get_template(f"{name}.j2").render(**ctx) for name in TARGETS}
-
-    # Um arquivo de peer por WAN PPPoE.
-    peer_tpl = env.get_template("ppp-peer.j2")
-    for wan in cfg.wans:
-        if wan.pppoe:
-            out[f"ppp-peers-{wan.pppoe.peer}"] = peer_tpl.render(iface=wan, ppp=wan.pppoe)
-            TARGETS.setdefault(
-                f"ppp-peers-{wan.pppoe.peer}", f"/etc/ppp/peers/{wan.pppoe.peer}"
-            )
+    out = {}
+    for name in services.targets(cfg):
+        template = env.get_template(services.template_for(name, cfg))
+        out[name] = template.render(**ctx, **services.context_for(name, cfg))
     return out
 
 

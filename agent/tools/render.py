@@ -17,7 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from fwadmin.render import TARGETS, load, render_all  # noqa: E402
+from fwadmin import services  # noqa: E402
+from fwadmin.render import load, render_all  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -60,6 +61,7 @@ def compare(name: str, generated: str, live_path: Path) -> tuple[int, list[str]]
 def main() -> int:
     cfg = load(ROOT / "config" / "config.yaml")
     files = render_all(cfg)
+    targets = services.targets(cfg)
 
     out_dir = ROOT / "build"
     out_dir.mkdir(exist_ok=True)
@@ -71,7 +73,7 @@ def main() -> int:
 
     print(f"{len(files)} arquivos renderizados em build/")
     for name in sorted(files):
-        print(f"  {name:22s} -> {TARGETS[name]}")
+        print(f"  {name:22s} -> {targets[name]}")
 
     if "--diff" not in sys.argv:
         return 0

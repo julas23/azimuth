@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.environ.get("FWADMIN_CODE", "/opt/fwadmin"))
 
-from fwadmin import paths  # noqa: E402
+from fwadmin import paths, services  # noqa: E402
 from fwadmin.apply import (  # noqa: E402
     ApplyError,
     Plan,
@@ -35,10 +35,9 @@ from fwadmin.apply import (  # noqa: E402
     disarm_watchdog,
     install,
     restore,
-    rollback_reloads,
     run,
 )
-from fwadmin.render import TARGETS, dump, load  # noqa: E402
+from fwadmin.render import dump, load  # noqa: E402
 
 BOLD, RED, GREEN, YELLOW, DIM, OFF = (
     ("\033[1m", "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m")
@@ -82,7 +81,7 @@ def show_plan(plan: Plan) -> None:
 
     say(f"{BOLD}arquivos que mudam ({len(plan.changed)}){OFF}")
     for name in plan.changed:
-        say(f"  {name:22s} {DIM}->{OFF} {TARGETS[name]}")
+        say(f"  {name:22s} {DIM}->{OFF} {plan.targets[name]}")
 
     say()
     say(f"{BOLD}validacao de sintaxe{OFF}")
@@ -99,6 +98,24 @@ def show_plan(plan: Plan) -> None:
         for action in plan.reloads:
             flag = f" {YELLOW}(derruba trafego){OFF}" if action.disruptive else ""
             say(f"  {action.label}{flag}")
+
+
+def show_provas(provas: list) -> None:
+    """Mostra a prova de funcao de cada servico mexido."""
+    if not provas:
+        return
+    say()
+    say(f"{BOLD}prova de funcao{OFF}")
+    for prova in provas:
+        if prova.ok:
+            mark = f"{GREEN}OK{OFF}"
+        elif prova.conclusive:
+            mark = f"{RED}FALHOU{OFF}"
+        else:
+            mark = f"{YELLOW}?{OFF}"
+        say(f"  [{mark}] {prova.service}: {prova.expected}")
+        if prova.observed:
+            say(f"       {DIM}{prova.observed}{OFF}")
 
 
 # ---------------------------------------------------------------------------
@@ -154,9 +171,11 @@ def cmd_apply(args: argparse.Namespace) -> int:
         backup.mkdir(parents=True, exist_ok=True)
         shutil.copy2(paths.CONFIG, backup / "config.yaml")
 
-    installed = install(paths.STAGING, backup, plan.changed)
+    installed = install(
+        paths.STAGING, backup, plan.changed, plan.targets, plan.executable
+    )
     for name in installed:
-        say(f"  instalado {TARGETS[name]}")
+        say(f"  instalado {plan.targets[name]}")
 
     paths.CONFIG.parent.mkdir(parents=True, exist_ok=True)
     paths.CONFIG.write_text(
@@ -176,6 +195,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
             for line in result.output.splitlines()[:5]:
                 say(f"       {RED}{line}{OFF}")
 
+    # O estado e' gravado ANTES da prova: se a prova reprovar, o rollback
+    # precisa do mapa do backup, e quem tem o mapa e' o state.
     timeout = proposed.system.confirm_timeout
     state = State(
         backup=str(backup),
@@ -186,6 +207,24 @@ def cmd_apply(args: argparse.Namespace) -> int:
         note=args.note or read_note(),
     )
     state.save()
+
+    # ---- prova de funcao -------------------------------------------------
+    # Codigo de retorno de recarga nao e' evidencia: em 2026-08-21 o 'pon'
+    # devolveu zero com a WAN caida. Aqui se pergunta ao sistema vivo, e
+    # reprovacao reverte na hora — esperar os 90s do watchdog so faria
+    # sentido se ninguem soubesse que quebrou.
+    provas = services.provas(proposed, current, plan.changed)
+    show_provas(provas)
+
+    reprovadas = [p for p in provas if p.fatal]
+    if reprovadas:
+        motivo = "prova de funcao: " + "; ".join(
+            f"{p.service} ({p.observed})" for p in reprovadas
+        )
+        say()
+        say(f"{RED}{BOLD}a prova de funcao reprovou.{OFF} Revertendo sem esperar o watchdog.")
+        revert(state, motivo, auto=True)
+        return 1
 
     if args.no_watchdog:
         say(f"\n{YELLOW}watchdog desarmado por --no-watchdog{OFF}")
@@ -217,18 +256,17 @@ def cmd_confirm(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_rollback(args: argparse.Namespace) -> int:
-    require_root()
-    state = State.load()
-    if state is None:
-        say("nada para reverter")
-        return 0
+def revert(state: State, reason: str, auto: bool = False) -> int:
+    """Desfaz o ultimo apply. Caminho unico do rollback.
 
+    Usado pelo comando manual, pelo watchdog e pela prova de funcao que
+    falhou — os tres precisam do mesmo caminho, senao a rede de seguranca
+    tem versoes diferentes conforme quem puxa a corda.
+    """
     backup = Path(state.backup)
     if not (backup / "MANIFEST.json").exists():
         return fail(f"backup {backup} incompleto — reverta a mao")
 
-    reason = "watchdog (apply nao confirmado)" if args.auto else "pedido manual"
     say(f"{YELLOW}revertendo{OFF} — {reason}")
 
     restored = restore(backup)
@@ -248,7 +286,7 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         say(f"  {YELLOW}config restaurada nao valida ({exc}){OFF} — recarga parcial")
         previous = None
 
-    for action in rollback_reloads(state.files, previous):
+    for action in services.rollback_reloads(previous, state.files):
         result = run(*action.argv, timeout=120)
         mark = f"{GREEN}OK{OFF}" if result.ok else f"{RED}FALHOU{OFF}"
         say(f"  [{mark}] {action.label}")
@@ -256,10 +294,20 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     disarm_watchdog()
     State.clear()
 
-    if args.auto:
-        run("logger", "-t", "fwadmin", "apply revertido pelo watchdog: nao foi confirmado")
+    if auto:
+        run("logger", "-t", "fwadmin", f"apply revertido: {reason}")
     say(f"{GREEN}rollback concluido{OFF}")
     return 0
+
+
+def cmd_rollback(args: argparse.Namespace) -> int:
+    require_root()
+    state = State.load()
+    if state is None:
+        say("nada para reverter")
+        return 0
+    reason = "watchdog (apply nao confirmado)" if args.auto else "pedido manual"
+    return revert(state, reason, auto=args.auto)
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -290,10 +338,10 @@ def cmd_diff(args: argparse.Namespace) -> int:
     import difflib
 
     for name in plan.changed:
-        target = paths.sys_path(TARGETS[name])
+        target = paths.sys_path(plan.targets[name])
         old = target.read_text().splitlines() if target.exists() else []
         new = plan.rendered[name].splitlines()
-        say(f"{BOLD}--- {TARGETS[name]}{OFF}")
+        say(f"{BOLD}--- {plan.targets[name]}{OFF}")
         for line in difflib.unified_diff(old, new, lineterm="", n=2):
             color = GREEN if line.startswith("+") else RED if line.startswith("-") else DIM
             say(f"{color}{line}{OFF}")

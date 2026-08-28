@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import socket
+import struct
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -312,6 +314,41 @@ def dns_lookup(name: str) -> Probe:
     argv = ["dig", "+short", "+time=2", "@127.0.0.1", name]
     output = _run(*argv, timeout=15)
     return Probe(bool(output.strip()), output or "sem resposta do resolvedor local", " ".join(argv))
+
+
+def dns_answers(name: str, server: str = "127.0.0.1", timeout: float = 2.0) -> bool:
+    """Pergunta um registro A direto ao resolvedor e diz se ele respondeu.
+
+    Consulta crua de proposito: 'dig' vem do dnsutils, que nem toda instalacao
+    tem, e uma prova de funcao que depende de pacote opcional vira prova
+    inconclusiva justamente na caixa mais magra. Sao trinta linhas de UDP
+    contra uma dependencia a mais na ISO.
+    """
+    if not _valid_target(name):
+        return False
+    query = struct.pack(">HHHHHH", 0x4157, 0x0100, 1, 0, 0, 0)
+    for label in name.rstrip(".").split("."):
+        encoded = label.encode("idna" if not label.isascii() else "ascii")
+        if not 0 < len(encoded) < 64:
+            return False
+        query += bytes([len(encoded)]) + encoded
+    query += b"\x00" + struct.pack(">HH", 1, 1)  # QTYPE=A, QCLASS=IN
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        sock.sendto(query, (server, 53))
+        data, _ = sock.recvfrom(1232)
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+    if len(data) < 12 or data[:2] != query[:2]:
+        return False
+    rcode = data[3] & 0x0F
+    answers = struct.unpack(">H", data[6:8])[0]
+    return rcode == 0 and answers > 0
 
 
 def journal(unit: str = "", lines: int = 100) -> str:

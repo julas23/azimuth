@@ -1,0 +1,133 @@
+"""Os peers de PPPoE: um arquivo em /etc/ppp/peers por WAN discada."""
+
+from __future__ import annotations
+
+from fwadmin import status
+from fwadmin.models import Config
+from fwadmin.services.base import Prova, Reload, ServiceModule, until
+
+PREFIX = "ppp-peers-"
+
+
+def targets(cfg: Config) -> dict[str, str]:
+    return {
+        f"{PREFIX}{w.pppoe.peer}": f"/etc/ppp/peers/{w.pppoe.peer}"
+        for w in cfg.wans
+        if w.pppoe
+    }
+
+
+def _peers(files: list[str]) -> list[str]:
+    return [n.removeprefix(PREFIX) for n in files if n.startswith(PREFIX)]
+
+
+def _interface(cfg: Config | None, peer: str):
+    if cfg is None:
+        return None
+    for iface in cfg.interfaces:
+        if iface.pppoe is not None and iface.pppoe.peer == peer:
+            return iface
+    return None
+
+
+def _restart(peer: str, device: str | None) -> Reload:
+    """Derruba e resobe um peer.
+
+    A espera pela interface de baixo cobre o caminho do rollback, onde as
+    interfaces sao mesmo derrubadas e resubidas antes do PPPoE: o rp-pppoe
+    recusa o nome com 'unrecognized option <dev>' se ela nao estiver up na
+    hora do parse.
+
+    A confirmacao de que o ppp0 subiu NAO esta mais aqui — virou a prova de
+    funcao deste modulo. O motivo e' o incidente de 2026-08-21: 'pon' devolve
+    zero porque quem morre e' o pppd que ele lanca, entao a recarga reportava
+    sucesso com a WAN caida. Como prova, a mesma verificacao passa a disparar
+    rollback em vez de virar uma linha de FALHOU que ninguem le.
+    """
+    steps = [f"poff {peer} || true"]
+    if device:
+        steps.append(
+            f"for i in $(seq 1 20); do "
+            f"ip link show {device} 2>/dev/null | grep -q LOWER_UP && break; sleep 1; done"
+        )
+    steps.append(f"pon {peer}")
+    return Reload(f"PPPoE {peer}", ["sh", "-c", "; ".join(steps)], disruptive=True)
+
+
+def context(cfg: Config, name: str) -> dict:
+    """Cada peer renderiza com a propria interface — um arquivo por WAN discada."""
+    iface = _interface(cfg, name.removeprefix(PREFIX))
+    return {"iface": iface, "ppp": iface.pppoe if iface else None}
+
+
+def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Reload]:
+    out = []
+    for peer in _peers(changed):
+        iface = _interface(cfg, peer)
+        out.append(_restart(peer, iface.device if iface else None))
+    return out
+
+
+def rollback(cfg: Config | None, files: list[str]) -> list[Reload]:
+    out = []
+    for peer in _peers(files):
+        iface = _interface(cfg, peer)
+        out.append(_restart(peer, iface.device if iface else None))
+    return out
+
+
+def probe(cfg: Config, previous: Config | None, changed: list[str]) -> Prova | None:
+    """O link discado subiu e tem endereco.
+
+    Esta e' a prova que faltou em 2026-08-21: o 'pon' devolveu zero, o apply
+    reportou sucesso e a WAN primaria estava caida. So o failover, um minuto
+    depois, denunciou.
+    """
+    peers = _peers(changed)
+    if not peers:
+        return None
+
+    alvos = {}
+    for peer in peers:
+        iface = _interface(cfg, peer)
+        if iface is not None:
+            alvos[peer] = iface.ppp_device
+    if not alvos:
+        return None
+
+    esperado = "endereco no link discado: " + ", ".join(
+        f"{p} ({d})" for p, d in alvos.items()
+    )
+
+    def olhar() -> Prova:
+        vivos = status.links()
+        if not vivos:
+            return Prova.inconclusiva(
+                "pppoe", esperado, "nao consegui ler o estado das interfaces"
+            )
+        quebrados = []
+        vistos = []
+        for peer, device in alvos.items():
+            estado = vivos.get(device)
+            if estado is None or not estado.address:
+                quebrados.append(f"{peer}: {device} sem endereco")
+            else:
+                vistos.append(f"{peer}: {device} {estado.address}")
+        if quebrados:
+            return Prova.falhou("pppoe", esperado, "; ".join(quebrados))
+        return Prova.passou("pppoe", esperado, "; ".join(vistos))
+
+    return until(30, olhar)
+
+
+SERVICE = ServiceModule(
+    name="pppoe",
+    order=40,
+    section="interfaces[].pppoe",
+    targets=targets,
+    reloads=reloads,
+    rollback=rollback,
+    probe=probe,
+    template_for=lambda name: "ppp-peer.j2",
+    context_for=context,
+)

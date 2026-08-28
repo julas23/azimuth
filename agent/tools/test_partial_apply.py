@@ -22,7 +22,15 @@ os.environ["FWADMIN_SYSROOT"] = SANDBOX
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fwadmin import apply as apply_mod  # noqa: E402
-from fwadmin.render import TARGETS  # noqa: E402
+TARGETS = {
+    "dnsmasq.conf": "/etc/dnsmasq.conf",
+    "nftables.conf": "/etc/nftables.conf",
+    "interfaces": "/etc/network/interfaces",
+    "wan-failover.sh": "/usr/local/bin/wan-failover.sh",
+}
+"""Alvos fixos, escritos aqui de proposito: este teste exercita o install e o
+restore crus, sem config e sem registro de servicos — que e' exatamente a
+situacao do rollback quando tudo o mais falhou."""
 
 pass_n = fail_n = 0
 
@@ -71,7 +79,7 @@ print(f"sandbox: {SANDBOX}\n")
 print("== apply morre no meio ==")
 raised = None
 try:
-    apply_mod.install(staging, backup, names)
+    apply_mod.install(staging, backup, names, TARGETS)
 except OSError as exc:
     raised = exc
 apply_mod.os.replace = real_replace
