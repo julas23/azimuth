@@ -24,7 +24,11 @@ Todos os painéis desse mercado escrevem o arquivo, recarregam o serviço e torc
 
 **A nuvem não tem autoridade.** O servidor do usuário é a fonte da verdade. Na instalação local não há nuvem nenhuma. Quando existe control plane, ele guarda o estado desejado e mostra o estado real — mas quem decide e escreve é sempre o agente, na casa da pessoa.
 
-**Só sai, nunca entra.** O agente pergunta ao ACP se há instrução para ele. A plataforma nunca alcança a casa do usuário — sem porta aberta, sem encaminhamento, sem IP fixo. Funciona atrás de CGNAT.
+**Só sai, nunca entra.** O agente pergunta ao ACP se há instrução para ele. A plataforma nunca alcança a casa do usuário — sem porta aberta, sem encaminhamento, sem IP fixo. Esse canal funciona até atrás de CGNAT; o que o CGNAT impede é a VPN, e por isso ela é verificada antes de ser prometida.
+
+**Fechado por padrão, e a VPN é a porta.** Na internet, a caixa não responde a nada além do WireGuard — que, por sua vez, ignora em silêncio quem não tem chave. Não há redirecionamento de porta, e nenhuma aplicação é publicada: quem precisa alcançar a casa de fora entra pelo túnel. Encaminhar porta é publicar um serviço doméstico na internet, e é assim que a maioria das casas é invadida.
+
+**Lista de bloqueio é dado assinado, não autoridade.** As listas descem verificadas e valem para nomes e endereços — mas exceção do dono vence lista sempre, e nenhuma lista alcança a LAN, o túnel ou a porta da VPN. Uma lista que pudesse trancar você do lado de fora da própria casa seria pior que o problema que resolve.
 
 **Nada muda sem ser reversível.** Toda alteração passa por validação de sintaxe, aplicação atômica com manifesto, verificação de função e janela de rollback. Operações irreversíveis saem desse fluxo e exigem confirmação explícita.
 
@@ -43,19 +47,20 @@ Todos os painéis desse mercado escrevem o arquivo, recarregam o serviço e torc
 | **dnsmasq** | DNS local, DHCP, reservas por MAC, bloqueio por lista |
 | **WireGuard** | Acesso remoto; a única porta exposta à internet |
 | **fail2ban** | Bloqueio ativo contra força bruta |
+| **NFS** e **Samba** | Compartilhamento de arquivos na LAN, sob a mesma política de rede |
 
 ### 2 — Orquestração
 | Componente | Onde roda | Papel |
 |---|---|---|
 | **ACP** — Azimuth Control Plane | VPS | Guarda perfis e templates. Não decide, não aplica |
 | **ARA** — Azimuth Remote Agent | Appliance | Converge o estado real no desejado. É quem escreve |
-| **ADO** — Azimuth Data Orchestrator | Nó de storage | Volumes, snapshots, compartilhamentos |
+| **ADO** — Azimuth Data Orchestrator | Nó de storage | Volumes, snapshots e integridade dos dados |
 
 ### 3 — IA (chaves do usuário, sempre)
 BYOK para provedores externos, BYOA para agentes autônomos em modo leitura e proposta, motor local via Ollama ou vLLM, e OpenWebUI com Whisper (voz para texto) e Piper (texto para voz) — tudo na LAN, sem dado saindo de casa.
 
 ### 4 — Storage e mídia
-Nextcloud, Immich, Jellyfin e Navidrome sobre volumes gerenciados, com NFS e Samba integrados à mesma política de rede.
+Nextcloud, Immich, Jellyfin e Navidrome sobre volumes gerenciados. **Nada disso é publicado na internet:** respondem na LAN e pela VPN.
 
 ---
 
