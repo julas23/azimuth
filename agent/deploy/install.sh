@@ -128,4 +128,12 @@ echo
 echo "pronto. abra https://fw.home.lan e crie o usuario administrador."
 echo "o /etc do firewall NAO foi alterado: nenhuma config foi aplicada ainda."
 echo
+echo "adocao de uma caixa que ja estava rodando, na ordem:"
+echo "   fwctl inventory   o que o motor possui, e o que roda aqui sem dono"
+echo "   fwctl seal        carimba como referencia o que ja bate com o modelo"
+echo
+echo "O 'seal' recusa todo arquivo que difere do que o motor escreveria, e diz"
+echo "qual. Cada recusa e' uma diferenca real entre o /etc desta maquina e o"
+echo "config.yaml — resolva-as antes de aplicar qualquer coisa, com 'fwctl diff'."
+echo
 systemctl --no-pager --lines=0 status fwadmin.service || true

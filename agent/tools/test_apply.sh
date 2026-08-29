@@ -158,5 +158,62 @@ check "notebook entrou"               "$(grep -c 'notebook' "$WGCONF")" "1"
 check "so o wg0.conf mudou"           "$(grep -c 'arquivos que mudam (1)' "$SANDBOX/out")" "1"
 echo
 
+echo "== 8. posse: selo, divergencia e o portao do apply =="
+"$FWCTL" confirm > /dev/null 2>&1 || true
+
+# O selo do confirm ja deve ter carimbado tudo que o motor escreveria.
+"$FWCTL" inventory > "$SANDBOX/out" 2>&1 || true
+sed 's/^/     /' "$SANDBOX/out"
+check "nada divergente logo apos o confirm" \
+      "$(grep -c 'editado a mao' "$SANDBOX/out" || true)" "0"
+check "selo cobre os arquivos do motor" \
+      "$(grep -c 'sem selo' "$SANDBOX/out" || true)" "0"
+
+# Alguem edita /etc a mao — o caso que o selo existe para pegar.
+echo "# editado a mao as 23h" >> "$SANDBOX/etc/dnsmasq.conf"
+"$FWCTL" inventory > "$SANDBOX/out" 2>&1 || true
+check "a edicao a mao e' detectada" \
+      "$(grep -c 'editado a mao' "$SANDBOX/out")" "1"
+
+# E um apply que passaria por cima dela e' barrado antes de tocar em /etc.
+python3 - "$SANDBOX" <<'DRIFT'
+import sys, os
+sandbox = sys.argv[1]
+os.environ["FWADMIN_SYSROOT"] = sandbox
+sys.path.insert(0, os.environ["FWADMIN_CODE"])
+from pathlib import Path
+from fwadmin.render import load, dump
+cfg = load(Path(sandbox) / "etc/fwadmin/config.yaml")
+cfg.hosts.append(cfg.hosts[0].model_copy(update={"name": "outrohost", "ip": "10.0.0.78", "services": []}))
+Path(sandbox, "etc/fwadmin/config.pending.yaml").write_text(dump(cfg))
+print("     config.pending.yaml com host 'outrohost'")
+DRIFT
+
+sum_before="$(md5sum < "$SANDBOX/etc/dnsmasq.conf")"
+"$FWCTL" apply --yes > "$SANDBOX/out" 2>&1 && rc=0 || rc=$?
+sed 's/^/     /' "$SANDBOX/out"
+check "apply barrado pela divergencia" "$rc" "1"
+check "/etc segue intacto"             "$(md5sum < "$SANDBOX/etc/dnsmasq.conf")" "$sum_before"
+check "a edicao a mao continua la"     "$(grep -c 'editado a mao as 23h' "$SANDBOX/etc/dnsmasq.conf")" "1"
+
+# Com o descarte explicito ele passa — e guarda copia do que apagou.
+"$FWCTL" apply --yes --discard-drift > "$SANDBOX/out" 2>&1 || true
+sed 's/^/     /' "$SANDBOX/out"
+check "apply passa com --discard-drift" "$(grep -c 'copia guardada em' "$SANDBOX/out")" "1"
+check "a edicao a mao foi sobrescrita"  "$(grep -c 'editado a mao as 23h' "$SANDBOX/etc/dnsmasq.conf" || true)" "0"
+check "a mudanca do modelo entrou"      "$(grep -c 'outrohost' "$SANDBOX/etc/dnsmasq.conf")" "1"
+check "copia do descartado existe"      "$(cat "$SANDBOX"/var/lib/fwadmin/drift/*/dnsmasq.conf 2>/dev/null | grep -c 'editado a mao as 23h')" "1"
+echo
+
+echo "== 9. o selo nunca afirma o que nao viu =="
+"$FWCTL" confirm > /dev/null 2>&1 || true
+echo "# outra edicao a mao" >> "$SANDBOX/etc/nftables.conf"
+"$FWCTL" seal > "$SANDBOX/out" 2>&1 && rc=0 || rc=$?
+sed 's/^/     /' "$SANDBOX/out"
+check "seal recusa o arquivo divergente" "$rc" "1"
+check "e diz qual foi"                   "$(grep -c 'nao selado nftables.conf' "$SANDBOX/out")" "1"
+check "os outros seguem selados"         "$(grep -c 'selado dnsmasq.conf' "$SANDBOX/out")" "1"
+echo
+
 printf '\033[1m%d passaram, %d falharam\033[0m\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -20,6 +20,11 @@ def targets(cfg: Config) -> dict[str, str]:
     return {f"{wg.device}.conf": f"/etc/wireguard/{wg.device}.conf"}
 
 
+def units(cfg: Config) -> frozenset[str]:
+    wg = _wg(cfg)
+    return frozenset() if wg is None else frozenset({f"wg-quick@{wg.device}.service"})
+
+
 def context(cfg: Config, name: str) -> dict:
     return {"wg": cfg.wireguard}
 
@@ -138,6 +143,7 @@ SERVICE = ServiceModule(
     order=45,  # depois do nftables (porta liberada) e da WAN (endpoint alcancavel)
     section="wireguard",
     targets=targets,
+    units=units,
     reloads=reloads,
     rollback=rollback,
     probe=probe,

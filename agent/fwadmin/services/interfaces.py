@@ -14,6 +14,10 @@ def targets(cfg: Config) -> dict[str, str]:
     return {FILE: PATH}
 
 
+def units(cfg: Config) -> frozenset[str]:
+    return frozenset({"networking.service"})
+
+
 def _bounce(device: str) -> Reload:
     return Reload(
         f"interface {device}",
@@ -93,6 +97,7 @@ SERVICE = ServiceModule(
     order=30,
     section="interfaces",
     targets=targets,
+    units=units,
     reloads=reloads,
     rollback=rollback,
     probe=probe,

@@ -13,6 +13,12 @@ def targets(cfg: Config) -> dict[str, str]:
     return {FILE: PATH}
 
 
+def units(cfg: Config) -> frozenset[str]:
+    # A unidade e' do proprio appliance, e nao um daemon de terceiro: quem
+    # roda o script e' o timer que o instalador criou.
+    return frozenset({"fwadmin-failover.timer"})
+
+
 def _rearm() -> Reload:
     # o script e' lido a cada disparo do timer; nada a recarregar de fato
     return Reload("failover (rearmar timer)", ["systemctl", "restart", "fwadmin-failover.timer"])
@@ -31,6 +37,7 @@ SERVICE = ServiceModule(
     order=50,
     section="routing.failover",
     targets=targets,
+    units=units,
     reloads=reloads,
     rollback=rollback,
     probe=None,  # o proprio timer prova a cada disparo; nada a verificar no apply

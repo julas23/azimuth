@@ -75,6 +75,7 @@ def until(seconds: int, check: Callable[[], Prova], interval: float = 1.0) -> Pr
 
 
 Targets = Callable[[Config], dict[str, str]]
+Units = Callable[[Config], frozenset[str]]
 Reloads = Callable[[Config, "Config | None", list[str]], list[Reload]]
 Rollback = Callable[["Config | None", list[str]], list[Reload]]
 Probe = Callable[[Config, "Config | None", list[str]], "Prova | None"]
@@ -108,6 +109,19 @@ class ServiceModule:
 
     rollback: Rollback
     """Recargas do caminho de volta: nao ha diff, reaplica o que foi tocado."""
+
+    units: Units = lambda cfg: frozenset()  # noqa: E731
+    """Config -> unidades do systemd que este servico reivindica.
+
+    Existe para o inventario poder responder "o que roda nesta caixa e nao tem
+    dono". Antes disso a resposta era uma tupla WATCHED escrita a mao no
+    status.py — exatamente o tipo de lista paralela que o registro de servicos
+    foi criado para matar, e que envelhece calada.
+
+    E' funcao do config, e nao constante, porque o nome da unidade as vezes
+    depende do modelo: o WireGuard reivindica wg-quick@<device>, e o device e'
+    escolhido pelo usuario.
+    """
 
     probe: Probe | None = None
     """A prova de funcao.

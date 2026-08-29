@@ -27,6 +27,26 @@
   </div>
 </div>
 
+{% set fora = posses | selectattr('divergiu') | list %}
+{% if fora %}
+<div class="note bad">
+  <b>Arquivos editados fora do motor</b>
+  <div class="sub">
+    Alguém alterou estes arquivos direto no disco depois da última aplicação. O motor
+    não vai sobrescrevê-los sem você decidir o que fazer.
+  </div>
+  <ul>
+    {% for p in fora %}
+      <li><code>{{ p.target }}</code> — {{ p.state }} <span class="sub">({{ p.service }})</span></li>
+    {% endfor %}
+  </ul>
+  <div class="sub">
+    Para manter a alteração, traga-a para a configuração e aplique. Para descartá-la,
+    aplique com descarte — uma cópia é guardada antes.
+  </div>
+</div>
+{% endif %}
+
 <h2>Rede local</h2>
 <div class="grid">
   <div class="card stat">

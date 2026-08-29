@@ -49,6 +49,17 @@ STAGING = VAR / "staging"
 STATE = VAR / "state.json"
 DB = VAR / "fwadmin.db"
 
+OWNED = VAR / "owned.json"
+"""Selo de posse: o sha256 de cada arquivo no instante em que ele virou oficial.
+
+Mora em /var e nao em /etc de proposito. O selo e' observacao do motor sobre o
+sistema, nao configuracao: se ele fosse versionado junto da config, um `git
+checkout` no historico devolveria um selo que nunca correspondeu ao /etc vivo.
+"""
+
+DRIFT = VAR / "drift"
+"""Copias de arquivos editados a mao, guardadas antes de serem sobrescritos."""
+
 REVERT_UNIT = "fwadmin-revert"
 """Unidade transiente do systemd que desfaz um apply nao confirmado."""
 

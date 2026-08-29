@@ -25,7 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from fwadmin import db, paths, status
+from fwadmin import db, ownership, paths, status
 from fwadmin.models import (
     Config,
     Failover,
@@ -309,6 +309,7 @@ async def dashboard(request: Request, user: User) -> Response:
         wans=status.wans(cfg),
         system=status.system(),
         services=status.services(),
+        posses=ownership.survey(cfg),
         leases=status.leases(cfg),
         failover=status.failover_state(),
         route_dev=status.default_route()[0],

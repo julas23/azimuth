@@ -22,6 +22,10 @@ def targets(cfg: Config) -> dict[str, str]:
     return {FILE: PATH}
 
 
+def units(cfg: Config) -> frozenset[str]:
+    return frozenset({"nftables.service"})
+
+
 def _reload() -> Reload:
     return Reload("firewall (nft -f)", ["nft", "-f", str(paths.sys_path(PATH))])
 
@@ -71,6 +75,7 @@ SERVICE = ServiceModule(
     order=10,
     section="firewall",
     targets=targets,
+    units=units,
     reloads=reloads,
     rollback=rollback,
     probe=probe,

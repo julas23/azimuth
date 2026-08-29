@@ -8,13 +8,24 @@
 #
 # Tambem nao esta liberado o 'fwctl apply --no-watchdog': a interface web
 # nunca pode aplicar sem a rede de seguranca do rollback automatico.
+#
+# O '--discard-drift' esta liberado, e de proposito: descartar uma edicao feita
+# a mao e' decisao do dono da caixa, e o caminho para tomar essa decisao e' a
+# tela — nao o console. O comando guarda copia do arquivo antes de sobrescrever
+# e registra o descarte na mensagem do commit, entao ele e' reversivel. Repare
+# que cada combinacao de flags esta escrita por extenso: sem curinga, como no
+# resto do arquivo.
 
 Cmnd_Alias FWADMIN_RO = /usr/local/sbin/fwctl check, \
                         /usr/local/sbin/fwctl status, \
-                        /usr/local/sbin/fwctl diff
+                        /usr/local/sbin/fwctl diff, \
+                        /usr/local/sbin/fwctl inventory
 
 Cmnd_Alias FWADMIN_RW = /usr/local/sbin/fwctl apply, \
                         /usr/local/sbin/fwctl apply --yes, \
+                        /usr/local/sbin/fwctl apply --discard-drift, \
+                        /usr/local/sbin/fwctl apply --yes --discard-drift, \
+                        /usr/local/sbin/fwctl seal, \
                         /usr/local/sbin/fwctl confirm, \
                         /usr/local/sbin/fwctl rollback
 

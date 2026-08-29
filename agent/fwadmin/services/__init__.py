@@ -44,6 +44,7 @@ __all__ = [
     "reloads",
     "rollback_reloads",
     "targets",
+    "units",
     "template_for",
     "context_for",
     "validate_syntax",
@@ -61,6 +62,20 @@ def targets(cfg: Config) -> dict[str, str]:
     out: dict[str, str] = {}
     for service in REGISTRY:
         out.update(service.targets(cfg))
+    return out
+
+
+def units(cfg: Config) -> dict[str, str]:
+    """Unidades do systemd reivindicadas: {unidade: nome_do_servico}.
+
+    Duas unidades nunca sao do mesmo dono por acidente — se dois modulos
+    reivindicarem a mesma, o ultimo do REGISTRY ganha, e o inventario mostra
+    um dono so. E' aceitavel porque a ordem do REGISTRY e' declarada.
+    """
+    out: dict[str, str] = {}
+    for service in REGISTRY:
+        for unit in service.units(cfg):
+            out[unit] = service.name
     return out
 
 

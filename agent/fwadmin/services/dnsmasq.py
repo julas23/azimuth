@@ -14,6 +14,10 @@ def targets(cfg: Config) -> dict[str, str]:
     return {FILE: PATH}
 
 
+def units(cfg: Config) -> frozenset[str]:
+    return frozenset({"dnsmasq.service"})
+
+
 def _reload() -> Reload:
     # reload do dnsmasq so rele /etc/hosts e leases; mudanca de conf exige restart
     return Reload("dnsmasq", ["systemctl", "restart", "dnsmasq"])
@@ -70,6 +74,7 @@ SERVICE = ServiceModule(
     order=20,
     section="dns, dhcp, hosts",
     targets=targets,
+    units=units,
     reloads=reloads,
     rollback=rollback,
     probe=probe,

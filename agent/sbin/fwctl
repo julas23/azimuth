@@ -11,6 +11,8 @@ da UI vira caminho, argumento de shell ou nome de arquivo.
     fwctl confirm    confirma o apply e grava no git
     fwctl rollback   desfaz o ultimo apply
     fwctl status     mostra se ha apply aguardando confirmacao
+    fwctl inventory  o que o motor possui, e o que roda aqui sem dono
+    fwctl seal       sela o /etc atual como referencia de posse
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.environ.get("FWADMIN_CODE", "/opt/fwadmin"))
 
-from fwadmin import paths, services  # noqa: E402
+from fwadmin import ownership, paths, services  # noqa: E402
 from fwadmin.apply import (  # noqa: E402
     ApplyError,
     Plan,
@@ -58,6 +60,55 @@ def fail(msg: str) -> int:
 def require_root() -> None:
     if os.geteuid() != 0 and not paths.sandboxed():
         raise SystemExit("fwctl precisa rodar como root (use sudo)")
+
+
+# ---------------------------------------------------------------------------
+# posse
+# ---------------------------------------------------------------------------
+
+
+ROTULO = {
+    ownership.INTACTO: f"{GREEN}intacto{OFF}",
+    ownership.DIVERGENTE: f"{RED}editado a mao{OFF}",
+    ownership.AUSENTE: f"{RED}sumiu do sistema{OFF}",
+    ownership.ILEGIVEL: f"{YELLOW}nao consegui ler{OFF}",
+    ownership.SEM_SELO: f"{DIM}sem selo{OFF}",
+}
+
+
+def seal_now(motivo: str, verbose: bool = False) -> None:
+    """Sela o /etc atual, se ele for mesmo o que o motor escreveria.
+
+    Falha de selo nunca derruba quem chamou: o confirm ja aconteceu, o
+    rollback ja restaurou, e nao selar deixa o sistema num estado honesto —
+    'sem selo' — que a proxima rodada resolve. Perder o apply por causa do
+    carimbo seria trocar o problema por um pior.
+    """
+    try:
+        cfg = load(paths.CONFIG)
+    except Exception as exc:  # noqa: BLE001
+        say(f"{YELLOW}selo nao gravado ({motivo}): config nao carrega — {exc}{OFF}")
+        return
+
+    try:
+        selados, recusados = ownership.seal(cfg)
+    except Exception as exc:  # noqa: BLE001
+        say(f"{YELLOW}selo nao gravado ({motivo}): {exc}{OFF}")
+        return
+
+    if verbose or recusados:
+        say(f"{DIM}selo ({motivo}): {len(selados)} arquivos{OFF}")
+    for name, porque in recusados:
+        say(f"  {YELLOW}nao selado{OFF} {name}: {porque}")
+
+
+def show_drift(posses: list, bloqueiam: list) -> None:
+    """Diz quem mexeu em que, e o que isso impede."""
+    say()
+    say(f"{RED}{BOLD}arquivos editados fora do motor:{OFF}")
+    for p in posses:
+        marca = f"{RED}bloqueia{OFF}" if p in bloqueiam else f"{YELLOW}aviso{OFF}"
+        say(f"  [{marca}] {p.target}  {DIM}({p.service}, {p.state}){OFF}")
 
 
 # ---------------------------------------------------------------------------
@@ -129,6 +180,11 @@ def cmd_check(args: argparse.Namespace) -> int:
     say(f"{DIM}config: {source}{OFF}\n")
     plan = build_plan(proposed, current, paths.STAGING)
     show_plan(plan)
+
+    divergiram = ownership.divergentes(proposed)
+    if divergiram:
+        show_drift(divergiram, [p for p in divergiram if p.name in plan.changed])
+
     if not plan.valid:
         return fail("a config nao passou na validacao de sintaxe — apply bloqueado")
     return 0
@@ -154,6 +210,24 @@ def cmd_apply(args: argparse.Namespace) -> int:
     if not plan.valid:
         return fail("validacao de sintaxe falhou — nada foi tocado em /etc")
 
+    # ---- divergencia: alguem editou /etc a mao desde o ultimo apply? -----
+    # Bloqueia o que ela toca, e avisa sobre o resto. Barrar um apply de DNS
+    # por causa de uma edicao a mao no nftables castigaria a pessoa errada e,
+    # pior, deixaria o firewall impedido de mudar qualquer coisa justo na hora
+    # em que alguem mexeu nele as pressas.
+    divergiram = ownership.divergentes(proposed)
+    bloqueiam = [p for p in divergiram if p.name in plan.changed]
+    if divergiram:
+        show_drift(divergiram, bloqueiam)
+    if bloqueiam and not args.discard_drift:
+        say()
+        return fail(
+            "este apply sobrescreveria edicao feita fora do motor — nada foi tocado.\n"
+            "       'fwctl diff' mostra a edicao (sem config pendente, ela e' o diff inteiro).\n"
+            "       Para manter a edicao, traga-a para o config.yaml e aplique de novo.\n"
+            "       Para descartar, 'fwctl apply --discard-drift' — uma copia e' guardada antes."
+        )
+
     if plan.disruptive and not (args.yes or args.force):
         say()
         return fail(
@@ -162,6 +236,12 @@ def cmd_apply(args: argparse.Namespace) -> int:
         )
 
     # ---- a partir daqui /etc e' tocado -----------------------------------
+    if bloqueiam:
+        guardado = ownership.stash(bloqueiam)
+        if guardado is not None:
+            say()
+            say(f"{YELLOW}edicao a mao descartada{OFF} — copia guardada em {guardado}")
+
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup = paths.BACKUPS / stamp
     say()
@@ -198,13 +278,21 @@ def cmd_apply(args: argparse.Namespace) -> int:
     # O estado e' gravado ANTES da prova: se a prova reprovar, o rollback
     # precisa do mapa do backup, e quem tem o mapa e' o state.
     timeout = proposed.system.confirm_timeout
+    # Descartar edicao a mao entra no historico. O git de /etc/fwadmin e' o
+    # unico lugar onde daqui a seis meses alguem descobre por que o ajuste que
+    # ele fez numa madrugada nao esta mais la.
+    nota = args.note or read_note()
+    if bloqueiam:
+        alvos = ", ".join(p.target for p in bloqueiam)
+        nota = f"{nota} " if nota else ""
+        nota = f"{nota}[descartou edicao feita a mao em: {alvos}]"
     state = State(
         backup=str(backup),
         at=time.time(),
         timeout=timeout,
         files=installed,
         reloads=[a.label for a in plan.reloads],
-        note=args.note or read_note(),
+        note=nota,
     )
     state.save()
 
@@ -252,6 +340,11 @@ def cmd_confirm(args: argparse.Namespace) -> int:
     State.clear()
     say(f"{GREEN}confirmado{OFF} — {len(state.files)} arquivos mantidos")
 
+    # O selo so e' gravado aqui, e nao no apply: ate o confirm o estado ainda
+    # pode voltar sozinho, e um selo de estado que o watchdog desfez apontaria
+    # para um /etc que deixou de existir.
+    seal_now("confirm")
+
     git_commit(state.note or "apply via fwadmin")
     return 0
 
@@ -294,6 +387,11 @@ def revert(state: State, reason: str, auto: bool = False) -> int:
     disarm_watchdog()
     State.clear()
 
+    # Depois do rollback o /etc restaurado tambem e' estado oficial: sem
+    # reselar, o proximo apply acusaria de "editado a mao" um arquivo que quem
+    # escreveu foi o proprio rollback.
+    seal_now("rollback")
+
     if auto:
         run("logger", "-t", "fwadmin", f"apply revertido: {reason}")
     say(f"{GREEN}rollback concluido{OFF}")
@@ -325,6 +423,95 @@ def cmd_status(args: argparse.Namespace) -> int:
     say(f"config viva:   {paths.CONFIG}{'' if paths.CONFIG.exists() else '  (ausente)'}")
     if paths.PENDING.exists():
         say(f"{YELLOW}config pendente:{OFF} {paths.PENDING}  (nao aplicada)")
+
+    try:
+        posses = ownership.survey(load(paths.CONFIG)) if paths.CONFIG.exists() else []
+    except Exception:  # noqa: BLE001 — status nunca morre por causa da config
+        posses = []
+    if posses:
+        fora = [p for p in posses if p.divergiu]
+        sem = [p for p in posses if p.state == ownership.SEM_SELO]
+        if fora:
+            say(f"{RED}posse: {len(fora)} de {len(posses)} arquivos editados fora do motor{OFF}"
+                f"  {DIM}(fwctl inventory){OFF}")
+        elif sem:
+            say(f"{DIM}posse: {len(posses) - len(sem)} de {len(posses)} arquivos selados"
+                f"  (fwctl seal){OFF}")
+        else:
+            say(f"{GREEN}posse: os {len(posses)} arquivos do motor estao intactos{OFF}")
+    return 0
+
+
+def cmd_inventory(args: argparse.Namespace) -> int:
+    """O que o motor possui, e o que roda nesta caixa sem dono.
+
+    Leitura pura. A segunda metade e' o roteiro de adocao de uma caixa que
+    nao nasceu do instalador: cada unidade sem dono ali ou vira um modulo de
+    servico, ou vira uma decisao escrita de ficar de fora.
+    """
+    cfg = load(paths.PENDING if paths.PENDING.exists() and args.pending else paths.CONFIG)
+
+    posses = ownership.survey(cfg)
+    say(f"{BOLD}arquivos do motor{OFF} ({len(posses)})")
+    largura = max((len(p.target) for p in posses), default=0)
+    for p in posses:
+        say(f"  {p.target:<{largura}}  {ROTULO.get(p.state, p.state)}  {DIM}{p.service}{OFF}")
+
+    terr = ownership.territory(cfg)
+    if not terr:
+        say()
+        say(f"{DIM}inventario de unidades indisponivel (sandbox ou systemd ausente){OFF}")
+        return 0
+
+    donas = [u for u in terr if not u.orfa]
+    orfas = [u for u in terr if u.orfa]
+
+    say()
+    say(f"{BOLD}unidades com dono{OFF} ({len(donas)})")
+    for u in donas:
+        cor = GREEN if u.active == "active" else YELLOW
+        say(f"  {u.unit:<32} {cor}{u.active}{OFF} {DIM}{u.enabled} — {u.service}{OFF}")
+
+    say()
+    if not orfas:
+        say(f"{GREEN}nenhuma unidade habilitada fora do motor.{OFF}")
+        return 0
+
+    say(f"{YELLOW}{BOLD}unidades sem dono{OFF} ({len(orfas)}) {DIM}— o roteiro de adocao{OFF}")
+    for u in orfas:
+        cor = GREEN if u.active == "active" else DIM
+        say(f"  {u.unit:<32} {cor}{u.active}{OFF} {DIM}{u.enabled}{OFF}")
+    say()
+    say(f"{DIM}Cada linha acima ou vira um modulo em fwadmin/services/, ou uma decisao{OFF}")
+    say(f"{DIM}escrita de deixar de fora. Enquanto houver linhas, o config.yaml afirma{OFF}")
+    say(f"{DIM}ser fonte da verdade de um sistema onde parte do /etc e' escrita a mao.{OFF}")
+    return 0
+
+
+def cmd_seal(args: argparse.Namespace) -> int:
+    """Carimba o /etc atual como referencia de posse.
+
+    E' o gesto de adocao de uma caixa que ja estava rodando: nada e' escrito
+    em /etc, so se registra o que se viu. E o registro nunca mente — arquivo
+    que difere do que o motor escreveria nao e' selado, e o comando diz qual.
+    """
+    require_root()
+    cfg = load(paths.CONFIG)
+    selados, recusados = ownership.seal(cfg)
+
+    for name in selados:
+        say(f"  {GREEN}selado{OFF} {name}")
+    for name, porque in recusados:
+        say(f"  {YELLOW}nao selado{OFF} {name}: {porque}")
+
+    say()
+    if recusados:
+        say(f"{YELLOW}{len(selados)} selados, {len(recusados)} de fora.{OFF}")
+        say("Um arquivo so e' selado quando e' identico ao que o motor escreveria.")
+        say(f"Veja a diferenca com {BOLD}fwctl diff{OFF} e decida: trazer para o")
+        say("config.yaml, ou aplicar por cima.")
+        return 1
+    say(f"{GREEN}os {len(selados)} arquivos do motor estao selados.{OFF}")
     return 0
 
 
@@ -399,10 +586,21 @@ def main() -> int:
     sub.add_parser("status", help="mostra apply pendente").set_defaults(fn=cmd_status)
     sub.add_parser("diff", help="diff dos arquivos gerados").set_defaults(fn=cmd_diff)
 
+    p_inv = sub.add_parser("inventory", help="posse dos arquivos e unidades sem dono")
+    p_inv.add_argument("--pending", action="store_true", help="usa a config pendente")
+    p_inv.set_defaults(fn=cmd_inventory)
+
+    sub.add_parser("seal", help="sela o /etc atual como referencia").set_defaults(fn=cmd_seal)
+
     p_apply = sub.add_parser("apply", help="aplica a config pendente")
     p_apply.add_argument("--yes", action="store_true", help="aceita recargas que derrubam trafego")
     p_apply.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     p_apply.add_argument("--no-watchdog", action="store_true", help="nao arma o rollback automatico")
+    p_apply.add_argument(
+        "--discard-drift",
+        action="store_true",
+        help="sobrescreve arquivo editado a mao (guarda copia antes)",
+    )
     p_apply.add_argument("--note", default="", help="mensagem do commit")
     p_apply.set_defaults(fn=cmd_apply)
 

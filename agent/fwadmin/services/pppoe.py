@@ -17,6 +17,13 @@ def targets(cfg: Config) -> dict[str, str]:
     }
 
 
+def units(cfg: Config) -> frozenset[str]:
+    # PPPoE nao tem unidade propria: quem sobe o link e' o 'pon', chamado pelo
+    # ifup da interface fisica. Reivindicar uma unidade aqui seria reivindicar
+    # o que este modulo nao controla — a linha do inventario e' do interfaces.
+    return frozenset()
+
+
 def _peers(files: list[str]) -> list[str]:
     return [n.removeprefix(PREFIX) for n in files if n.startswith(PREFIX)]
 
@@ -125,6 +132,7 @@ SERVICE = ServiceModule(
     order=40,
     section="interfaces[].pppoe",
     targets=targets,
+    units=units,
     reloads=reloads,
     rollback=rollback,
     probe=probe,

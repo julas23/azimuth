@@ -1,4 +1,4 @@
-# Azimuth
+# AIONAS - All In One Network Attach Storage
 
 **Uma central doméstica que qualquer pessoa consegue instalar, e que se conserta sozinha quando dá errado.**
 
@@ -31,6 +31,8 @@ Todos os painéis desse mercado escrevem o arquivo, recarregam o serviço e torc
 **Lista de bloqueio é dado assinado, não autoridade.** As listas descem verificadas e valem para nomes e endereços — mas exceção do dono vence lista sempre, e nenhuma lista alcança a LAN, o túnel ou a porta da VPN. Uma lista que pudesse trancar você do lado de fora da própria casa seria pior que o problema que resolve.
 
 **Nada muda sem ser reversível.** Toda alteração passa por validação de sintaxe, aplicação atômica com manifesto, verificação de função e janela de rollback. Operações irreversíveis saem desse fluxo e exigem confirmação explícita.
+
+**O motor sabe o que é dele, e não apaga o que não é.** Cada arquivo gerenciado é selado quando vira estado oficial. Se alguém editou `/etc` à mão depois disso — o dono numa madrugada, ou um atendimento de suporte —, a mudança é detectada e o servidor se recusa a passar por cima dela sem uma decisão. Descartar é possível, guarda cópia antes e fica escrito no histórico. Um sistema declarativo que apaga ajustes em silêncio ensina a ninguém confiar nele.
 
 **Verificação prova função, não código de retorno.** Serviço recarregado precisa demonstrar que voltou. `systemctl` dizer "ok" não é evidência.
 
@@ -146,6 +148,7 @@ agent/                    ARA — roda no appliance do usuário
   fwadmin/models.py       schema Pydantic — fonte de verdade do configurável
   fwadmin/render.py       geração dos arquivos de /etc a partir do modelo
   fwadmin/apply.py        validação, aplicação atômica, manifesto, rollback
+  fwadmin/ownership.py    posse: o que é do motor, e quem editou /etc à mão
   fwadmin/etc_templates/  templates Jinja de cada arquivo gerado
   sbin/fwctl              executor privilegiado: check, diff, apply, rollback
   deploy/                 unit systemd, sudoers, nginx, instalador
