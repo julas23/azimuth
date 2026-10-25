@@ -219,6 +219,67 @@ def services(extra: tuple[str, ...] = ()) -> list[ServiceState]:
 
 
 @dataclass
+class UnitInfo:
+    """O que a tela de Servicos sabe de um servico da stack."""
+
+    unit: str
+    package: str
+    installed: bool = False
+    version: str = ""
+    active: str = "inactive"
+    """ActiveState do systemd: active, inactive, failed, activating,
+    deactivating, reloading."""
+
+    sub: str = ""
+    enabled: str = ""
+    since: float = 0.0
+    memory: int = 0
+    can_reload: bool = False
+
+    @property
+    def running(self) -> bool:
+        return self.active in ("active", "reloading")
+
+    @property
+    def busy(self) -> bool:
+        """No meio de uma transicao: nenhum botao vale ate ela terminar."""
+        return self.active in ("activating", "deactivating", "reloading")
+
+    @property
+    def stopped(self) -> bool:
+        return self.active in ("inactive", "failed")
+
+
+def unit_info(unit: str, package: str) -> UnitInfo:
+    """Estado da unidade pelo 'systemctl show' e do pacote pelo dpkg.
+
+    Os dois funcionam sem privilegio. Unidade que o systemd nao conhece e
+    pacote ausente contam como 'nao instalado' — e' o que habilita o botao
+    de instalar.
+    """
+    info = UnitInfo(unit=unit, package=package)
+    raw = _run(
+        "systemctl", "show", unit,
+        "-p", "LoadState,ActiveState,SubState,UnitFileState,ActiveEnterTimestamp,"
+        "CanReload,MemoryCurrent",
+        "--timestamp=unix",
+    )
+    props = dict(line.split("=", 1) for line in raw.splitlines() if "=" in line)
+    pkg = _run("dpkg-query", "-W", "-f=${db:Status-Status} ${Version}", package).split()
+    info.installed = bool(pkg) and pkg[0] == "installed" and props.get("LoadState") != "not-found"
+    info.version = pkg[1] if len(pkg) > 1 else ""
+    info.active = props.get("ActiveState", "inactive") or "inactive"
+    info.sub = props.get("SubState", "")
+    info.enabled = props.get("UnitFileState", "")
+    info.can_reload = props.get("CanReload") == "yes"
+    stamp = props.get("ActiveEnterTimestamp", "").lstrip("@")
+    info.since = float(stamp) if stamp.isdigit() else 0.0
+    memory = props.get("MemoryCurrent", "")
+    info.memory = int(memory) if memory.isdigit() else 0
+    return info
+
+
+@dataclass
 class SystemInfo:
     hostname: str = ""
     uptime: str = ""

@@ -761,8 +761,14 @@ def build_firewall(
             }
         )
 
+    # O modelo so aceita entrada fechada. Regra de bloqueio vira redundante;
+    # o que importa traduzir sao as excecoes.
     input_rules = []
     for line in filter_input["rules"]:
+        m = NFT_RULE.match(line)
+        if (m and m.group("action") in ("drop", "reject")) or re.search(r"\b(drop|reject)\b", line):
+            note(f"nftables/input: bloqueio redundante com a entrada fechada, sai: {line}")
+            continue
         rule = to_rule(line, "input")
         if rule is None:
             change(f"nftables/input: regra sem traducao sai: {line}")
@@ -799,16 +805,23 @@ def build_firewall(
         else:
             masquerade.append(wan_by_dev[m.group("dev")])
 
-    input_policy = filter_input.get("policy") or "accept"
-    if input_policy == "accept":
-        note(
-            "input_policy continua 'accept' para importar fielmente o estado atual. "
-            "Recomendo migrar para 'drop' com allows explicitos — mudanca separada"
-        )
+    for chain, body in (("input", filter_input), ("forward", filter_forward)):
+        if (body.get("policy") or "accept") != "drop":
+            change(
+                f"nftables/{chain}: a politica passa de '{body.get('policy') or 'accept'}' para "
+                "'drop' (lista negra vira lista branca). Hoje tudo o que nao tem regra passa; "
+                "com o modelo, so passa o que tiver excecao"
+                + (
+                    " — da WAN, so a porta do WireGuard. Servico exposto de proposito "
+                    "precisa de regra 'accept'; o resto que escuta em 0.0.0.0 fecha"
+                    if chain == "input"
+                    else ""
+                )
+            )
 
     return {
-        "input_policy": input_policy,
-        "forward_policy": filter_forward.get("policy") or "drop",
+        "input_policy": "drop",
+        "forward_policy": "drop",
         "input_rules": input_rules,
         "forward_rules": forward_rules,
         "port_forwards": port_forwards,
@@ -834,6 +847,11 @@ def build_wireguard(live: Path) -> dict[str, Any] | None:
             note(
                 f"tunel WireGuard '{dev}' fica fora do modelo (que tem um tunel so); o motor "
                 "nao e' dono do arquivo dele, entao ele continua como esta"
+            )
+            change(
+                f"nftables/input: com a entrada fechada, o que chega pelo tunel '{dev}' ao "
+                "proprio firewall passa a ser bloqueado (so os peers do tunel do modelo "
+                "entram); se algo dele usa o firewall, como DNS, precisa de excecao"
             )
     if server is None:
         return None

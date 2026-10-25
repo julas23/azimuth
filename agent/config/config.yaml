@@ -567,45 +567,12 @@ portal:
   - 'Proxmox, Webmin e o nginx do AI Lab usam certificados self-signed: o navegador vai pedir exceção
     na primeira visita.'
 firewall:
-  input_policy: accept
+  # Entrada fechada: o modelo so aceita 'drop'. Os bloqueios por porta que o HP
+  # tinha viraram redundantes; a base (LAN, VPN, established, ICMP) vem do
+  # render.base_input.
+  input_policy: drop
   forward_policy: drop
-  input_rules:
-  - enabled: true
-    action: drop
-    description: SSH so LAN
-    proto: tcp
-    source: wan
-    destination: this
-    dest_ports: '22'
-    log: false
-    counter: true
-  - enabled: true
-    action: drop
-    description: Cockpit/Webmin so LAN
-    proto: tcp
-    source: wan
-    destination: this
-    dest_ports: 9090,10000
-    log: false
-    counter: true
-  - enabled: true
-    action: drop
-    description: Webmin UDP so LAN
-    proto: udp
-    source: wan
-    destination: this
-    dest_ports: '10000'
-    log: false
-    counter: true
-  - enabled: true
-    action: drop
-    description: Portal nginx so LAN
-    proto: tcp
-    source: wan
-    destination: this
-    dest_ports: 80,443
-    log: false
-    counter: true
+  input_rules: []
   forward_rules:
   - enabled: true
     action: accept

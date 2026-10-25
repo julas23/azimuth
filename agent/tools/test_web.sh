@@ -59,7 +59,7 @@ check "agora o painel abre"     "$(code "http://127.0.0.1:$PORT/")" "200"
 echo
 
 echo "== telas =="
-TELAS="/ /network /firewall /fail2ban /dhcp /domain /dns /vpn /system"
+TELAS="/ /services /network /firewall /fail2ban /dhcp /domain /dns /vpn /system"
 for rota in $TELAS; do
     check "GET $rota" "$(code "http://127.0.0.1:$PORT$rota")" "200"
 done
@@ -155,6 +155,8 @@ code "http://127.0.0.1:$PORT/dhcp" >/dev/null
 check "DHCP lido do dnsmasq vivo" "$(grep -c '10.0.0.99' "$SANDBOX/body")" "1"
 code "http://127.0.0.1:$PORT/vpn" >/dev/null
 check "tunel fora do modelo aparece" "$(grep -qi 'wgsite' "$SANDBOX/body" && echo sim || echo nao)" "sim"
+code "http://127.0.0.1:$PORT/firewall" >/dev/null
+check "denuncia a lista negra viva" "$(grep -c 'trabalha com lista negra' "$SANDBOX/body")" "1"
 code "http://127.0.0.1:$PORT/system" >/dev/null
 check "lista o que o motor mudaria" "$(grep -qi 'O que o motor mudaria' "$SANDBOX/body" && echo sim || echo nao)" "sim"
 check "template baixa" "$(code "http://127.0.0.1:$PORT/system/config")" "200"

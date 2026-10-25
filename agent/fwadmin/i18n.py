@@ -26,6 +26,7 @@ LANGS = [
 TEXT: dict[str, dict[str, str]] = {
     'pt-BR': {
         'status': 'Status',
+        'services': 'Serviços',
         'network': 'Rede',
         'firewall': 'Firewall',
         'fail2ban': 'Fail2Ban',
@@ -52,6 +53,7 @@ TEXT: dict[str, dict[str, str]] = {
     },
     'pt-PT': {
         'status': 'Estado',
+        'services': 'Serviços',
         'network': 'Rede',
         'firewall': 'Firewall',
         'fail2ban': 'Fail2Ban',
@@ -78,6 +80,7 @@ TEXT: dict[str, dict[str, str]] = {
     },
     'en-US': {
         'status': 'Status',
+        'services': 'Services',
         'network': 'Network',
         'firewall': 'Firewall',
         'fail2ban': 'Fail2Ban',
@@ -104,6 +107,7 @@ TEXT: dict[str, dict[str, str]] = {
     },
     'en-GB': {
         'status': 'Status',
+        'services': 'Services',
         'network': 'Network',
         'firewall': 'Firewall',
         'fail2ban': 'Fail2Ban',
@@ -130,6 +134,7 @@ TEXT: dict[str, dict[str, str]] = {
     },
     'es': {
         'status': 'Estado',
+        'services': 'Servicios',
         'network': 'Red',
         'firewall': 'Firewall',
         'fail2ban': 'Fail2Ban',
@@ -156,6 +161,7 @@ TEXT: dict[str, dict[str, str]] = {
     },
     'fr': {
         'status': 'État',
+        'services': 'Services',
         'network': 'Réseau',
         'firewall': 'Pare-feu',
         'fail2ban': 'Fail2Ban',
@@ -182,6 +188,7 @@ TEXT: dict[str, dict[str, str]] = {
     },
     'de': {
         'status': 'Status',
+        'services': 'Dienste',
         'network': 'Netzwerk',
         'firewall': 'Firewall',
         'fail2ban': 'Fail2Ban',
@@ -208,6 +215,7 @@ TEXT: dict[str, dict[str, str]] = {
     },
     'it': {
         'status': 'Stato',
+        'services': 'Servizi',
         'network': 'Rete',
         'firewall': 'Firewall',
         'fail2ban': 'Fail2Ban',
@@ -234,6 +242,7 @@ TEXT: dict[str, dict[str, str]] = {
     },
     'ru': {
         'status': 'Статус',
+        'services': 'Службы',
         'network': 'Сеть',
         'firewall': 'Firewall',
         'fail2ban': 'Fail2Ban',
@@ -260,6 +269,7 @@ TEXT: dict[str, dict[str, str]] = {
     },
     'zh-CN': {
         'status': '状态',
+        'services': '服务',
         'network': '网络',
         'firewall': '防火墙',
         'fail2ban': 'Fail2Ban',
@@ -286,6 +296,7 @@ TEXT: dict[str, dict[str, str]] = {
     },
     'ja': {
         'status': 'ステータス',
+        'services': 'サービス',
         'network': 'ネットワーク',
         'firewall': 'ファイアウォール',
         'fail2ban': 'Fail2Ban',

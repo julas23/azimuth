@@ -5,12 +5,18 @@
 {% set fw = cfg.firewall %}
 
 <div class="page-h">
-  <div><h1>{{ t.firewall }}</h1><p class="lede">O que entra no próprio firewall, o que atravessa ele entre LAN e internet, e as portas abertas para dentro.</p></div>
+  <div><h1>{{ t.firewall }}</h1><p class="lede">Bloqueia tudo e abre só as exceções: o que entra no próprio firewall, o que atravessa entre LAN e internet, e as portas abertas para dentro.</p></div>
 </div>
 
+{% set open_now = live_policy.items()|selectattr(1, 'equalto', 'accept')|map(attribute=0)|list %}
+{% if open_now %}
+  <div class="note bad"><b>Hoje esta máquina trabalha com lista negra</b>
+  A política viva é <span class="mono">accept</span>: tudo o que escuta e não tem regra de bloqueio está aberto para a internet. O Azimuth só trabalha com lista branca, e o que está nesta página é como ficaria: bloqueia tudo e abre só as exceções.</div>
+{% endif %}
+
 <div class="grid tiles">
-  <div class="card tile"><div class="top"><span class="lbl">Entrada · padrão</span><span class="chip {{ 'ok' if fw.input_policy.value != 'accept' else 'warn' }}">{{ fw.input_policy.value }}</span></div><span class="big">{{ fw.input_rules|length }} regras</span><span class="muted">tráfego para o próprio firewall</span></div>
-  <div class="card tile"><div class="top"><span class="lbl">Encaminhamento · padrão</span><span class="chip {{ 'ok' if fw.forward_policy.value != 'accept' else 'warn' }}">{{ fw.forward_policy.value }}</span></div><span class="big">{{ fw.forward_rules|length }} regras</span><span class="muted">tráfego que atravessa</span></div>
+  <div class="card tile"><div class="top"><span class="lbl">Entrada</span><span class="chip ok">bloqueia tudo</span>{% if 'input' in open_now %}<span class="chip bad">hoje: aberta</span>{% endif %}</div><span class="big">{{ base|length + fw.input_rules|length }} exceções</span><span class="muted">tráfego para o próprio firewall</span></div>
+  <div class="card tile"><div class="top"><span class="lbl">Encaminhamento</span><span class="chip ok">bloqueia tudo</span>{% if 'forward' in open_now %}<span class="chip bad">hoje: aberto</span>{% endif %}</div><span class="big">{{ fw.forward_rules|length + fw.port_forwards|length }} exceções</span><span class="muted">tráfego que atravessa</span></div>
   <div class="card tile"><div class="top"><span class="lbl">Redirecionamentos</span></div><span class="big">{{ fw.port_forwards|length }}</span><span class="muted">portas abertas para a LAN</span></div>
   <a class="card tile" href="/fail2ban"><div class="top"><span class="lbl">Fail2Ban</span></div><span class="big">{{ t.fail2ban }} →</span><span class="muted">tabela {{ fw.preserve_tables|join(', ') or 'própria' }}</span></a>
 </div>
@@ -35,7 +41,7 @@
           <td><form method="post" action="/firewall/rule/{{ chain }}/{{ loop.index0 }}/delete">{{ action('Remover', readonly) }}</form></td>
         </tr>
       {% else %}
-        <tr><td colspan="9" class="muted">Nenhuma regra: vale só a política padrão.</td></tr>
+        <tr><td colspan="9" class="muted">Nenhuma: só passa o que as exceções de base deixam.</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -43,7 +49,19 @@
 </section>
 {% endmacro %}
 
-{{ rules('Entrada', 'in', fw.input_rules, 'input') }}
+<section class="card" aria-labelledby="h-base">
+  <div class="card-h"><h2 class="h2" id="h-base">Entrada · exceções de base</h2><span class="chip mute">{{ base|length }}</span><span class="muted">vêm em toda caixa; sem elas o firewall para ou tranca o dono do lado de fora</span></div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Regra</th><th>Por quê</th></tr></thead>
+      <tbody>
+      {% for line, why in base %}<tr><td class="mono">{{ line }}</td><td>{{ why }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{{ rules('Entrada · suas exceções', 'in', fw.input_rules, 'input') }}
 {{ rules('Encaminhamento', 'fwd', fw.forward_rules, 'forward') }}
 
 <section class="card" aria-labelledby="h-pf">

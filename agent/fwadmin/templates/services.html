@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}{{ t.services }}{% endblock %}
+{% block body %}
+{% set infos = cards|map(attribute='info')|list %}
+{% set running = infos|selectattr('running')|list|length %}
+{% set failed = infos|selectattr('active', 'equalto', 'failed')|list|length %}
+{% set missing = infos|rejectattr('installed')|list|length %}
+
+<div class="page-h">
+  <div><h1>{{ t.services }}</h1><p class="lede">Os serviços que o portal administra. O que mais roda nesta máquina não aparece aqui.</p></div>
+</div>
+
+<div class="grid tiles">
+  <div class="card tile"><span class="lbl">Rodando</span><span class="big">{{ running }} de {{ cards|length }}</span></div>
+  <div class="card tile"><span class="lbl">Com falha</span><span class="big">{{ failed }}</span><span class="muted">{{ 'nenhum' if not failed else 'veja o log em Sistema › Diagnóstico' }}</span></div>
+  <div class="card tile"><span class="lbl">Não instalados</span><span class="big">{{ missing }}</span></div>
+</div>
+
+{% macro btn(card, action, label, ico, kind='') %}
+  {% set why = card.buttons[action] %}
+  <button class="btn {{ kind }}" type="button" {% if why %}disabled title="{{ why }}" aria-label="{{ label }}: {{ why }}"{% endif %}>{{ icon(ico, 16) }}{{ label }}</button>
+{% endmacro %}
+
+<div class="grid svc-grid">
+{% for c in cards %}
+  {% set i = c.info %}
+  <section class="card svc" aria-labelledby="svc-{{ c.key }}">
+    <div class="card-h">
+      <h2 class="h2" id="svc-{{ c.key }}">{{ c.name }}</h2>
+      <div class="fill"></div>
+      {% if not i.installed %}<span class="chip mute">não instalado</span>
+      {% elif i.active == 'failed' %}<span class="chip bad"><span class="dot bad"></span>falhou</span>
+      {% elif i.busy %}<span class="chip warn"><span class="dot warn"></span>{{ {'activating': 'subindo', 'deactivating': 'parando', 'reloading': 'recarregando'}[i.active] }}</span>
+      {% elif i.running %}<span class="chip ok"><span class="dot ok"></span>rodando</span>
+      {% else %}<span class="chip mute"><span class="dot"></span>parado</span>{% endif %}
+    </div>
+    <div class="card-b muted">{{ c.role }}</div>
+    <div class="kvs">
+      <div class="kv"><span>Unidade</span><span class="mono">{{ i.unit.removesuffix('.service') }}</span></div>
+      <div class="kv"><span>Pacote</span><span class="mono">{{ i.package }}{% if i.version %} {{ i.version }}{% endif %}</span></div>
+      {% if i.installed %}
+        <div class="kv"><span>{{ 'Rodando' if i.running else 'Estado' }}</span><span>{% if i.running and i.since %}{{ (now - i.since)|ago }}{% elif i.active == 'failed' %}falhou ({{ i.sub }}){% elif i.stopped %}parado{% else %}{{ i.sub or i.active }}{% endif %}</span></div>
+        <div class="kv"><span>Sobe no boot</span><span>{{ 'sim' if i.enabled in ('enabled', 'enabled-runtime', 'static', 'alias') else 'não' }}</span></div>
+        {% if i.memory %}<div class="kv"><span>Memória</span><span class="mono">{{ i.memory|size }}</span></div>{% endif %}
+      {% endif %}
+    </div>
+    <div class="svc-actions">
+      {{ btn(c, 'install', 'Instalar', 'download') }}
+      {{ btn(c, 'start', 'Iniciar', 'play') }}
+      {{ btn(c, 'restart', 'Reiniciar', 'restart') }}
+      {{ btn(c, 'reload', 'Recarregar', 'reload') }}
+      {{ btn(c, 'stop', 'Parar', 'stop', 'danger') }}
+      <div class="fill"></div>
+      <a href="{{ c.href }}">Configurar →</a>
+    </div>
+  </section>
+{% endfor %}
+</div>
+
+{% endblock %}

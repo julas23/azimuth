@@ -21,7 +21,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import import_live  # noqa: E402
 
+from pydantic import ValidationError  # noqa: E402
+
 from fwadmin.models import Config  # noqa: E402
+from fwadmin.render import render_all  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -198,9 +201,10 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
     check("e a divergencia vira mudanca", mentions(changes, "'tv': DHCP entrega 10.0.0.15"), True)
 
     print("\n== nftables ==")
-    check("regras de input lidas do arquivo",
-          [(r.description, r.dest_ports) for r in cfg.firewall.input_rules],
-          [("SSH so LAN", "22"), ("web so LAN", "80,443")])
+    check("bloqueios de input viram redundantes", cfg.firewall.input_rules, [])
+    check("e saem com aviso", mentions(findings, "redundante com a entrada fechada"), True)
+    check("entrada sempre fechada", cfg.firewall.input_policy.value, "drop")
+    check("a troca de politica vira mudanca", mentions(changes, "lista negra vira lista branca"), True)
     check("forward lan -> wan lido",
           [(r.source.value, r.destination.value) for r in cfg.firewall.forward_rules],
           [("lan", "wan")])
@@ -218,10 +222,28 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
     check("chave continua fora do modelo", cfg.wireguard.private_key_file, "/etc/wireguard/wg0.key")
     check("comentario vira nome do peer", [p.name for p in cfg.wireguard.peers], ["celular"])
     check("o outro tunel fica de fora, com aviso", mentions(findings, "'wgsite' fica fora"), True)
+    check("e o bloqueio dele na entrada vira mudanca", mentions(changes, "tunel 'wgsite' ao"), True)
 
-print("\n== o HP continua importando sem mudanca nenhuma ==")
+    print("\n== nftables gerado: entrada fechada, com a base ==")
+    nft = render_all(cfg)["nftables.conf"]
+    input_chain = nft.split("chain input {")[1].split("chain forward {")[0]
+    check("politica drop", "policy drop;" in input_chain, True)
+    check("LAN entra", 'iifname "lan0" accept' in input_chain, True)
+    check("established antes de tudo", "ct state established,related accept" in input_chain, True)
+    check("WireGuard aberto na WAN", "iifname $WAN udp dport 51820 accept" in input_chain, True)
+    check("peers da VPN entram", 'iifname "wg0" accept' in input_chain, True)
+    check("DHCP do provedor responde na WAN dhcp", 'iifname "wand" udp sport 67 udp dport 68 accept' in input_chain, True)
+    try:
+        Config.model_validate(cfg.model_dump() | {"firewall": cfg.firewall.model_dump() | {"input_policy": "accept"}})
+        recusou = False
+    except ValidationError:
+        recusou = True
+    check("o modelo recusa entrada aberta", recusou, True)
+
+print("\n== o HP so muda a entrada, que fecha ==")
 cfg, findings, changes = run(ROOT / "legacy" / "live", ROOT / "legacy" / "portal-index.html")
-check("nenhuma mudanca", changes, [])
+check("so muda a entrada, de lista negra para lista branca",
+      [c.split(":")[0] for c in changes], ["nftables/input"])
 check("failover continua ligado (o pppd abria mao da rota)", cfg.routing.failover.enabled, True)
 check("as duas regras por WAN viram uma so",
       [(r.source.value, r.destination.value) for r in cfg.firewall.forward_rules],

@@ -211,3 +211,14 @@ a.tile:hover { border-color: #93B4F5; color: var(--ink); }
 .login { width: 100%; max-width: 380px; padding: 28px; display: flex; flex-direction: column; gap: 16px; }
 .login .brand { margin-bottom: 4px; }
 .login .btn { width: 100%; justify-content: center; }
+
+/* --- servicos -------------------------------------------------------- */
+
+.svc-grid { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+@media (max-width: 480px) { .svc-grid { grid-template-columns: minmax(0, 1fr); } }
+.svc { display: flex; flex-direction: column; }
+.svc .card-b { padding-top: 12px; padding-bottom: 4px; }
+.svc .kvs { grid-template-columns: repeat(2, minmax(0, 1fr)); flex: 1; align-content: start; }
+.svc .kv { padding: 10px 20px; }
+.svc-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--line-2); }
+.svc-actions .btn { height: 34px; padding: 0 10px; font-size: 13px; }

@@ -42,7 +42,7 @@ from fwadmin.models import (
     Rule,
     Service,
 )
-from fwadmin.render import dump, load
+from fwadmin.render import base_input, dump, load
 
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
@@ -326,6 +326,7 @@ async def readonly_guard(request: Request, call_next: Callable) -> Response:
 NAV = [
     # (chave do texto, endereco, servico por baixo, recuado)
     ("status", "/", "", False),
+    ("services", "/services", "", False),
     None,
     ("network", "/network", "WAN · LAN", False),
     ("firewall", "/firewall", "nftables", False),
@@ -408,6 +409,15 @@ def alerts(cfg: Config, snapshot: live.Snapshot) -> list[dict[str, str]]:
                     "href": "/network",
                 }
             )
+    if READONLY and "accept" in snapshot.policies.values():
+        out.append(
+            {
+                "level": "bad",
+                "title": "Firewall em lista negra",
+                "detail": "a política viva é accept: o que escuta e não tem bloqueio está aberto para a internet",
+                "href": "/firewall",
+            }
+        )
     if not READONLY and has_pending():
         out.append(
             {
@@ -459,6 +469,50 @@ def alerts(cfg: Config, snapshot: live.Snapshot) -> list[dict[str, str]]:
                 }
             )
     return out
+
+
+def stack(cfg: Config) -> list[dict[str, str]]:
+    """Os servicos que o portal administra, na ordem da tela de Servicos.
+
+    So a stack do Azimuth: o que mais roda na maquina (zabbix, ssh, nginx)
+    nao e' do portal e nao aparece aqui.
+    """
+    wg = cfg.wireguard.device if cfg.wireguard.enabled else "wg0"
+    return [
+        {"key": "nftables", "name": "Firewall", "role": "filtra o que entra e o que atravessa",
+         "unit": "nftables.service", "package": "nftables", "href": "/firewall"},
+        {"key": "fail2ban", "name": "Fail2Ban", "role": "bane quem erra a senha demais",
+         "unit": "fail2ban.service", "package": "fail2ban", "href": "/fail2ban"},
+        {"key": "dnsmasq", "name": "DHCP e domínio", "role": "entrega IPs e responde os nomes da LAN",
+         "unit": "dnsmasq.service", "package": "dnsmasq", "href": "/dhcp"},
+        {"key": "unbound", "name": "DNS", "role": "resolve na internet o que não é da LAN",
+         "unit": "unbound.service", "package": "unbound", "href": "/dns"},
+        {"key": "wireguard", "name": "VPN", "role": f"túnel WireGuard {wg}",
+         "unit": f"wg-quick@{wg}.service", "package": "wireguard-tools", "href": "/vpn"},
+    ]
+
+
+def service_buttons(info: status.UnitInfo) -> dict[str, str]:
+    """Para cada acao, o motivo de ela estar desligada; '' = pode.
+
+    Nao instalado so deixa instalar. Durante uma transicao (subindo,
+    parando, recarregando) nada vale, para nao empilhar comando em cima de
+    comando.
+    """
+    if not info.installed:
+        off = "não está instalado"
+        return {"install": "", "start": off, "restart": off, "reload": off, "stop": off}
+    if info.busy:
+        off = "aguarde: o serviço está mudando de estado"
+        return {"install": "já instalado", "start": off, "restart": off, "reload": off, "stop": off}
+    stopped = "o serviço está parado"
+    return {
+        "install": "já instalado",
+        "start": "já está rodando" if info.running else "",
+        "restart": stopped if info.stopped else "",
+        "reload": stopped if info.stopped else ("" if info.can_reload else "o serviço não sabe recarregar"),
+        "stop": stopped if info.stopped else "",
+    }
 
 
 def services_of(cfg: Config) -> list[status.ServiceState]:
@@ -618,6 +672,22 @@ async def dashboard(request: Request, user: User) -> Response:
     )
 
 
+@app.get("/services", response_class=HTMLResponse)
+async def services_page(request: Request, user: User) -> Response:
+    cfg = current()
+    cards = []
+    for svc in stack(cfg):
+        info = status.unit_info(svc["unit"], svc["package"])
+        buttons = service_buttons(info)
+        if READONLY:
+            buttons = {k: v or "somente leitura" for k, v in buttons.items()}
+        else:
+            # as acoes sobre servicos ainda nao existem no fwctl
+            buttons = {k: v or "entra com as ações" for k, v in buttons.items()}
+        cards.append(svc | {"info": info, "buttons": buttons})
+    return page(request, "services.html", nav="services", cfg=cfg, cards=cards, now=time.time())
+
+
 @app.get("/network", response_class=HTMLResponse)
 async def network(request: Request, user: User) -> Response:
     cfg = current()
@@ -636,7 +706,15 @@ async def network(request: Request, user: User) -> Response:
 
 @app.get("/firewall", response_class=HTMLResponse)
 async def firewall(request: Request, user: User) -> Response:
-    return page(request, "firewall.html", nav="firewall", cfg=current())
+    cfg = current()
+    return page(
+        request,
+        "firewall.html",
+        nav="firewall",
+        cfg=cfg,
+        base=base_input(cfg),
+        live_policy=snap().policies if READONLY else {},
+    )
 
 
 @app.get("/fail2ban", response_class=HTMLResponse)
@@ -992,7 +1070,6 @@ def system_view(request: Request, **extra: Any) -> HTMLResponse:
         "system.html",
         nav="system",
         cfg=cfg,
-        services=services_of(cfg),
         history=git_history(),
         audit=db.recent(30),
         system=status.system(),

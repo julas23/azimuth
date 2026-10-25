@@ -99,6 +99,50 @@ def rule_to_nft(cfg: Config, rule: Rule) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def base_input(cfg: Config) -> list[tuple[str, str]]:
+    """As excecoes que toda caixa tem, antes das regras do usuario.
+
+    Com a entrada em 'drop', sao elas que impedem o dono de se trancar do lado
+    de fora e o proprio firewall de parar de funcionar. Ficam no codigo, e
+    nao no config.yaml, porque nenhuma delas e' escolha: sem a LAN o painel
+    some, sem o 'established' a caixa nao resolve um nome, sem o ICMPv6 o
+    IPv6 morre em silencio. O painel as mostra, com o porque de cada uma.
+
+    Devolve (linha nft, explicacao).
+    """
+    out = [
+        ('iifname "lo" accept', "o firewall falando com ele mesmo"),
+        ("ct state established,related accept", "respostas de conexões que já foram aceitas"),
+        ("ct state invalid drop", "pacote que não pertence a conexão nenhuma"),
+        (
+            "meta l4proto { icmp, ipv6-icmp } accept",
+            "ping e o ICMP sem o qual IPv4 e IPv6 quebram (MTU, vizinhança)",
+        ),
+        (
+            f'iifname "{cfg.lan.device}" accept',
+            "a LAN alcança o firewall: DNS, DHCP, SSH e o painel",
+        ),
+    ]
+    for wan in cfg.wans:
+        if wan.ipv4.mode is IPv4Mode.dhcp:
+            out.append(
+                (
+                    f'iifname "{wan.device}" udp sport 67 udp dport 68 accept',
+                    f"resposta do DHCP do provedor em {wan.description or wan.name}",
+                )
+            )
+    wg = cfg.wireguard
+    if wg.enabled:
+        out.append(
+            (
+                f"iifname $WAN udp dport {wg.listen_port} accept",
+                f"o WireGuard ({wg.device}) recebendo os peers pela internet",
+            )
+        )
+        out.append((f'iifname "{wg.device}" accept', "peers da VPN alcançam o firewall, como a LAN"))
+    return out
+
+
 def environment() -> Environment:
     env = Environment(
         loader=FileSystemLoader(TEMPLATE_DIR),
@@ -134,6 +178,7 @@ def render_all(cfg: Config) -> dict[str, str]:
         "firewall": cfg.firewall,
         "routing": cfg.routing,
         "rule_to_nft": lambda r: rule_to_nft(cfg, r),
+        "base_input": base_input(cfg),
         "IPv4Mode": IPv4Mode,
     }
 

@@ -41,6 +41,11 @@ class Snapshot:
     tunnels: list[str] = field(default_factory=list)
     """Todos os .conf do WireGuard, inclusive os que ficam fora do modelo."""
 
+    policies: dict[str, str] = field(default_factory=dict)
+    """Politica viva de input e forward do 'inet filter'. O modelo so tem
+    'drop'; isto e' o que a maquina faz de fato, para o painel nao mostrar
+    fechado o que esta aberto."""
+
     @property
     def age(self) -> int:
         return int(time.time() - self.taken_at) if self.taken_at else -1
@@ -96,6 +101,15 @@ def _load(taken_at: float) -> Snapshot:
         unbound=parse_unbound(observe.LIVE / "unbound"),
         tunnels=sorted(p.stem for p in (observe.LIVE / "wireguard").glob("*.conf")),
     )
+    try:
+        nft = importer.parse_nft((observe.LIVE / "nftables.conf").read_text())
+        snap.policies = {
+            chain: body["policy"] or "accept"
+            for (table, chain), body in nft["chains"].items()
+            if table == "inet filter" and chain in ("input", "forward")
+        }
+    except OSError:
+        pass
     try:
         snap.cfg, snap.findings, snap.changes = importer.run(observe.LIVE)
     except ValidationError as exc:

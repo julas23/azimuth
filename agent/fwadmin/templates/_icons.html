@@ -2,6 +2,11 @@
 {% macro icon(key, size=18) -%}
 <svg width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
 {%- if key == 'status' %}<path d="M3 13h4l3-8 4 14 3-6h4"/>
+{%- elif key == 'services' %}<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>
+{%- elif key == 'play' %}<path d="M7 5v14l11-7z"/>
+{%- elif key == 'restart' %}<path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/>
+{%- elif key == 'reload' %}<path d="M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4"/>
+{%- elif key == 'stop' %}<rect x="6" y="6" width="12" height="12" rx="1.5"/>
 {%- elif key == 'network' %}<rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 17h.01M11 17h.01M12 14V8M8 6a5 5 0 0 1 8 0M5.5 3.5a9 9 0 0 1 13 0"/>
 {%- elif key == 'firewall' %}<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/>
 {%- elif key == 'fail2ban' %}<circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/>

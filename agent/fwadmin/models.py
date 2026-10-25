@@ -486,7 +486,22 @@ class PortForward(Base):
 
 
 class Firewall(Base):
-    input_policy: Action = Action.accept
+    """Bloqueia tudo e abre so as excecoes, nas duas cadeias.
+
+    Nao e' um padrao que se troca: o modelo recusa politica 'accept'. Com
+    lista negra, todo servico novo que escuta em 0.0.0.0 nasce aberto para a
+    internet sem ninguem decidir isso — foi o que o import da VM em 25/10
+    achou (um rpc.statd em porta alta, exposto na WAN). Com lista branca,
+    abrir e' sempre um ato explicito, e esquecer de abrir so quebra um
+    servico, nunca expoe um.
+
+    O que a caixa precisa para funcionar e para o dono nao se trancar do lado
+    de fora vem pronto no nftables gerado, antes das regras do usuario: a
+    loopback, conexoes ja estabelecidas, ICMP, a LAN inteira, os peers da VPN
+    e a porta do WireGuard na WAN. Ver BASE_INPUT em render.py.
+    """
+
+    input_policy: Action = Action.drop
     forward_policy: Action = Action.drop
     input_rules: list[Rule] = []
     forward_rules: list[Rule] = []
@@ -496,6 +511,16 @@ class Firewall(Base):
 
     preserve_tables: list[str] = ["inet f2b-table"]
     """Tabelas de terceiros que o reload NAO pode apagar (fail2ban)."""
+
+    @field_validator("input_policy", "forward_policy")
+    @classmethod
+    def _bloqueia_por_padrao(cls, v: Action) -> Action:
+        if v is not Action.drop:
+            raise ValueError(
+                f"politica '{v.value}' recusada: o firewall bloqueia tudo e abre so as "
+                "excecoes, com regras 'accept'"
+            )
+        return v
 
 
 # ---------------------------------------------------------------------------

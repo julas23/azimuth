@@ -18,6 +18,12 @@ table inet filter {
     chain input {
         type filter hook input priority 0; policy {{ firewall.input_policy.value }};
 
+        # base: o que toda caixa precisa com a entrada fechada (render.base_input)
+{% for line, why in base_input %}
+        {{ line }}
+{% endfor %}
+
+        # excecoes do config.yaml
 {% for rule in firewall.input_rules %}
 {% for line in rule_to_nft(rule) %}
         {{ line }}

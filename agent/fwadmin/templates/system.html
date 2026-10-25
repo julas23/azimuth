@@ -42,26 +42,8 @@
 {% endif %}
 
 <section class="card" aria-labelledby="h-svc">
-  <div class="card-h"><h2 class="h2" id="h-svc">Serviços</h2></div>
-  <div class="scroll">
-    <table class="tbl">
-      <thead><tr><th>Unidade</th><th>Situação</th><th>Sobe no boot</th><th>Estado</th><th><span class="vh">Ações</span></th></tr></thead>
-      <tbody>
-      {% for s in services %}
-        <tr>
-          <td class="mono">{{ s.unit }}</td>
-          <td><span class="chip {{ 'ok' if s.ok else ('mute' if s.active == 'unknown' else 'bad') }}">{{ s.active }}</span></td>
-          <td class="muted">{{ s.enabled }}</td>
-          <td style="white-space:nowrap">
-            <label style="margin-right:14px"><input type="radio" name="svc-{{ loop.index }}" {% if s.ok %}checked{% endif %} disabled> Ativo</label>
-            <label><input type="radio" name="svc-{{ loop.index }}" {% if not s.ok %}checked{% endif %} disabled> Parado</label>
-          </td>
-          <td><button class="btn" type="button" disabled title="{{ 'Somente leitura' if readonly else 'Entra com as ações' }}">Reiniciar</button></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  <div class="card-h"><h2 class="h2" id="h-svc">Serviços</h2><div class="fill"></div><a href="/services">{{ t.services }} →</a></div>
+  <div class="row muted">Estado, instalação, reinício e parada de cada serviço da stack ficam em <a href="/services">{{ t.services }}</a>.</div>
 </section>
 
 <div class="grid two">
