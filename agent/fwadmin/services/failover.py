@@ -10,13 +10,16 @@ PATH = "/usr/local/bin/wan-failover.sh"
 
 
 def targets(cfg: Config) -> dict[str, str]:
-    return {FILE: PATH}
+    # Sem failover, o motor nao tem script nem timer: numa maquina adotada em
+    # que o pppd e' dono da rota, o timer nem existe, e rearmar o que nao
+    # existe faria o primeiro apply falhar na recarga.
+    return {FILE: PATH} if cfg.routing.failover.enabled else {}
 
 
 def units(cfg: Config) -> frozenset[str]:
     # A unidade e' do proprio appliance, e nao um daemon de terceiro: quem
     # roda o script e' o timer que o instalador criou.
-    return frozenset({"fwadmin-failover.timer"})
+    return frozenset({"fwadmin-failover.timer"}) if cfg.routing.failover.enabled else frozenset()
 
 
 def _rearm() -> Reload:

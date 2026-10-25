@@ -142,7 +142,14 @@ table ip nat {
     }
 }
 """,
-    "runtime.json": '{"ppp_units": ["ppp@provider.service"]}',
+    "runtime.json": '{"ppp_units": ["ppp@provider.service"], "ppp_aliases": {"provider": "vivo"}}',
+    "ppp-peers-modem": """\
+# o exemplo do pacote ppp: discagem por modem, sem rp-pppoe
+user "myusername@realm"
+connect "/usr/sbin/chat -v -f /etc/chatscripts/provider"
+/dev/modem
+38400
+""",
     "wireguard/wg0.conf": """\
 [Interface]
 Address = 10.80.0.1/24
@@ -195,7 +202,10 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
     check("sem a senha em nada que o painel renderiza",
           any('password "segredo"' in v or "segredo\"" in v for v in render_all(cfg).values()), False)
     check("sem failover, o pppd continua dono da rota", cfg.iface("wan_vivo").pppoe.default_route, True)
-    check("o link e' do systemd", cfg.iface("wan_vivo").pppoe.unit, "ppp@provider.service")
+    check("o link e' do systemd (ppp@provider disca o vivo pelo link)", cfg.iface("wan_vivo").pppoe.unit, "ppp@provider.service")
+    check("o peer de modem do Debian fica de fora", mentions(findings, "peers/modem nao e' PPPoE"), True)
+    from fwadmin.importer import pick_peer, unit_peer
+    check("sem o link, ppp@provider nao e' do vivo", unit_peer("ppp@provider.service", {}), "provider")
     from fwadmin.services import pppoe as pppoe_svc
     recarga = pppoe_svc.reloads(cfg, None, ["ppp-peers-vivo"])[0].argv[-1]
     check("e o reinicio passa pelo systemctl, sem pon/poff",

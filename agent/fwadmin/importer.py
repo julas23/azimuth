@@ -375,7 +375,7 @@ def build_interfaces(
         # o device do rp-pppoe vem numa linha sozinha, sem valor
         pppoe_dev = next((f for f in ppp_raw["flags"] if f in ifaces_raw), None)
     if pppoe_dev is None:
-        raise SystemExit("nao consegui identificar o device do PPPoE em peers/vivo")
+        raise ValueError(f"nao consegui identificar o device do PPPoE em peers/{peer}")
 
     # A placa do PPPoE pode estar como 'inet dhcp' no ifupdown; quem decide o
     # papel dela e' o peers/, nao o modo que sobrou no interfaces.
@@ -1018,18 +1018,53 @@ def build_wireguard(live: Path) -> dict[str, Any] | None:
     return wg
 
 
+def unit_peer(unit: str, aliases: dict[str, str]) -> str:
+    """ppp@provider.service -> o peer que ela disca, atravessando o link."""
+    name = unit.removeprefix("ppp@").removesuffix(".service")
+    return aliases.get(name, name)
+
+
+def pick_peer(live: Path, ppp_units: list[str], aliases: dict[str, str] | None = None) -> Path:
+    """O peer que esta em uso, entre os que sao PPPoE de fato.
+
+    O pacote ppp do Debian instala um 'provider' de exemplo (discagem por
+    modem, sem rp-pppoe); pegar o primeiro em ordem alfabetica importaria o
+    exemplo. Vale o que a unidade ppp@ ativa chama; sem ela, o primeiro PPPoE.
+    """
+    peers = sorted(live.glob("ppp-peers-*"))
+    pppoe = [p for p in peers if re.search(r"^\s*plugin\s+\S*pppoe", p.read_text(), re.M)]
+    if pppoe:
+        for p in peers:
+            if p not in pppoe:
+                note(f"peers/{p.name.removeprefix('ppp-peers-')} nao e' PPPoE; ficou de fora")
+    for unit in ppp_units:
+        name = unit_peer(unit, aliases or {})
+        for p in pppoe:
+            if p.name == f"ppp-peers-{name}":
+                return p
+    if pppoe:
+        return pppoe[0]
+    return peers[0] if peers else live / "ppp-peers-vivo"
+
+
 def build(live: Path, portal_html: Path | None = None) -> dict[str, Any]:
     iface_text = (live / "interfaces").read_text()
     ifaces_raw = parse_interfaces(iface_text)
     dns_raw = parse_dnsmasq((live / "dnsmasq.conf").read_text())
-    peer_file = next(iter(sorted(live.glob("ppp-peers-*"))), live / "ppp-peers-vivo")
-    ppp_raw = parse_ppp_peer(peer_file.read_text())
-    peer = ppp_raw.get("linkname", peer_file.name.removeprefix("ppp-peers-"))
     try:
         runtime = json.loads((live / "runtime.json").read_text())
     except (OSError, ValueError):
         runtime = {}
-    ppp_units = runtime.get("ppp_units") or []
+    aliases = runtime.get("ppp_aliases") or {}
+    peer_file = pick_peer(live, runtime.get("ppp_units") or [], aliases)
+    ppp_raw = parse_ppp_peer(peer_file.read_text())
+    peer = ppp_raw.get("linkname", peer_file.name.removeprefix("ppp-peers-"))
+    # So a unidade que disca este peer e' dele: um ppp@ de outro peer (o
+    # exemplo do Debian, um modem) nao pode ser reiniciado no lugar do PPPoE.
+    ppp_units = [
+        u for u in runtime.get("ppp_units") or []
+        if unit_peer(u, aliases) == peer_file.name.removeprefix("ppp-peers-")
+    ]
     if len(ppp_units) > 1:
         note(f"mais de uma unidade ppp@ rodando ({', '.join(ppp_units)}); o modelo fica com a primeira")
 

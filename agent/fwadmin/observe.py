@@ -78,6 +78,19 @@ def _strip(text: str, secret: re.Pattern[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def ppp_aliases() -> dict[str, str]:
+    """Links em /etc/ppp/peers (provider -> vivo): a unidade ppp@provider
+    disca o peer vivo, e o importador precisa saber disso."""
+    peers = paths.sys_path("/etc/ppp/peers")
+    out = {}
+    for link in sorted(peers.glob("*")) if peers.is_dir() else []:
+        if link.is_symlink():
+            target = link.resolve()
+            if target.parent == peers.resolve() and SAFE_NAME.match(target.name):
+                out[link.name] = target.name
+    return out
+
+
 def _copy_files(dest: Path) -> list[str]:
     """Copia o que existir. Devolve os caminhos que nao deu para ler."""
     missing = []
@@ -224,7 +237,7 @@ def collect() -> Path:
     fresh.mkdir()
 
     missing = _copy_files(fresh)
-    runtime = {"taken_at": time.time(), "missing": missing}
+    runtime = {"taken_at": time.time(), "missing": missing, "ppp_aliases": ppp_aliases()}
     if paths.sandboxed():
         # No sandbox os binarios seriam os da maquina de quem testa. O estado
         # de execucao vem de um arquivo de mentira, se houver.

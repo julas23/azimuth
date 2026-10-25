@@ -31,8 +31,26 @@ PORT="${PORT:-8443}"
 UNIT=/etc/systemd/system/fwadmin.service
 DROPIN=/etc/systemd/system/fwadmin.service.d/readonly.conf
 
-# O motor completo usa os mesmos caminhos. Instalar ou remover por cima dele
-# trocaria o sudoers dele por um que nao aplica nada, ou apagaria o banco.
+# Maquina adotada (adopt.sh): so o codigo e' atualizado. Sudoers, drop-in e
+# config sao do motor; reescreve-los aqui voltaria o painel ao somente leitura.
+if [ -e /etc/fwadmin/config.yaml ] && grep -q '^Environment=FWADMIN_READONLY=0' "$DROPIN" 2>/dev/null; then
+    [ "${1:-}" = "--remover" ] && { echo "maquina adotada: use deploy/adopt.sh --desfazer antes"; exit 1; }
+    echo "== maquina adotada: atualizando so o codigo =="
+    rm -rf /opt/fwadmin/fwadmin
+    cp -r "$SRC/fwadmin" /opt/fwadmin/
+    find /opt/fwadmin -name __pycache__ -prune -exec rm -rf {} +
+    install -m 0755 "$SRC/sbin/fwctl" /usr/local/sbin/fwctl
+    VERSION="$(git -C "$SRC" describe --always --dirty 2>/dev/null || cat "$SRC/VERSION" 2>/dev/null || echo dev)"
+    echo "$VERSION" > /opt/fwadmin/VERSION
+    echo "   versao $VERSION"
+    systemctl restart fwadmin.service
+    systemctl --no-pager --lines=0 status fwadmin.service | grep -E "Active:" || true
+    exit 0
+fi
+
+# O motor completo do install.sh usa os mesmos caminhos. Instalar ou remover
+# por cima dele trocaria o sudoers por um que nao aplica nada, ou apagaria o
+# banco.
 if [ -e /etc/fwadmin/config.yaml ]; then
     echo "esta maquina tem o motor completo (/etc/fwadmin/config.yaml); este instalador e' para quem nao tem"
     exit 1
