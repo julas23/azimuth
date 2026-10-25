@@ -19,11 +19,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import pwd
 import time
 
 from fwadmin import paths
 
 FILE = paths.VAR / "intencionais.json"
+PANEL_USER = "netadm"
 
 
 def change_id(text: str) -> str:
@@ -43,6 +45,14 @@ def _save(data: dict[str, dict]) -> None:
     FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = FILE.with_name(f".{FILE.name}.{os.getpid()}")
     tmp.write_text(json.dumps(data, indent=1, ensure_ascii=False))
+    # O 'fwctl ack' roda como root; o arquivo tem de continuar do usuario do
+    # painel, senao a proxima marcacao pela tela falha.
+    if os.geteuid() == 0:
+        try:
+            owner = pwd.getpwnam(PANEL_USER)
+            os.chown(tmp, owner.pw_uid, owner.pw_gid)
+        except KeyError:
+            pass
     tmp.replace(FILE)
 
 
