@@ -385,7 +385,9 @@ def alerts(cfg: Config, snapshot: live.Snapshot) -> list[dict[str, str]]:
     """O que pede atencao, do mais grave para o menos. Vai para o sino do
     cabecalho e para o topo do Status."""
     out: list[dict[str, str]] = []
-    down = [svc.unit for svc in services_of(cfg) if svc.active not in ("active", "unknown")]
+    # So os servicos da stack, e so os instalados: o que nao esta na maquina e'
+    # assunto da tela de Servicos, nao um alarme.
+    down = [i.unit for i in stack_state(cfg) if i.installed and not i.running]
     if len(down) == 1:
         out.append(
             {"level": "bad", "title": f"{down[0]} não está rodando", "detail": "", "href": "/system"}
@@ -463,7 +465,11 @@ def alerts(cfg: Config, snapshot: live.Snapshot) -> list[dict[str, str]]:
             out.append(
                 {
                     "level": "mute",
-                    "title": f"{peer['name']} sem contato na VPN {peer['seen']}",
+                    "title": (
+                        f"{peer['name']} nunca se conectou à VPN"
+                        if peer["seen"] == "nunca"
+                        else f"{peer['name']} sem contato na VPN {peer['seen']}"
+                    ),
                     "detail": "se o aparelho foi perdido, revogue o peer",
                     "href": "/vpn",
                 }
@@ -515,10 +521,9 @@ def service_buttons(info: status.UnitInfo) -> dict[str, str]:
     }
 
 
-def services_of(cfg: Config) -> list[status.ServiceState]:
-    """As unidades da stack, com o tunel do WireGuard pelo nome que tem."""
-    extra = (f"wg-quick@{cfg.wireguard.device}",) if cfg.wireguard.enabled else ()
-    return status.services(extra)
+def stack_state(cfg: Config) -> list[status.UnitInfo]:
+    """Estado de cada servico da stack, na ordem de stack()."""
+    return [status.unit_info(svc["unit"], svc["package"]) for svc in stack(cfg)]
 
 
 def domain_conflicts(cfg: Config) -> list[dict[str, str]]:
@@ -662,7 +667,7 @@ async def dashboard(request: Request, user: User) -> Response:
         snapshot=snapshot,
         wans=status.wans(cfg),
         leases=status.leases(cfg),
-        services=services_of(cfg),
+        services=stack_state(cfg),
         system=status.system(),
         peers=peers,
         online=sum(1 for p in peers if p["online"]),

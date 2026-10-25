@@ -190,35 +190,6 @@ def leases(cfg: Config | None = None) -> list[Lease]:
 
 
 @dataclass
-class ServiceState:
-    unit: str
-    active: str = "unknown"
-    enabled: str = "unknown"
-
-    @property
-    def ok(self) -> bool:
-        return self.active == "active"
-
-
-WATCHED = ("nftables", "dnsmasq", "unbound", "fail2ban", "fwadmin", "fwadmin-failover.timer", "nginx")
-
-
-def services(extra: tuple[str, ...] = ()) -> list[ServiceState]:
-    """Estado das unidades da stack; `extra` traz as que dependem da config,
-    como o wg-quick@<tunel>."""
-    out = []
-    for unit in (*WATCHED, *extra):
-        out.append(
-            ServiceState(
-                unit=unit,
-                active=_run("systemctl", "is-active", unit).strip() or "unknown",
-                enabled=_run("systemctl", "is-enabled", unit).strip() or "unknown",
-            )
-        )
-    return out
-
-
-@dataclass
 class UnitInfo:
     """O que a tela de Servicos sabe de um servico da stack."""
 

@@ -66,9 +66,9 @@
 
 <div class="grid two">
   <section class="card" aria-labelledby="h-svc">
-    <div class="card-h"><h2 class="h2" id="h-svc">Serviços</h2><div class="fill"></div><a href="/system">Sistema</a></div>
+    <div class="card-h"><h2 class="h2" id="h-svc">{{ t.services }}</h2><div class="fill"></div><a href="/services">{{ t.services }} →</a></div>
     {% for s in services %}
-      <div class="row"><span class="dot {{ 'ok' if s.ok else ('mute' if s.active == 'unknown' else 'bad') }}"></span><span class="mono grow">{{ s.unit }}</span><span class="muted">{{ s.active }}</span></div>
+      <div class="row"><span class="dot {{ 'ok' if s.running else ('' if not s.installed else 'bad') }}"></span><span class="mono grow">{{ s.unit.removesuffix('.service') }}</span><span class="muted">{% if not s.installed %}não instalado{% elif s.running %}rodando{% elif s.active == 'failed' %}falhou{% else %}parado{% endif %}</span></div>
     {% endfor %}
   </section>
 
