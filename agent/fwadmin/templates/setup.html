@@ -1,32 +1,24 @@
+{% from "_icons.html" import logo %}
 <!doctype html>
-<html lang="pt-BR">
+<html lang="{{ lang }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Primeiro acesso · fwadmin</title>
+<title>Primeiro acesso · Azimuth</title>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <div class="center">
-  <div class="card">
-    <h1>Primeiro acesso</h1>
-    <p class="lede">Não há nenhum usuário ainda. Crie o administrador do painel.</p>
-
+  <form class="card login" method="post" action="/login">
+    <span class="brand">{{ logo() }}<b>Azimuth</b></span>
+    <h1 style="font-size:20px">Primeiro acesso</h1>
+    <p class="lede" style="margin:0">Não há nenhum usuário ainda. Crie o administrador do painel.</p>
     {% if error %}<div class="note bad">{{ error }}</div>{% endif %}
-
-    <form method="post" action="/login">
-      <div style="margin-bottom:0.85rem">
-        <label for="u">Usuário</label>
-        <input id="u" name="username" type="text" autocomplete="username" required autofocus>
-      </div>
-      <div style="margin-bottom:1.1rem">
-        <label for="p">Senha</label>
-        <input id="p" name="password" type="password" autocomplete="new-password" required minlength="10">
-        <div class="hint">Mínimo de 10 caracteres. Guardada com argon2id.</div>
-      </div>
-      <button class="primary" type="submit" style="width:100%;justify-content:center">Criar e entrar</button>
-    </form>
-  </div>
+    <div class="field"><label for="u">Usuário</label><input class="input" id="u" name="username" type="text" autocomplete="username" required autofocus></div>
+    <div class="field"><label for="p">Senha</label><input class="input" id="p" name="password" type="password" autocomplete="new-password" required minlength="10">
+      <span class="muted" style="font-size:12.5px">Mínimo de 10 caracteres. Guardada com argon2id.</span></div>
+    <button class="btn primary" type="submit">Criar e entrar</button>
+  </form>
 </div>
 </body>
 </html>

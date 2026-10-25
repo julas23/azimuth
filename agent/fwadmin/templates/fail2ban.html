@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ t.fail2ban }}{% endblock %}
+{% block body %}
+
+<div class="page-h">
+  <div><h1>{{ t.fail2ban }}</h1><p class="lede">Bane por um tempo quem erra a senha demais. Cada jail vigia um serviço; os banidos ficam na tabela do fail2ban, que o motor preserva.</p></div>
+  {% if f2b %}<span class="chip ok lg"><span class="dot ok"></span>rodando</span>{% endif %}
+</div>
+
+{% if not f2b %}
+  <div class="note warn"><b>Sem dados do fail2ban</b>O serviço está parado, não está instalado, ou o <span class="mono">fwctl observe</span> não conseguiu falar com ele.</div>
+{% else %}
+  {% set jails = f2b.jails %}
+  <div class="grid tiles">
+    <div class="card tile"><span class="lbl">Banidos agora</span><span class="big">{{ jails|map(attribute='banned')|map('int')|sum }}</span><span class="muted">em {{ jails|length }} jails</span></div>
+    <div class="card tile"><span class="lbl">Bans desde que subiu</span><span class="big">{{ jails|map(attribute='banned_total')|map('int')|sum }}</span><span class="muted">contador do fail2ban</span></div>
+    <div class="card tile"><span class="lbl">Tentativas falhas</span><span class="big">{{ jails|map(attribute='failed_total')|map('int')|sum }}</span><span class="muted">{{ jails|map(attribute='failed')|map('int')|sum }} ainda na janela</span></div>
+  </div>
+
+  <section class="card" aria-labelledby="h-jails">
+    <div class="card-h"><h2 class="h2" id="h-jails">Jails</h2></div>
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr><th>Jail</th><th class="num">Banidos</th><th class="num">Total de bans</th><th class="num">Falhas</th><th>Tentativas</th><th>Janela</th><th>Ban por</th></tr></thead>
+        <tbody>
+        {% for j in jails %}
+          <tr>
+            <td class="mono">{{ j.name }}</td>
+            <td class="num">{{ j.banned }}</td>
+            <td class="num">{{ j.banned_total }}</td>
+            <td class="num">{{ j.failed_total }}</td>
+            <td class="mono">{{ j.maxretry or '—' }}</td>
+            <td class="mono">{{ (j.findtime ~ ' s') if j.findtime else '—' }}</td>
+            <td class="mono">{{ (j.bantime ~ ' s') if j.bantime else '—' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="h-ban">
+    <div class="card-h"><h2 class="h2" id="h-ban">Banidos agora</h2></div>
+    {% for j in jails %}{% for ip in j.ips %}
+      <div class="row"><span class="mono grow">{{ ip }}</span><span class="chip mute">{{ j.name }}</span></div>
+    {% endfor %}{% endfor %}
+    {% if not jails|map(attribute='ips')|map('length')|sum %}<div class="empty">Ninguém banido agora.</div>{% endif %}
+  </section>
+{% endif %}
+
+{% endblock %}

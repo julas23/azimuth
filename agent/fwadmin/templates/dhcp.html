@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "_icons.html" import action %}
+{% block title %}{{ t.dhcp }}{% endblock %}
+{% block body %}
+{% set d = cfg.dhcp %}
+
+<div class="page-h">
+  <div><h1>{{ t.dhcp }}</h1><p class="lede">Endereços entregues na LAN pelo dnsmasq. A reserva fixa um IP para o MAC de um aparelho.</p></div>
+  {% if d.enabled %}<span class="chip ok lg"><span class="dot ok"></span>servindo em {{ cfg.iface(d.interface).device }}</span>{% else %}<span class="chip mute lg">desligado</span>{% endif %}
+</div>
+
+<section class="card" aria-labelledby="h-range">
+  <div class="card-h"><h2 class="h2" id="h-range">Faixa e opções</h2></div>
+  <form method="post" action="/dns/settings">
+    <div class="form-grid">
+      <div class="field"><label for="f-ini">Início da faixa</label><input id="f-ini" name="range_start" class="input mono" value="{{ d.range.start }}" {% if readonly %}disabled{% endif %}></div>
+      <div class="field"><label for="f-fim">Fim da faixa</label><input id="f-fim" name="range_end" class="input mono" value="{{ d.range.end }}" {% if readonly %}disabled{% endif %}></div>
+      <div class="field"><label for="f-lease">Duração do lease</label><input id="f-lease" name="lease" class="input mono" value="{{ d.range.lease }}" {% if readonly %}disabled{% endif %}></div>
+      <div class="field"><label for="f-gw">Gateway anunciado</label><input id="f-gw" class="input mono" value="{{ d.router or cfg.lan.ipv4.ip }}" disabled></div>
+      <div class="field"><label for="f-dns">DNS anunciado</label><input id="f-dns" class="input mono" value="{{ d.dns_servers|join(', ') or cfg.lan.ipv4.ip }}" disabled></div>
+    </div>
+    <div class="row"><span class="grow muted">Máscara <span class="mono">{{ d.range.netmask }}</span>.</span>{{ action('Salvar faixa', readonly, 'primary') }}</div>
+  </form>
+</section>
+
+<section class="card" aria-labelledby="h-leases">
+  <div class="card-h"><h2 class="h2" id="h-leases">Clientes conectados</h2><span class="chip mute">{{ leases|length }}</span><span class="muted">leases do dnsmasq</span></div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Nome</th><th>IP</th><th>MAC</th><th>Vence em</th><th>Tipo</th></tr></thead>
+      <tbody>
+      {% for l in leases %}
+        <tr><td>{{ l.hostname or '—' }}</td><td class="mono">{{ l.ip }}</td><td class="mono">{{ l.mac }}</td><td class="muted">{{ l.expires_in }}</td>
+          <td>{% if l.reserved %}<span class="chip info">reservado</span>{% else %}<span class="chip mute">dinâmico</span>{% endif %}</td></tr>
+      {% else %}
+        <tr><td colspan="5" class="muted">Nenhum lease ativo, ou o arquivo de leases não está legível.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="h-res">
+  <div class="card-h"><h2 class="h2" id="h-res">Reservas</h2><span class="chip mute">{{ d.reservations|length }}</span></div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Nome</th><th>IP</th><th>MAC</th><th>Descrição</th><th>Agora</th><th><span class="vh">Ações</span></th></tr></thead>
+      <tbody>
+      {% set online = leases|map(attribute='mac')|list %}
+      {% for r in d.reservations|sort(attribute='ip') %}
+        <tr><td>{{ r.name }}</td><td class="mono">{{ r.ip }}</td><td class="mono">{{ r.mac }}</td><td class="muted">{{ r.description }}</td>
+          <td>{% if r.mac|lower in online %}<span class="chip ok">conectado</span>{% else %}<span class="chip mute">fora do ar</span>{% endif %}</td>
+          <td><form method="post" action="/dns/reservation/{{ r.mac }}/delete">{{ action('Remover', readonly) }}</form></td></tr>
+      {% else %}
+        <tr><td colspan="6" class="muted">Nenhuma reserva.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% endblock %}

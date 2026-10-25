@@ -1,51 +1,88 @@
+{% from "_icons.html" import icon, logo %}
 <!doctype html>
-<html lang="pt-BR">
+<html lang="{{ lang }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}fwadmin{% endblock %} · {{ cfg.system.hostname if cfg else 'fwadmin' }}</title>
+<title>{% block title %}Azimuth{% endblock %} · {{ cfg.system.hostname if cfg else 'Azimuth' }}</title>
 <link rel="stylesheet" href="/static/app.css">
-<script src="/vendor/htmx.min.js" defer></script>
 </head>
 <body>
 <div class="shell">
 
-  <nav class="side">
-    <div class="brand">
-      <b>fwadmin</b>
-      <div>{{ cfg.system.hostname if cfg else '' }}{% if cfg %} · {{ cfg.lan.ipv4.ip }}{% endif %}</div>
+<header class="hd">
+  <label class="hbtn burger" for="nav-toggle" aria-label="{{ t.menu }}">{{ icon('menu', 20) }}</label>
+  <a class="brand" href="/">{{ logo() }}<b>Azimuth</b></a>
+  <span class="mono muted host">{{ cfg.system.hostname if cfg else '' }}{% if cfg %} · {{ cfg.lan.ipv4.ip }}{% endif %}</span>
+  <div class="fill"></div>
+
+  {% if readonly %}
+    <span class="chip info lg ro-chip" title="{{ t.readonly_hint }}">{{ icon('lock', 14) }}<span class="t">{{ t.readonly }}</span></span>
+  {% elif pending %}
+    <a class="chip warn lg" href="/system" style="text-decoration:none"><span class="dot warn"></span>{{ t.review }}</a>
+  {% endif %}
+
+  <form method="get" action="/lang/{{ lang }}" id="lang-form" style="margin:0">
+    <label class="vh" for="lang">{{ t.language }}</label>
+    <select id="lang" class="lang" onchange="location.href='/lang/'+this.value+'?back_to='+encodeURIComponent(location.pathname)">
+      {% for code, name in langs %}<option value="{{ code }}" {% if code == lang %}selected{% endif %}>{{ name }}</option>{% endfor %}
+    </select>
+  </form>
+
+  <details class="notif">
+    <summary class="hbtn" aria-label="{{ t.notifications }}">{{ icon('bell', 20) }}{% if alerts %}<span class="badge">{{ alerts|length }}</span>{% endif %}</summary>
+    <div class="pop" role="dialog" aria-label="{{ t.notifications }}">
+      <div class="pop-h"><b>{{ t.notifications }}</b>{% if alerts %}<span class="chip warn">{{ alerts|length }}</span>{% endif %}</div>
+      {% for a in alerts[:6] %}
+        <a class="it" href="{{ a.href }}"><span class="dot {{ a.level }}"></span><span><b>{{ a.title }}</b><div class="muted">{{ a.detail }}</div></span></a>
+      {% else %}
+        <div class="it muted">{{ t.nonotif }}</div>
+      {% endfor %}
+      {% if alerts %}<a class="it" href="/" style="justify-content:center;font-weight:500;color:var(--accent)">{{ t.allnotif }}</a>{% endif %}
     </div>
-    {% for href, label, icon in nav %}
-      <a href="{{ href }}" class="{{ 'on' if path == href or (href != '/' and path.startswith(href)) }}">
-        <span class="ico">{{ icon }}</span>{{ label }}
+  </details>
+
+  <div class="user">
+    <span class="avatar" aria-hidden="true">{{ user[:2] }}</span>
+    <div class="uinfo"><b>{{ user }}</b><div class="muted">{{ t.access }} <span class="mono" style="font-size:12px">{{ client }}</span> · {{ t.session.replace('{t}', session_until) }}</div></div>
+    <form method="post" action="/logout"><button class="hbtn" type="submit" aria-label="{{ t.signout }}" title="{{ t.signout }}">{{ icon('logout') }}</button></form>
+  </div>
+</header>
+
+<input type="checkbox" id="nav-toggle" aria-hidden="true" tabindex="-1">
+<nav class="side" aria-label="{{ t.menu }}">
+  {% for item in nav %}
+    {% if item is none %}
+      <div class="nav-sep" role="separator"></div>
+    {% else %}
+      {% set key, href, sub, indent = item %}
+      <a class="nav-i{% if indent %} sub{% endif %}{% if key == here %} on{% endif %}" href="{{ href }}" {% if key == here %}aria-current="page"{% endif %}>
+        {{ icon(key) }}<span class="nav-l">{{ t[key] }}</span>{% if sub %}<span class="nav-s">{{ sub }}</span>{% endif %}
       </a>
-    {% endfor %}
-    <div class="foot">
-      <form method="post" action="/logout">
-        <button class="tiny" type="submit">sair · {{ user }}</button>
-      </form>
-    </div>
-  </nav>
-
-  <main>
-   <div class="page">
-    {% if pending and path != '/system' %}
-      <div class="note warn">
-        <b>Há alterações não aplicadas</b>
-        As mudanças estão gravadas como proposta e ainda não valem no firewall.
-        <div class="actions"><a class="btn" href="/system">Revisar e aplicar</a></div>
-      </div>
     {% endif %}
+  {% endfor %}
+  <div class="nav-fill"></div>
+  <div class="nav-sep" role="separator"></div>
+  <a class="nav-i{% if here == 'system' %} on{% endif %}" href="/system" {% if here == 'system' %}aria-current="page"{% endif %}>{{ icon('system') }}<span class="nav-l">{{ t.system }}</span></a>
+</nav>
 
+<main class="frame">
+  <div class="frame-in">
     {% if request.query_params.get('erro') %}
       <div class="note bad"><b>Não deu para salvar</b>{{ request.query_params.get('erro') }}</div>
     {% elif request.query_params.get('ok') %}
       <div class="note ok"><b>Salvo como proposta</b>Revise em <a href="/system">Sistema</a> para aplicar.</div>
     {% endif %}
-
     {% block body %}{% endblock %}
-   </div>
-  </main>
+  </div>
+</main>
+<div class="edge" aria-hidden="true"></div>
+
+<footer class="ft">
+  <span><b style="color:var(--ink)">Azimuth</b> · {{ t.version }} <span class="mono" style="font-size:12px">{{ version }}</span>{% if readonly %} · {{ t.readonly }}{% endif %}{% if snapshot_age is defined and snapshot_age >= 0 %} · {{ t.snapshot.replace('{s}', snapshot_age|string) }}{% endif %}</span>
+  <div class="fill"></div>
+  <span>{{ t.promo }}</span>
+</footer>
 
 </div>
 </body>

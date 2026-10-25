@@ -10,6 +10,9 @@ User=netadm
 Group=netadm
 WorkingDirectory=/opt/fwadmin
 Environment=PYTHONPATH=/opt/fwadmin
+# Somente leitura: o painel mostra o sistema vivo (fwctl observe + importador)
+# e recusa todo POST que mude algo. Trocar para 0 liga as acoes.
+Environment=FWADMIN_READONLY=1
 ExecStart=/usr/bin/python3 -m uvicorn fwadmin.web:app \
     --host 127.0.0.1 --port 8080 --proxy-headers --forwarded-allow-ips 127.0.0.1
 Restart=on-failure

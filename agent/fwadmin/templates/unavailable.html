@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Sem dados{% endblock %}
+{% block body %}
+<div class="page-h"><div><h1>Não consegui ler o sistema</h1><p class="lede">O painel não tem um modelo para mostrar, então nenhuma tela abre até isso ser resolvido.</p></div></div>
+<div class="note bad"><b>Motivo</b><span class="mono">{{ reason }}</span></div>
+<section class="card">
+  <div class="card-h"><h2 class="h2">O que costuma ser</h2></div>
+  <ul class="list">
+    <li><span class="n">1</span><span>O <span class="mono">fwctl observe</span> não está liberado no sudoers, ou o painel roda sem o usuário <span class="mono">netadm</span>.</span></li>
+    <li><span class="n">2</span><span>Algum arquivo do <span class="mono">/etc</span> tem uma forma que o importador ainda não conhece. O erro acima diz qual.</span></li>
+    <li><span class="n">3</span><span>No modo de edição: o motor ainda não tem <span class="mono">config.yaml</span>.</span></li>
+  </ul>
+</section>
+{% endblock %}

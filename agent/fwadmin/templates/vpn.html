@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% from "_icons.html" import action, icon %}
+{% block title %}{{ t.vpn }}{% endblock %}
+{% block body %}
+{% set wg = cfg.wireguard %}
+
+<div class="page-h">
+  <div><h1>{{ t.vpn }}</h1><p class="lede">Entrar na rede de casa de qualquer lugar, pelo WireGuard. Cada aparelho é um peer, com chave e endereço próprios.</p></div>
+  <button class="btn primary" type="button" disabled title="Entra com as ações">Novo peer</button>
+</div>
+
+{% if not wg.enabled %}
+  <div class="note"><b>Nenhum túnel de acesso remoto</b>Não há nenhum <span class="mono">.conf</span> com <span class="mono">ListenPort</span> em <span class="mono">/etc/wireguard</span>.</div>
+{% else %}
+<section class="card" aria-labelledby="h-tun">
+  <div class="card-h">
+    <h2 class="h2" id="h-tun">Túnel <span class="mono">{{ wg.device }}</span></h2>
+    {% if runtime %}<span class="chip ok">ativo</span>{% elif observed %}<span class="chip bad">parado</span>{% else %}<span class="chip mute">estado não observado</span>{% endif %}
+  </div>
+  <div class="kvs">
+    <div class="kv"><span>Rede do túnel</span><span class="mono">{{ wg.address }}</span></div>
+    <div class="kv"><span>Porta</span><span class="mono">{{ wg.listen_port }}/udp</span></div>
+    <div class="kv"><span>MTU</span><span class="mono">{{ wg.mtu or 'automático' }}</span></div>
+    <div class="kv"><span>Chave pública do servidor</span><span class="mono" style="font-size:12px">{{ runtime.public_key if runtime else '—' }}</span></div>
+    <div class="kv"><span>Chave privada</span><span class="mono">{{ wg.private_key_file }}</span></div>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="h-peers">
+  <div class="card-h"><h2 class="h2" id="h-peers">Peers</h2><span class="chip mute">{{ peers|length }}</span>{% if not observed %}<span class="muted">sem leitura do <span class="mono">wg show</span></span>{% endif %}</div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Aparelho</th><th>Endereço</th><th>Último contato</th><th>De onde</th><th class="num">Recebido</th><th class="num">Enviado</th><th>Situação</th><th><span class="vh">Ações</span></th></tr></thead>
+      <tbody>
+      {% for p in peers %}
+        <tr class="{{ '' if p.enabled else 'off' }}">
+          <td>{{ p.name }}</td>
+          <td class="mono">{{ p.ip }}</td>
+          <td class="muted">{{ p.seen if observed else '—' }}</td>
+          <td class="mono">{{ p.endpoint or '—' }}</td>
+          <td class="num mono">{{ p.rx|size if observed else '—' }}</td>
+          <td class="num mono">{{ p.tx|size if observed else '—' }}</td>
+          <td>{% if not p.enabled %}<span class="chip mute">revogado</span>{% elif p.online %}<span class="chip ok">conectado</span>{% elif p.stale %}<span class="chip warn">sem contato</span>{% else %}<span class="chip mute">ocioso</span>{% endif %}</td>
+          <td style="white-space:nowrap"><button class="btn" type="button" disabled title="O perfil e o QR nascem junto com a chave, ao criar o peer">{{ icon('download', 16) }}Perfil</button></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="8" class="muted">Nenhum peer.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="row muted">O perfil e o QR code de um aparelho só existem no momento em que ele é criado: a chave privada é gerada para ele e não fica guardada no firewall.</div>
+</section>
+{% endif %}
+
+{% for name in outside %}
+<section class="card quiet" aria-labelledby="h-ext-{{ name }}">
+  <div class="card-h"><h2 class="h2" id="h-ext-{{ name }}">Túnel <span class="mono">{{ name }}</span></h2><span class="chip mute">fora do painel</span>
+    {% if name in up %}<span class="chip ok">ativo</span>{% endif %}</div>
+  <div class="row"><span class="grow muted">Encontrado em <span class="mono">/etc/wireguard/{{ name }}.conf</span>. O modelo tem um túnel só; este continua sendo do arquivo, e o motor não mexe nele.</span></div>
+</section>
+{% endfor %}
+
+{% endblock %}

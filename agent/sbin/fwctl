@@ -13,6 +13,7 @@ da UI vira caminho, argumento de shell ou nome de arquivo.
     fwctl status     mostra se ha apply aguardando confirmacao
     fwctl inventory  o que o motor possui, e o que roda aqui sem dono
     fwctl seal       sela o /etc atual como referencia de posse
+    fwctl observe    fotografa o /etc vivo, sem segredos, para o painel ler
 """
 
 from __future__ import annotations
@@ -27,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.environ.get("FWADMIN_CODE", "/opt/fwadmin"))
 
-from fwadmin import ownership, paths, services  # noqa: E402
+from fwadmin import observe, ownership, paths, services  # noqa: E402
 from fwadmin.apply import (  # noqa: E402
     ApplyError,
     Plan,
@@ -442,6 +443,14 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_observe(args: argparse.Namespace) -> int:
+    """So le o sistema. E' o que o painel em modo somente leitura chama."""
+    require_root()
+    live = observe.collect()
+    say(f"fotografia em {live}")
+    return 0
+
+
 def cmd_inventory(args: argparse.Namespace) -> int:
     """O que o motor possui, e o que roda nesta caixa sem dono.
 
@@ -591,6 +600,9 @@ def main() -> int:
     p_inv.set_defaults(fn=cmd_inventory)
 
     sub.add_parser("seal", help="sela o /etc atual como referencia").set_defaults(fn=cmd_seal)
+    sub.add_parser("observe", help="fotografa o /etc vivo para o painel").set_defaults(
+        fn=cmd_observe
+    )
 
     p_apply = sub.add_parser("apply", help="aplica a config pendente")
     p_apply.add_argument("--yes", action="store_true", help="aceita recargas que derrubam trafego")

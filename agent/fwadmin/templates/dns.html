@@ -1,141 +1,62 @@
 {% extends "base.html" %}
-{% block title %}DNS e DHCP{% endblock %}
+{% block title %}{{ t.dns }}{% endblock %}
 {% block body %}
+{% set srv = unbound.server %}
+{% set fwd = unbound['forward-zone'] %}
+{% macro opt(key, default='—') %}{{ (srv.get(key) or [default])|join(', ') }}{% endmacro %}
+{% macro yes(key) %}{% set v = (srv.get(key) or ['no'])[-1] %}<span class="chip {{ 'ok' if v == 'yes' else 'mute' }}">{{ 'sim' if v == 'yes' else 'não' }}</span>{% endmacro %}
 
-<h1>DNS e DHCP</h1>
-<p class="lede">Tudo isto vira o <code>/etc/dnsmasq.conf</code>. Os registros de host são os mesmos que alimentam a página de Serviços.</p>
+<div class="page-h">
+  <div><h1>{{ t.dns }}</h1><p class="lede">O resolvedor recursivo, unbound. Responde ao dnsmasq tudo o que não é da rede de casa.</p></div>
+  <span class="chip {{ 'info' if fwd else 'ok' }} lg">{{ 'encaminha para terceiros' if fwd else 'resolve pelas raízes' }}</span>
+</div>
 
-<h2>Configuração</h2>
-<div class="card">
-  <form method="post" action="/dns/settings">
-    <div class="fields">
-      <div>
-        <label>Domínio local</label>
-        <input type="text" name="domain" value="{{ cfg.dns.domain }}">
-      </div>
-      <div>
-        <label>Resolvedores upstream</label>
-        <input type="text" name="upstream" value="{{ cfg.dns.upstream | join(', ') }}">
-        <div class="hint">Vazio = herda o resolv.conf.</div>
-      </div>
-      <div class="check">
-        <input type="checkbox" id="bind" name="bind_interfaces" value="1" {{ 'checked' if cfg.dns.bind_interfaces }}>
-        <label for="bind">Escutar só na LAN</label>
-      </div>
-      <div class="check">
-        <input type="checkbox" id="dh" name="dhcp_enabled" value="1" {{ 'checked' if cfg.dhcp.enabled }}>
-        <label for="dh">Servir DHCP</label>
-      </div>
-      <div>
-        <label>Início da faixa</label>
-        <input type="text" name="range_start" value="{{ cfg.dhcp.range.start }}">
-      </div>
-      <div>
-        <label>Fim da faixa</label>
-        <input type="text" name="range_end" value="{{ cfg.dhcp.range.end }}">
-      </div>
-      <div>
-        <label>Lease</label>
-        <input type="text" name="lease" value="{{ cfg.dhcp.range.lease }}" placeholder="12h">
-      </div>
+{% if not srv %}
+  <div class="note warn"><b>Não encontrei a config do unbound</b>Nem <span class="mono">/etc/unbound/unbound.conf</span> nem <span class="mono">unbound.conf.d</span> foram lidos. O unbound pode não estar instalado.</div>
+{% else %}
+
+<section class="card" aria-labelledby="h-flow">
+  <div class="card-h"><h2 class="h2" id="h-flow">Caminho de uma consulta</h2></div>
+  <div class="flow">
+    <span class="node">aparelho da LAN</span><span class="arrow">→</span>
+    <span class="node">dnsmasq <span class="mono muted">{{ cfg.lan.ipv4.ip }}:53</span></span><span class="arrow">→</span>
+    <span class="node">unbound <span class="mono muted">{{ opt('interface') }}</span></span><span class="arrow">→</span>
+    <span class="node">{% if fwd %}{{ fwd|map(attribute='forward-addr')|map('join', ', ')|join('; ') }}{% else %}servidores raiz{% endif %}</span>
+  </div>
+</section>
+
+{% if stats %}
+{% set q = stats.get('total.num.queries', '0')|int %}
+<div class="grid tiles">
+  <div class="card tile"><span class="lbl">Consultas</span><span class="big">{{ '{:,}'.format(q).replace(',', '.') }}</span><span class="muted">desde que o unbound subiu</span></div>
+  <div class="card tile"><span class="lbl">Do cache</span><span class="big">{{ (100 * stats.get('total.num.cachehits', '0')|int / q)|round|int if q else 0 }}%</span><span class="muted">{{ stats.get('total.num.prefetch', '0') }} renovadas antes de vencer</span></div>
+  <div class="card tile"><span class="lbl">Tempo de recursão</span><span class="big">{{ ((stats.get('total.recursion.time.avg', '0')|float) * 1000)|round|int }} ms</span><span class="muted">média das que saíram para a internet</span></div>
+</div>
+{% else %}
+  <div class="note"><b>Sem contadores</b>O <span class="mono">unbound-control</span> não respondeu. Os números aparecem quando o controle remoto local estiver habilitado.</div>
+{% endif %}
+
+<div class="grid two">
+  <section class="card" aria-labelledby="h-sec">
+    <div class="card-h"><h2 class="h2" id="h-sec">Segurança e privacidade</h2></div>
+    <div class="row"><span class="grow">Recusa respostas sem a assinatura DNSSEC esperada</span>{{ yes('harden-dnssec-stripped') }}</div>
+    <div class="row"><span class="grow">Pergunta só o necessário a cada servidor (QNAME minimisation)</span>{{ yes('qname-minimisation') }}</div>
+    <div class="row"><span class="grow">Usa NSEC para responder sem perguntar de novo</span>{{ yes('aggressive-nsec') }}</div>
+    <div class="row"><span class="grow">Esconde nome e versão</span>{{ yes('hide-identity') }}{{ yes('hide-version') }}</div>
+  </section>
+  <section class="card" aria-labelledby="h-cache">
+    <div class="card-h"><h2 class="h2" id="h-cache">Cache e acesso</h2></div>
+    <div class="kvs">
+      <div class="kv"><span>TTL mínimo · máximo</span><span class="mono">{{ opt('cache-min-ttl', '0') }} · {{ opt('cache-max-ttl', '86400') }} s</span></div>
+      <div class="kv"><span>Cache de mensagens · registros</span><span class="mono">{{ opt('msg-cache-size', '4m') }} · {{ opt('rrset-cache-size', '4m') }}</span></div>
+      <div class="kv"><span>Renova antes de vencer</span><span>{{ yes('prefetch') }}</span></div>
+      <div class="kv"><span>Threads</span><span class="mono">{{ opt('num-threads', '1') }}</span></div>
+      <div class="kv"><span>Quem pode perguntar</span><span class="mono">{{ opt('access-control') }}</span></div>
     </div>
-    <div class="row"><button class="primary" type="submit">Salvar</button></div>
-  </form>
+  </section>
 </div>
+{% endif %}
 
-<h2>Reservas por MAC ({{ cfg.dhcp.reservations | length }})</h2>
-<div class="card">
-  <form method="post" action="/dns/reservation">
-    <div class="fields">
-      <div><label>MAC</label><input type="text" name="mac" placeholder="aa:bb:cc:dd:ee:ff" required></div>
-      <div><label>IP</label><input type="text" name="ip" placeholder="10.0.0.50" required></div>
-      <div><label>Nome</label><input type="text" name="name" placeholder="impressora" required></div>
-      <div><label>Descrição</label><input type="text" name="description"></div>
-    </div>
-    <div class="row"><button type="submit">Adicionar reserva</button></div>
-  </form>
-</div>
-
-<div class="tablewrap" style="margin-top:0.9rem">
-  <table>
-    <thead><tr><th>IP</th><th>Nome</th><th>MAC</th><th>Descrição</th><th class="right"></th></tr></thead>
-    <tbody>
-      {% for r in cfg.dhcp.reservations %}
-        <tr>
-          <td class="mono nowrap">{{ r.ip }}</td>
-          <td>{{ r.name }}</td>
-          <td class="mono nowrap">{{ r.mac }}</td>
-          <td style="color:var(--text-dim)">{{ r.description }}</td>
-          <td class="right">
-            <form method="post" action="/dns/reservation/{{ r.mac }}/delete">
-              <button class="tiny danger" type="submit">remover</button>
-            </form>
-          </td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-
-<h2>Registros de host ({{ cfg.hosts | selectattr('dns') | list | length }})</h2>
-<div class="card">
-  <form method="post" action="/dns/host">
-    <div class="fields">
-      <div><label>Nome</label><input type="text" name="name" placeholder="nas" required>
-        <div class="hint">Sem ponto vira <code>nome.{{ cfg.dns.domain }}</code>.</div></div>
-      <div><label>IP</label><input type="text" name="ip" placeholder="10.0.0.60" required></div>
-      <div>
-        <label>Grupo no portal</label>
-        <select name="group">
-          <option value="">nenhum</option>
-          {% for g in cfg.portal.groups %}<option value="{{ g.id }}">{{ g.title }}</option>{% endfor %}
-        </select>
-      </div>
-      <div><label>Descrição</label><input type="text" name="description"></div>
-    </div>
-    <div class="row"><button type="submit">Adicionar host</button></div>
-  </form>
-</div>
-
-<div class="tablewrap" style="margin-top:0.9rem">
-  <table>
-    <thead><tr><th>Nome</th><th>IP</th><th>Grupo</th><th>Serviços</th><th class="right"></th></tr></thead>
-    <tbody>
-      {% for h in cfg.hosts %}
-        <tr>
-          <td class="mono">{{ h.fqdn(cfg.dns.domain) }}{% if not h.dns %} <span class="pill">sem DNS</span>{% endif %}</td>
-          <td class="mono nowrap">{{ h.ip }}</td>
-          <td style="color:var(--text-dim)">{{ h.group or '—' }}</td>
-          <td>{{ h.services | length or '' }}</td>
-          <td class="right">
-            <form method="post" action="/dns/host/{{ h.name }}/delete">
-              <button class="tiny danger" type="submit">remover</button>
-            </form>
-          </td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
-
-<h2>Leases ativos ({{ leases | length }})</h2>
-<div class="tablewrap">
-  <table>
-    <thead><tr><th>IP</th><th>Nome</th><th>MAC</th><th>Expira</th><th class="right"></th></tr></thead>
-    <tbody>
-      {% for lease in leases %}
-        <tr>
-          <td class="mono nowrap">{{ lease.ip }}</td>
-          <td>{{ lease.hostname or '—' }}</td>
-          <td class="mono nowrap">{{ lease.mac }}</td>
-          <td class="nowrap">{{ lease.expires_in }}</td>
-          <td class="right">{% if lease.reserved %}<span class="pill">reserva</span>{% endif %}</td>
-        </tr>
-      {% else %}
-        <tr><td colspan="5" style="color:var(--text-faint)">Nenhum lease ativo.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+<div class="note"><b>Ainda só leitura, mesmo quando as ações chegarem às outras telas</b>O modelo do motor ainda não tem o unbound. Esta página lê o arquivo de config e os contadores direto do sistema.</div>
 
 {% endblock %}

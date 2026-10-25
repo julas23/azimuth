@@ -1,0 +1,29 @@
+{#- Icones do menu, desenhados em 24x24 com traco. -#}
+{% macro icon(key, size=18) -%}
+<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if key == 'status' %}<path d="M3 13h4l3-8 4 14 3-6h4"/>
+{%- elif key == 'network' %}<rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 17h.01M11 17h.01M12 14V8M8 6a5 5 0 0 1 8 0M5.5 3.5a9 9 0 0 1 13 0"/>
+{%- elif key == 'firewall' %}<path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/>
+{%- elif key == 'fail2ban' %}<circle cx="12" cy="12" r="8"/><path d="M6.5 6.5l11 11"/>
+{%- elif key == 'dhcp' %}<rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M8 20h8M12 16v4"/>
+{%- elif key == 'domain' %}<path d="M4 6h10l6 6-6 6H4z"/><circle cx="9" cy="12" r="1.5"/>
+{%- elif key == 'dns' %}<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.7 3.5 5.7 3.5 9s-1 6.3-3.5 9c-2.5-2.7-3.5-5.7-3.5-9s1-6.3 3.5-9"/>
+{%- elif key == 'vpn' %}<rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+{%- elif key == 'system' %}<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>
+{%- elif key == 'bell' %}<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20a2 2 0 0 0 4 0"/>
+{%- elif key == 'menu' %}<path d="M4 7h16M4 12h16M4 17h16"/>
+{%- elif key == 'logout' %}<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>
+{%- elif key == 'download' %}<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>
+{%- elif key == 'lock' %}<rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+{%- endif %}
+</svg>
+{%- endmacro %}
+
+{% macro logo(size=26) -%}
+<svg width="{{ size }}" height="{{ size }}" viewBox="0 0 24 24" fill="none" stroke="#1D4ED8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></svg>
+{%- endmacro %}
+
+{#- Botao de acao: no somente leitura aparece, desabilitado, com o motivo. -#}
+{% macro action(label, readonly, kind='') -%}
+<button class="btn {{ kind }}" type="submit" {% if readonly %}disabled title="Somente leitura: ações entram na próxima etapa"{% endif %}>{{ label }}</button>
+{%- endmacro %}

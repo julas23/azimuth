@@ -1,324 +1,213 @@
-/* fwadmin — herda o design system do portal antigo (mesmos tokens e acentos)
-   e estende para formulario, tabela e navegacao. */
+/* Painel Azimuth — moldura fixa (cabecalho, menu, rodape, borda) e o
+   conteudo rolando no meio. Fontes do sistema: o painel abre sem internet. */
 
 :root {
-  --bg: #0e1116;
-  --bg-soft: #151a21;
-  --card: #1a2029;
-  --card-hover: #212934;
-  --border: #2a323d;
-  --text: #e6edf3;
-  --text-dim: #8b98a8;
-  --text-faint: #5d6875;
-  --accent: #4a9eff;
-  --ok: #22c55e;
-  --warn: #f59e0b;
-  --bad: #f87171;
-  --shadow: 0 1px 3px rgb(0 0 0 / 0.4);
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f4f6f9;
-    --bg-soft: #eaeef3;
-    --card: #ffffff;
-    --card-hover: #f8fafc;
-    --border: #d7dee7;
-    --text: #16202b;
-    --text-dim: #5a6875;
-    --text-faint: #8996a5;
-    --accent: #1d6fd0;
-    --ok: #15803d;
-    --warn: #b45309;
-    --bad: #c0392b;
-    --shadow: 0 1px 3px rgb(0 0 0 / 0.08);
-  }
+  --bg: #F4F6F8;
+  --surface: #fff;
+  --surface-2: #F9FAFB;
+  --line: #E2E6EB;
+  --line-2: #EEF0F3;
+  --ink: #111827;
+  --ink-2: #374151;
+  --muted: #5B6472;
+  --faint: #8A93A0;
+  --accent: #1D4ED8;
+  --accent-ink: #1E40AF;
+  --accent-soft: #EEF3FE;
+  --ok-bg: #DCFCE7; --ok: #166534; --ok-dot: #16A34A;
+  --warn-bg: #FEF3C7; --warn: #92400E; --warn-dot: #D97706; --warn-line: #F3D38B;
+  --bad-bg: #FEE2E2; --bad: #991B1B; --bad-dot: #DC2626;
+  --info-bg: #DBEAFE; --info: #1E40AF;
+  --mute-bg: #F1F3F5; --mute: #4B5563;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
-
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-}
-
-code, .mono, pre {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.85em;
-}
-
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); }
 a { color: var(--accent); }
+a:hover { color: var(--accent-ink); }
+h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+.h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.mono { font-family: var(--mono); font-size: 13px; }
+.muted { color: var(--muted); }
+.lede { margin: 4px 0 0; color: var(--muted); }
+.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+b, strong { font-weight: 600; }
 
-/* ---- layout --------------------------------------------------------- */
+/* --- moldura --------------------------------------------------------- */
 
-/* A pagina em si nunca rola: a altura e' travada na do viewport e quem rola e'
-   o <main>. Assim o menu fica parado, sem acompanhar o conteudo. */
 .shell {
-  display: flex;
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr) 10px;
+  grid-template-rows: 60px minmax(0, 1fr) auto;
+  grid-template-areas: "hd hd hd" "nav main edge" "ft ft ft";
   height: 100vh;
-  height: 100dvh; /* no mobile a barra de endereco nao rouba altura */
-  overflow: hidden;
 }
+.hd { grid-area: hd; display: flex; align-items: center; gap: 12px; padding: 0 16px 0 20px; background: var(--surface); border-bottom: 1px solid var(--line); position: relative; z-index: 3; }
+.side { grid-area: nav; display: flex; flex-direction: column; gap: 2px; padding: 14px 10px; background: var(--surface); border-right: 1px solid var(--line); overflow-y: auto; }
+.frame { grid-area: main; overflow-y: auto; min-width: 0; }
+.frame-in { max-width: 1180px; margin: 0 auto; padding: 28px 28px 48px; display: flex; flex-direction: column; gap: 20px; }
+.edge { grid-area: edge; background: var(--surface); border-left: 1px solid var(--line); }
+.ft { grid-area: ft; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 20px; padding: 10px 20px; background: var(--surface); border-top: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+.ft a { text-decoration: none; }
+.ft a:hover { text-decoration: underline; }
 
-nav.side {
-  flex: 0 0 220px;
-  background: var(--bg-soft);
-  border-right: 1px solid var(--border);
-  padding: 1.25rem 0;
-  display: flex;
-  flex-direction: column;
-  /* Estica ate a altura do .shell por padrao (align-items: stretch). Se os
-     itens passarem disso, o menu rola dentro de si mesmo em vez de esticar a
-     pagina. O contain evita que a rolagem vaze para o main ao chegar no fim. */
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-nav.side .brand {
-  padding: 0 1.25rem 1rem;
-  margin-bottom: 0.5rem;
-  border-bottom: 1px solid var(--border);
-}
-nav.side .brand b { font-size: 1.1rem; letter-spacing: -0.02em; }
-nav.side .brand div { color: var(--text-faint); font-size: 0.78rem; }
-nav.side a {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.55rem 1.25rem;
-  color: var(--text-dim);
-  text-decoration: none;
-  border-left: 3px solid transparent;
-  font-size: 0.92rem;
-}
-nav.side a:hover { background: var(--card-hover); color: var(--text); }
-nav.side a.on {
-  background: var(--card);
-  color: var(--text);
-  border-left-color: var(--accent);
-  font-weight: 600;
-}
-nav.side .ico { width: 1.1rem; text-align: center; opacity: 0.8; }
-nav.side .foot { margin-top: auto; padding: 1rem 1.25rem 0; border-top: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; }
+.brand b { font-size: 17px; letter-spacing: -0.01em; }
+.brand:hover { color: var(--ink); }
 
-/* O unico painel que rola. min-height: 0 e' obrigatorio: sem isso um filho
-   flex se recusa a encolher abaixo do proprio conteudo e o overflow-y nunca
-   chega a valer.
+.nav-i { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px; border-radius: 8px; color: var(--ink-2); text-decoration: none; font-weight: 500; }
+.nav-i:hover { background: #F3F4F6; color: var(--ink); }
+.nav-i.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-i.sub { padding-left: 30px; min-height: 34px; font-size: 13px; }
+.nav-i.sub svg { width: 15px; height: 15px; }
+.nav-i svg { flex: none; }
+.nav-l { flex: 1; min-width: 0; }
+.nav-s { font-size: 11px; color: var(--faint); font-weight: 500; font-family: var(--mono); }
+.nav-i.on .nav-s { color: #5B7FD6; }
+.nav-sep { height: 1px; background: var(--line-2); margin: 10px 4px; }
+.nav-fill { flex: 1; }
 
-   Quem rola e quem limita a largura sao elementos diferentes de proposito: se
-   o max-width ficasse aqui, a barra de rolagem nasceria na borda dos 1200px,
-   flutuando no meio de um monitor largo em vez de na borda da janela. */
-main {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-main > .page { padding: 1.75rem 2rem 4rem; max-width: 1200px; }
+.hbtn { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 8px; border: 0; background: transparent; color: var(--mute); cursor: pointer; list-style: none; }
+.hbtn::-webkit-details-marker { display: none; }
+.hbtn:hover { background: #F3F4F6; color: var(--ink); }
+.badge { position: absolute; top: 5px; right: 4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--bad-dot); color: #fff; font-size: 10.5px; font-weight: 700; line-height: 16px; text-align: center; }
+.lang { height: 36px; padding: 0 8px; border: 1px solid #D1D5DB; border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; max-width: 170px; }
+.user { display: flex; align-items: center; gap: 10px; padding-left: 12px; border-left: 1px solid var(--line-2); }
+.user form { margin: 0; }
+.avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--info-bg); color: var(--info); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; flex: none; text-transform: uppercase; }
+.uinfo { line-height: 1.25; }
+.uinfo .muted { font-size: 12px; }
 
-h1 { margin: 0 0 0.35rem; font-size: 1.5rem; font-weight: 650; letter-spacing: -0.02em; }
-h1 + .lede { margin: 0 0 1.75rem; color: var(--text-dim); font-size: 0.92rem; }
-h2 {
-  margin: 2rem 0 0.9rem;
-  font-size: 0.78rem;
-  font-weight: 650;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--text-dim);
-}
-h2:first-of-type { margin-top: 0; }
+.notif { position: relative; }
+.notif > summary { list-style: none; }
+.pop { position: absolute; top: 48px; right: 0; width: 360px; max-width: calc(100vw - 32px); background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px rgba(17, 24, 39, .12); }
+.pop-h { display: flex; align-items: center; gap: 8px; padding: 12px 16px; }
+.pop-h b { flex: 1; }
+.pop .it { display: flex; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--line-2); color: var(--ink); text-decoration: none; }
+.pop .it:hover { background: var(--surface-2); color: var(--ink); }
+.pop .it .dot { margin-top: 6px; }
 
-/* ---- cartoes -------------------------------------------------------- */
+.burger { display: none; }
+#nav-toggle { position: absolute; opacity: 0; pointer-events: none; }
 
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1.1rem 1.25rem;
-  box-shadow: var(--shadow);
-}
-.card + .card { margin-top: 0.9rem; }
-.card h3 { margin: 0 0 0.75rem; font-size: 1rem; font-weight: 620; }
+.ro-band { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 16px; border: 1px solid #BFD3FB; background: var(--accent-soft); border-radius: 10px; color: var(--accent-ink); }
+.ro-band b { color: var(--accent-ink); }
 
-.grid { display: grid; gap: 0.9rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-
-.stat .k { color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
-.stat .v { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; margin-top: 0.15rem; }
-.stat .sub { color: var(--text-faint); font-size: 0.8rem; }
-
-/* ---- selos ---------------------------------------------------------- */
-
-.pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.15rem 0.55rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-soft);
-  color: var(--text-dim);
-  font-size: 0.74rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.pill.ok   { color: var(--ok);   border-color: var(--ok); }
-.pill.warn { color: var(--warn); border-color: var(--warn); }
-.pill.bad  { color: var(--bad);  border-color: var(--bad); }
-.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-
-/* ---- avisos --------------------------------------------------------- */
-
-.note {
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  background: var(--card);
-  border-radius: 8px;
-  padding: 0.85rem 1.1rem;
-  margin-bottom: 1.25rem;
-  font-size: 0.9rem;
-}
-.note.warn { border-left-color: var(--warn); }
-.note.bad  { border-left-color: var(--bad); }
-.note.ok   { border-left-color: var(--ok); }
-.note b { display: block; margin-bottom: 0.2rem; }
-.note .actions { margin-top: 0.7rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
-
-/* ---- formularios ---------------------------------------------------- */
-
-.fields { display: grid; gap: 0.85rem; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
-label { display: block; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.25rem; }
-
-input[type=text], input[type=password], input[type=number], input[type=search], select, textarea {
-  width: 100%;
-  padding: 0.5rem 0.65rem;
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  color: var(--text);
-  font: inherit;
-  font-size: 0.9rem;
-}
-input:focus, select:focus, textarea:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-}
-input[disabled], select[disabled] { opacity: 0.55; cursor: not-allowed; }
-.check { display: flex; align-items: center; gap: 0.45rem; margin-top: 1.35rem; }
-.check input { width: auto; }
-.check label { margin: 0; color: var(--text); font-size: 0.9rem; }
-.hint { color: var(--text-faint); font-size: 0.78rem; margin-top: 0.3rem; }
-
-button, .btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.5rem 0.95rem;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg-soft);
-  color: var(--text);
-  font: inherit;
-  font-size: 0.88rem;
-  font-weight: 550;
-  cursor: pointer;
-  text-decoration: none;
-}
-button:hover, .btn:hover { background: var(--card-hover); border-color: var(--accent); }
-button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-button.primary:hover { filter: brightness(1.1); }
-button.danger { color: var(--bad); border-color: var(--bad); }
-button.danger:hover { background: var(--bad); color: #fff; }
-button.tiny { padding: 0.2rem 0.45rem; font-size: 0.78rem; }
-.row { display: flex; gap: 0.6rem; align-items: flex-end; flex-wrap: wrap; margin-top: 1rem; }
-
-/* ---- tabelas -------------------------------------------------------- */
-
-.tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-th {
-  text-align: left;
-  padding: 0.6rem 0.9rem;
-  background: var(--bg-soft);
-  color: var(--text-dim);
-  font-size: 0.74rem;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  border-bottom: 1px solid var(--border);
-}
-td { padding: 0.55rem 0.9rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
-tr:last-child td { border-bottom: none; }
-tbody tr:hover { background: var(--card-hover); }
-td.right, th.right { text-align: right; }
-td.nowrap { white-space: nowrap; }
-
-/* ---- saida de comando ----------------------------------------------- */
-
-pre.out {
-  background: var(--bg-soft);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.9rem 1.1rem;
-  overflow-x: auto;
-  margin: 0;
-  color: var(--text-dim);
-  line-height: 1.45;
-  white-space: pre;
-}
-pre.out.diff .add { color: var(--ok); }
-pre.out.diff .del { color: var(--bad); }
-
-/* ---- portal de servicos --------------------------------------------- */
-
-.services { display: grid; gap: 0.85rem; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
-.svc {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.9rem 1rem;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--group, var(--accent));
-  border-radius: 10px;
-  text-decoration: none;
-  color: inherit;
-  transition: transform 0.14s, border-color 0.14s, background 0.14s;
-}
-.svc:hover { background: var(--card-hover); transform: translateY(-2px); border-color: var(--group, var(--accent)); }
-.svc .top { display: flex; align-items: center; gap: 0.55rem; }
-.svc .name { font-weight: 600; }
-.svc .desc { color: var(--text-dim); font-size: 0.84rem; flex: 1; }
-.svc .url { color: var(--text-faint); font-size: 0.74rem; word-break: break-all; }
-.group-head { display: flex; align-items: center; gap: 0.6rem; margin: 1.75rem 0 0.85rem; }
-.group-head::before { content: ""; width: 10px; height: 10px; border-radius: 3px; background: var(--group, var(--accent)); }
-.group-head .t { font-weight: 650; font-size: 0.95rem; }
-.group-head .s { color: var(--text-faint); font-size: 0.82rem; }
-
-/* ---- login ---------------------------------------------------------- */
-
-.center { display: grid; place-items: center; min-height: 100vh; padding: 1.5rem; }
-.center .card { width: min(400px, 100%); }
-
-/* ---- responsivo ----------------------------------------------------- */
-
+@media (max-width: 1100px) { .uinfo { display: none; } }
 @media (max-width: 860px) {
-  .shell { flex-direction: column; }
-  nav.side {
-    flex: none;
-    flex-direction: row;
-    /* Barra horizontal: rola de lado, nunca para baixo. Precisa sobrescrever o
-       overflow-y do layout de coluna, senao sobra uma barra vertical inutil. */
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding: 0;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-  nav.side .brand, nav.side .foot { display: none; }
-  nav.side a { border-left: none; border-bottom: 3px solid transparent; white-space: nowrap; }
-  nav.side a.on { border-left: none; border-bottom-color: var(--accent); }
-  main > .page { padding: 1.25rem 1rem 3rem; }
+  /* No celular a pagina rola inteira: rodape fixo comeria metade da tela. */
+  .shell { grid-template-columns: minmax(0, 1fr); grid-template-areas: "hd" "main" "ft"; height: auto; min-height: 100vh; }
+  .hd { position: sticky; top: 0; }
+  .frame { overflow: visible; }
+  .ro-chip .t, .avatar { display: none; }
+  .ro-chip { padding: 0 9px; }
+  .brand b { font-size: 16px; }
+  .burger { display: inline-flex; }
+  .side { display: none; position: fixed; top: 60px; left: 0; bottom: 0; width: 260px; z-index: 4; box-shadow: 8px 0 24px rgba(17, 24, 39, .12); }
+  #nav-toggle:checked ~ .side { display: flex; }
+  .edge, .host { display: none; }
+  .frame-in { padding: 20px 16px 40px; }
+  .hd { padding: 0 8px; gap: 6px; }
+  .lang { max-width: 76px; padding: 0 4px; }
+  .user { padding-left: 6px; }
 }
+
+/* --- pecas ----------------------------------------------------------- */
+
+.page-h { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; }
+.page-h > div:first-child { flex: 1 1 420px; }
+
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.card.warn { border-color: var(--warn-line); }
+.card.quiet { background: var(--surface-2); }
+.card-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 16px 20px; border-bottom: 1px solid var(--line-2); }
+.card-h:last-child { border-bottom: 0; }
+.card.warn > .card-h { background: #FFFBEB; border-radius: 10px 10px 0 0; }
+.card-b { padding: 16px 20px; }
+.card-b > p:first-child { margin-top: 0; }
+.card-b > p:last-child { margin-bottom: 0; }
+.fill { flex: 1; }
+
+.grid { display: grid; gap: 20px; }
+.grid.tiles { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.grid.two { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); }
+@media (max-width: 480px) { .grid.two { grid-template-columns: minmax(0, 1fr); } }
+
+.tile { display: flex; flex-direction: column; gap: 6px; padding: 18px 20px; text-decoration: none; color: var(--ink); }
+a.tile:hover { border-color: #93B4F5; color: var(--ink); }
+.tile .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tile .lbl { font-size: 12px; font-weight: 600; color: var(--mute); text-transform: uppercase; letter-spacing: .04em; }
+.tile .big { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 20px; border-top: 1px solid var(--line-2); }
+.row:first-child { border-top: 0; }
+.row .grow { flex: 1 1 260px; min-width: 0; }
+
+.kvs { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.kv { display: flex; flex-direction: column; gap: 2px; padding: 14px 20px; border-top: 1px solid var(--line-2); min-width: 0; }
+.kv > span:first-child { font-size: 12px; font-weight: 600; color: var(--mute); }
+.kv > span:last-child { overflow-wrap: anywhere; }
+
+.scroll { overflow-x: auto; position: relative; }
+.tbl { width: 100%; border-collapse: collapse; }
+.tbl th { text-align: left; font-size: 12px; font-weight: 600; color: var(--mute); padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); white-space: nowrap; }
+.tbl td { padding: 10px 16px; border-bottom: 1px solid var(--line-2); vertical-align: middle; }
+.tbl tr:last-child td { border-bottom: 0; }
+.tbl tr.off td { color: var(--faint); }
+.tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.chip.ok { background: var(--ok-bg); color: var(--ok); }
+.chip.bad { background: var(--bad-bg); color: var(--bad); }
+.chip.warn { background: var(--warn-bg); color: var(--warn); }
+.chip.info { background: var(--info-bg); color: var(--info); }
+.chip.mute { background: var(--mute-bg); color: var(--mute); }
+.chip.lg { height: 30px; padding: 0 12px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; background: var(--faint); }
+.dot.ok { background: var(--ok-dot); }
+.dot.warn { background: var(--warn-dot); }
+.dot.bad { background: var(--bad-dot); }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid #D1D5DB; background: var(--surface); color: var(--ink); font: inherit; font-weight: 500; cursor: pointer; text-decoration: none; white-space: nowrap; }
+.btn:hover { background: #F3F4F6; color: var(--ink); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { background: var(--accent-ink); color: #fff; }
+.btn.danger { border-color: #FCA5A5; color: var(--bad); }
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.btn:disabled:hover { background: var(--surface); }
+.btn.primary:disabled:hover { background: var(--accent); }
+
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field label { font-size: 12px; font-weight: 600; color: var(--mute); }
+.input { height: 40px; padding: 0 12px; border: 1px solid #D1D5DB; border-radius: 8px; font: inherit; background: var(--surface); color: var(--ink); width: 100%; }
+.input:disabled { background: var(--surface-2); color: var(--muted); }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; padding: 16px 20px; }
+
+.list { margin: 0; padding: 0; list-style: none; }
+.list li { display: flex; gap: 10px; padding: 10px 20px; border-top: 1px solid var(--line-2); }
+.list li:first-child { border-top: 0; }
+.list li .n { flex: none; width: 24px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+.out { margin: 0; padding: 14px 20px; background: #0F172A; color: #E2E8F0; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; overflow-x: auto; border-radius: 0 0 10px 10px; max-height: 480px; }
+
+.note { padding: 12px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); }
+.note b { display: block; margin-bottom: 2px; }
+.note.ok { background: #F0FDF4; border-color: #BBF7D0; }
+.note.bad { background: #FEF2F2; border-color: #FECACA; }
+.note.warn { background: #FFFBEB; border-color: var(--warn-line); }
+
+.empty { padding: 20px; color: var(--muted); }
+
+.flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 16px 20px; }
+.flow .node { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+.flow .arrow { color: var(--faint); }
+
+/* --- entrar ---------------------------------------------------------- */
+
+.center { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+.login { width: 100%; max-width: 380px; padding: 28px; display: flex; flex-direction: column; gap: 16px; }
+.login .brand { margin-bottom: 4px; }
+.login .btn { width: 100%; justify-content: center; }

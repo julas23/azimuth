@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "_icons.html" import action %}
+{% block title %}{{ t.domain }}{% endblock %}
+{% block body %}
+{% set records = cfg.hosts|selectattr('dns')|list %}
+
+<div class="page-h">
+  <div><h1>{{ t.domain }}</h1><p class="lede">Os nomes da rede de casa em <span class="mono">{{ cfg.dns.domain }}</span>, respondidos pelo dnsmasq. O que não for daqui segue para o <a href="/dns">DNS</a>.</p></div>
+</div>
+
+{% for c in conflicts %}
+  <div class="note warn"><b>{{ c.name }} aponta para o IP errado</b>O domínio diz <span class="mono">{{ c.dns }}</span>; a reserva do DHCP entrega <span class="mono">{{ c.dhcp }}</span>. Quem acessa pelo nome chega no aparelho errado, ou em nenhum.</div>
+{% endfor %}
+
+<section class="card" aria-labelledby="h-zone">
+  <div class="card-h"><h2 class="h2" id="h-zone">Zona</h2></div>
+  <div class="kvs">
+    <div class="kv"><span>Domínio</span><span class="mono">{{ cfg.dns.domain }}</span></div>
+    <div class="kv"><span>Só responde localmente</span><span>{{ 'sim' if cfg.dns.local_only else 'não' }}</span></div>
+    <div class="kv"><span>Nome do DHCP vira registro</span><span>{{ 'sim' if cfg.dns.expand_hosts else 'não' }}</span></div>
+    <div class="kv"><span>Escuta só na interface da LAN</span><span>{{ 'sim' if cfg.dns.bind_interfaces else 'não' }}</span></div>
+    <div class="kv"><span>Encaminha para</span><span class="mono">{{ cfg.dns.upstream|join(', ') or '—' }}</span></div>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="h-rec">
+  <div class="card-h"><h2 class="h2" id="h-rec">Registros</h2><span class="chip mute">{{ records|length }}</span></div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Nome</th><th>Aponta para</th><th>Grupo</th><th>Descrição</th><th><span class="vh">Ações</span></th></tr></thead>
+      <tbody>
+      {% set wrong = conflicts|map(attribute='name')|list %}
+      {% for h in records|sort(attribute='name') %}
+        <tr><td class="mono">{{ h.name }}.{{ cfg.dns.domain }}</td><td class="mono">{{ h.ip }}{% if (h.name ~ '.' ~ cfg.dns.domain) in wrong %} <span class="chip warn">conflito</span>{% endif %}</td><td>{{ h.group or '—' }}</td><td class="muted">{{ h.description }}</td>
+          <td><form method="post" action="/dns/host/{{ h.name }}/delete">{{ action('Remover', readonly) }}</form></td></tr>
+      {% else %}
+        <tr><td colspan="5" class="muted">Nenhum registro manual; só os nomes que vêm do DHCP.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% set outside = cfg.hosts|rejectattr('dns')|list %}
+{% if outside %}
+<section class="card quiet" aria-labelledby="h-out">
+  <div class="card-h"><h2 class="h2" id="h-out">Fora do DNS</h2><span class="chip mute">{{ outside|length }}</span><span class="muted">conhecidos pelo modelo, mas sem registro na zona</span></div>
+  {% for h in outside %}<div class="row"><span class="mono grow">{{ h.name }}</span><span class="muted">{{ h.description }}</span></div>{% endfor %}
+</section>
+{% endif %}
+
+{% endblock %}

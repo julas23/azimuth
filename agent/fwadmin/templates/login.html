@@ -1,31 +1,23 @@
+{% from "_icons.html" import logo %}
 <!doctype html>
-<html lang="pt-BR">
+<html lang="{{ lang }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Entrar · fwadmin</title>
+<title>Entrar · Azimuth</title>
 <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <div class="center">
-  <div class="card">
-    <h1>fwadmin</h1>
-    <p class="lede">Administração do firewall. Acessível apenas pela LAN.</p>
-
+  <form class="card login" method="post" action="/login">
+    <span class="brand">{{ logo() }}<b>Azimuth</b></span>
+    <p class="lede" style="margin:0">Administração do firewall. Acessível apenas pela LAN.</p>
     {% if error %}<div class="note bad">{{ error }}</div>{% endif %}
-
-    <form method="post" action="/login">
-      <div style="margin-bottom:0.85rem">
-        <label for="u">Usuário</label>
-        <input id="u" name="username" type="text" autocomplete="username" required autofocus>
-      </div>
-      <div style="margin-bottom:1.1rem">
-        <label for="p">Senha</label>
-        <input id="p" name="password" type="password" autocomplete="current-password" required>
-      </div>
-      <button class="primary" type="submit" style="width:100%;justify-content:center">Entrar</button>
-    </form>
-  </div>
+    <div class="field"><label for="u">Usuário</label><input class="input" id="u" name="username" type="text" autocomplete="username" required autofocus></div>
+    <div class="field"><label for="p">Senha</label><input class="input" id="p" name="password" type="password" autocomplete="current-password" required></div>
+    <button class="btn primary" type="submit">Entrar</button>
+    {% if readonly %}<p class="muted" style="margin:0;font-size:12.5px">{{ t.readonly }}: {{ t.readonly_hint }}</p>{% endif %}
+  </form>
 </div>
 </body>
 </html>

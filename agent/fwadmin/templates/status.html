@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}{{ t.status }}{% endblock %}
+{% block body %}
+{% set bad = alerts|selectattr('level', 'equalto', 'bad')|list %}
+
+<div class="page-h">
+  <div>
+    <h1>{% if bad %}{{ bad|length }} problema{{ 's' if bad|length > 1 }} agora{% elif alerts %}Tudo funcionando, com {{ alerts|length }} ponto{{ 's' if alerts|length > 1 }} de atenção{% else %}Tudo funcionando{% endif %}</h1>
+    <p class="lede">
+      {% set active = wans|selectattr('active')|first %}
+      {% if active %}Internet saindo por {{ active.description or active.name }}{% else %}Nenhuma WAN com a rota padrão agora{% endif %}{% if cfg.routing.backup %}, com {{ cfg.iface(cfg.routing.backup).description or cfg.routing.backup }} de reserva{% endif %}.
+      Ligado há {{ system.uptime or '?' }}.
+    </p>
+  </div>
+</div>
+
+{% if readonly %}
+<div class="ro-band"><b>{{ t.readonly }}.</b> <span>{{ t.readonly_hint }} Os dados vêm dos arquivos do sistema, lidos pelo importador; em <a href="/system">Sistema</a> está o que o motor faria diferente se assumisse.</span></div>
+{% endif %}
+
+<section class="card{% if alerts %} warn{% endif %}" aria-labelledby="h-att">
+  <div class="card-h"><h2 class="h2" id="h-att">Pede atenção</h2>{% if alerts %}<span class="chip warn">{{ alerts|length }}</span>{% endif %}</div>
+  {% for a in alerts %}
+    <div class="row"><span class="dot {{ a.level }}"></span><div class="grow"><b>{{ a.title }}</b><div class="muted">{{ a.detail }}</div></div><a class="btn" href="{{ a.href }}">Ver</a></div>
+  {% else %}
+    <div class="empty">{{ t.nonotif }}.</div>
+  {% endfor %}
+</section>
+
+<div class="grid tiles">
+  {% for w in wans %}
+  <a class="card tile" href="/network">
+    <div class="top"><span class="lbl">{{ w.description or w.name }}</span>
+      {% if not w.up %}<span class="chip bad">sem link</span>{% elif w.active %}<span class="chip ok">em uso</span>{% else %}<span class="chip mute">reserva</span>{% endif %}</div>
+    <span class="big mono" style="font-size:18px">{{ w.address or '—' }}</span>
+    <span class="muted">{{ w.device }}{% if w.errors %} · {{ w.errors }} erros{% endif %}</span>
+  </a>
+  {% endfor %}
+  <a class="card tile" href="/dhcp">
+    <div class="top"><span class="lbl">Aparelhos na LAN</span><span class="chip info">DHCP</span></div>
+    <span class="big">{{ leases|length }} com lease</span>
+    <span class="muted">{{ leases|selectattr('reserved')|list|length }} com reserva · {{ cfg.dhcp.reservations|length }} reservas no total</span>
+  </a>
+  <a class="card tile" href="/vpn">
+    <div class="top"><span class="lbl">VPN</span>{% if cfg.wireguard.enabled %}<span class="chip ok">{{ cfg.wireguard.device }}</span>{% else %}<span class="chip mute">desligada</span>{% endif %}</div>
+    <span class="big">{% if cfg.wireguard.enabled %}{{ online }} de {{ peers|length }} conectados{% else %}—{% endif %}</span>
+    <span class="muted">{% if snapshot.wireguard %}handshake nos últimos 3 min{% else %}estado do túnel não observado{% endif %}</span>
+  </a>
+  <a class="card tile" href="/fail2ban">
+    <div class="top"><span class="lbl">Fail2Ban</span>{% if snapshot.fail2ban %}<span class="chip {{ 'warn' if banned else 'ok' }}">{{ banned }} banidos</span>{% else %}<span class="chip mute">sem dados</span>{% endif %}</div>
+    <span class="big">{% if snapshot.fail2ban %}{{ snapshot.fail2ban.jails|length }} jails{% else %}—{% endif %}</span>
+    <span class="muted">{% if snapshot.fail2ban %}{{ snapshot.fail2ban.jails|map(attribute='name')|join(', ') }}{% else %}fail2ban parado ou ausente{% endif %}</span>
+  </a>
+  <a class="card tile" href="/dns">
+    <div class="top"><span class="lbl">DNS</span>{% if snapshot.unbound_stats %}<span class="chip ok">unbound</span>{% else %}<span class="chip mute">sem contadores</span>{% endif %}</div>
+    {% if snapshot.unbound_stats and snapshot.unbound_stats.get('total.num.queries') %}
+      {% set q = snapshot.unbound_stats['total.num.queries']|int %}{% set hits = snapshot.unbound_stats.get('total.num.cachehits', '0')|int %}
+      <span class="big">{{ '{:,}'.format(q).replace(',', '.') }} consultas</span>
+      <span class="muted">{{ (100 * hits / q)|round|int if q else 0 }}% do cache</span>
+    {% else %}
+      <span class="big">{{ cfg.dns.domain }}</span>
+      <span class="muted">domínio local</span>
+    {% endif %}
+  </a>
+</div>
+
+<div class="grid two">
+  <section class="card" aria-labelledby="h-svc">
+    <div class="card-h"><h2 class="h2" id="h-svc">Serviços</h2><div class="fill"></div><a href="/system">Sistema</a></div>
+    {% for s in services %}
+      <div class="row"><span class="dot {{ 'ok' if s.ok else ('mute' if s.active == 'unknown' else 'bad') }}"></span><span class="mono grow">{{ s.unit }}</span><span class="muted">{{ s.active }}</span></div>
+    {% endfor %}
+  </section>
+
+  <section class="card" aria-labelledby="h-hist">
+    <div class="card-h"><h2 class="h2" id="h-hist">Atividade no painel</h2><div class="fill"></div><a href="/system#auditoria">Tudo</a></div>
+    {% for row in audit %}
+      <div class="row"><span class="mono muted" style="flex:0 0 96px">{{ row['at']|int|timestamp }}</span><span class="grow">{{ row['action'] }}</span><span class="muted">{{ row['username'] or '—' }}</span></div>
+    {% else %}
+      <div class="empty">Nada registrado ainda.</div>
+    {% endfor %}
+  </section>
+</div>
+
+{% endblock %}

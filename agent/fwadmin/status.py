@@ -200,12 +200,14 @@ class ServiceState:
         return self.active == "active"
 
 
-WATCHED = ("dnsmasq", "nftables", "fwadmin", "fwadmin-failover.timer", "fail2ban", "nginx")
+WATCHED = ("nftables", "dnsmasq", "unbound", "fail2ban", "fwadmin", "fwadmin-failover.timer", "nginx")
 
 
-def services() -> list[ServiceState]:
+def services(extra: tuple[str, ...] = ()) -> list[ServiceState]:
+    """Estado das unidades da stack; `extra` traz as que dependem da config,
+    como o wg-quick@<tunel>."""
     out = []
-    for unit in WATCHED:
+    for unit in (*WATCHED, *extra):
         out.append(
             ServiceState(
                 unit=unit,

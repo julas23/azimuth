@@ -1,185 +1,78 @@
 {% extends "base.html" %}
-{% block title %}Firewall{% endblock %}
+{% from "_icons.html" import action %}
+{% block title %}{{ t.firewall }}{% endblock %}
 {% block body %}
+{% set fw = cfg.firewall %}
 
-<h1>Firewall</h1>
-<p class="lede">Regras em termos de zona e serviço. O <code>nft</code> é gerado a partir delas — e validado com <code>nft -c</code> antes de qualquer coisa entrar em vigor.</p>
-
-<h2>Políticas padrão</h2>
-<div class="card">
-  <form method="post" action="/firewall/policy">
-    <div class="fields">
-      <div>
-        <label>Entrada (tráfego para o próprio firewall)</label>
-        <select name="input_policy">
-          {% for p in ['accept', 'drop', 'reject'] %}
-            <option value="{{ p }}" {{ 'selected' if cfg.firewall.input_policy.value == p }}>{{ p }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label>Encaminhamento (tráfego atravessando)</label>
-        <select name="forward_policy">
-          {% for p in ['accept', 'drop', 'reject'] %}
-            <option value="{{ p }}" {{ 'selected' if cfg.firewall.forward_policy.value == p }}>{{ p }}</option>
-          {% endfor %}
-        </select>
-      </div>
-    </div>
-    <div class="row"><button class="primary" type="submit">Salvar</button></div>
-  </form>
-
-  {% if cfg.firewall.input_policy.value == 'accept' %}
-    <div class="note warn" style="margin:1rem 0 0">
-      <b>A política de entrada está em <code>accept</code></b>
-      Os bloqueios funcionam por regras explícitas, então qualquer serviço novo
-      que você suba no firewall nasce alcançável pela WAN. Trocar para
-      <code>drop</code> inverte isso — mas exige liberar antes tudo que precisa
-      entrar, ou você se tranca para fora.
-    </div>
-  {% endif %}
+<div class="page-h">
+  <div><h1>{{ t.firewall }}</h1><p class="lede">O que entra no próprio firewall, o que atravessa ele entre LAN e internet, e as portas abertas para dentro.</p></div>
 </div>
 
-{% for chain, rules, titulo in [('input', cfg.firewall.input_rules, 'Regras de entrada'), ('forward', cfg.firewall.forward_rules, 'Regras de encaminhamento')] %}
-  <h2>{{ titulo }} ({{ rules | length }})</h2>
-  <div class="tablewrap">
-    <table>
-      <thead>
-        <tr><th>#</th><th>Ação</th><th>Origem</th><th>Destino</th><th>Proto</th><th>Portas</th><th>Descrição</th><th class="right">Ordem</th><th></th></tr>
-      </thead>
+<div class="grid tiles">
+  <div class="card tile"><div class="top"><span class="lbl">Entrada · padrão</span><span class="chip {{ 'ok' if fw.input_policy.value != 'accept' else 'warn' }}">{{ fw.input_policy.value }}</span></div><span class="big">{{ fw.input_rules|length }} regras</span><span class="muted">tráfego para o próprio firewall</span></div>
+  <div class="card tile"><div class="top"><span class="lbl">Encaminhamento · padrão</span><span class="chip {{ 'ok' if fw.forward_policy.value != 'accept' else 'warn' }}">{{ fw.forward_policy.value }}</span></div><span class="big">{{ fw.forward_rules|length }} regras</span><span class="muted">tráfego que atravessa</span></div>
+  <div class="card tile"><div class="top"><span class="lbl">Redirecionamentos</span></div><span class="big">{{ fw.port_forwards|length }}</span><span class="muted">portas abertas para a LAN</span></div>
+  <a class="card tile" href="/fail2ban"><div class="top"><span class="lbl">Fail2Ban</span></div><span class="big">{{ t.fail2ban }} →</span><span class="muted">tabela {{ fw.preserve_tables|join(', ') or 'própria' }}</span></a>
+</div>
+
+{% macro rules(title, id, list, chain) %}
+<section class="card" aria-labelledby="h-{{ id }}">
+  <div class="card-h"><h2 class="h2" id="h-{{ id }}">{{ title }}</h2><span class="chip mute">{{ list|length }}</span></div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>#</th><th>Ação</th><th>Origem</th><th>Destino</th><th>Protocolo</th><th>Portas</th><th>Descrição</th><th>Situação</th><th><span class="vh">Ações</span></th></tr></thead>
       <tbody>
-        {% for rule in rules %}
-          <tr>
-            <td style="color:var(--text-faint)">{{ loop.index0 }}</td>
-            <td><span class="pill {{ 'ok' if rule.action.value == 'accept' else 'bad' }}">{{ rule.action.value }}</span></td>
-            <td class="mono">{{ rule.source.value if rule.source.value is defined else rule.source }}</td>
-            <td class="mono">{{ rule.destination.value if rule.destination.value is defined else rule.destination }}</td>
-            <td>{{ rule.proto.value }}</td>
-            <td class="mono">{{ rule.dest_ports or '—' }}</td>
-            <td style="color:var(--text-dim)">{{ rule.description }}</td>
-            <td class="right nowrap">
-              <form method="post" action="/firewall/rule/{{ chain }}/{{ loop.index0 }}/move" style="display:inline">
-                <button class="tiny" name="direction" value="up" type="submit" {{ 'disabled' if loop.first }}>↑</button>
-              </form>
-              <form method="post" action="/firewall/rule/{{ chain }}/{{ loop.index0 }}/move" style="display:inline">
-                <button class="tiny" name="direction" value="down" type="submit" {{ 'disabled' if loop.last }}>↓</button>
-              </form>
-            </td>
-            <td class="right">
-              <form method="post" action="/firewall/rule/{{ chain }}/{{ loop.index0 }}/delete">
-                <button class="tiny danger" type="submit">remover</button>
-              </form>
-            </td>
-          </tr>
-        {% else %}
-          <tr><td colspan="9" style="color:var(--text-faint)">Nenhuma regra — vale a política padrão.</td></tr>
-        {% endfor %}
+      {% for r in list %}
+        <tr class="{{ '' if r.enabled else 'off' }}">
+          <td class="muted">{{ loop.index }}</td>
+          <td><span class="chip {{ 'ok' if r.action.value == 'accept' else 'bad' }}">{{ r.action.value }}</span></td>
+          <td class="mono">{{ r.source.value if r.source.value is defined else r.source }}</td>
+          <td class="mono">{{ r.destination.value if r.destination.value is defined else r.destination }}</td>
+          <td class="mono">{{ r.proto.value }}</td>
+          <td class="mono">{{ r.dest_ports or '—' }}</td>
+          <td>{{ r.description }}</td>
+          <td>{% if r.enabled %}<span class="chip ok">ativa</span>{% else %}<span class="chip mute">desligada</span>{% endif %}{% if r.log %} <span class="chip info">log</span>{% endif %}</td>
+          <td><form method="post" action="/firewall/rule/{{ chain }}/{{ loop.index0 }}/delete">{{ action('Remover', readonly) }}</form></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="9" class="muted">Nenhuma regra: vale só a política padrão.</td></tr>
+      {% endfor %}
       </tbody>
     </table>
   </div>
+</section>
+{% endmacro %}
 
-  <div class="card" style="margin-top:0.9rem">
-    <form method="post" action="/firewall/rule/{{ chain }}">
-      <div class="fields">
-        <div>
-          <label>Ação</label>
-          <select name="action">
-            <option value="accept">accept</option>
-            <option value="drop">drop</option>
-            <option value="reject">reject</option>
-          </select>
-        </div>
-        <div>
-          <label>Origem</label>
-          <input type="text" name="source" value="any" placeholder="lan, wan, any ou CIDR">
-        </div>
-        <div>
-          <label>Destino</label>
-          <input type="text" name="destination" value="{{ 'this' if chain == 'input' else 'any' }}" placeholder="lan, wan, this, any ou CIDR">
-        </div>
-        <div>
-          <label>Protocolo</label>
-          <select name="proto">
-            <option value="any">any</option>
-            <option value="tcp">tcp</option>
-            <option value="udp">udp</option>
-            <option value="tcp/udp">tcp/udp</option>
-            <option value="icmp">icmp</option>
-          </select>
-        </div>
-        <div>
-          <label>Portas de destino</label>
-          <input type="text" name="dest_ports" placeholder="22 · 80,443 · 9000-9010">
-        </div>
-        <div>
-          <label>Descrição</label>
-          <input type="text" name="description">
-        </div>
-        <div class="check">
-          <input type="checkbox" id="log-{{ chain }}" name="log" value="1">
-          <label for="log-{{ chain }}">Registrar no log</label>
-        </div>
-      </div>
-      <div class="row"><button type="submit">Adicionar regra</button></div>
-    </form>
-  </div>
-{% endfor %}
+{{ rules('Entrada', 'in', fw.input_rules, 'input') }}
+{{ rules('Encaminhamento', 'fwd', fw.forward_rules, 'forward') }}
 
-<h2>Redirecionamento de portas ({{ cfg.firewall.port_forwards | length }})</h2>
-<div class="tablewrap">
-  <table>
-    <thead><tr><th>WAN</th><th>Porta</th><th>Proto</th><th>Destino</th><th>Origem permitida</th><th>Descrição</th><th class="right"></th></tr></thead>
-    <tbody>
-      {% for pf in cfg.firewall.port_forwards %}
-        <tr>
-          <td>{{ pf.interface }}</td>
+<section class="card" aria-labelledby="h-pf">
+  <div class="card-h"><h2 class="h2" id="h-pf">Redirecionamento de portas</h2><span class="chip mute">{{ fw.port_forwards|length }}</span></div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>WAN</th><th>Porta externa</th><th>Para</th><th>Protocolo</th><th>Só de</th><th>Descrição</th><th><span class="vh">Ações</span></th></tr></thead>
+      <tbody>
+      {% for pf in fw.port_forwards %}
+        <tr class="{{ '' if pf.enabled else 'off' }}">
+          <td>{{ cfg.iface(pf.interface).description or pf.interface }}</td>
           <td class="mono">{{ pf.wan_port }}</td>
-          <td>{{ pf.proto }}</td>
-          <td class="mono nowrap">{{ pf.to_ip }}:{{ pf.to_port }}</td>
+          <td class="mono">{{ pf.to_ip }}:{{ pf.to_port }}</td>
+          <td class="mono">{{ pf.proto }}</td>
           <td class="mono">{{ pf.source_filter or 'qualquer' }}</td>
-          <td style="color:var(--text-dim)">{{ pf.description }}</td>
-          <td class="right">
-            <form method="post" action="/firewall/forward/{{ loop.index0 }}/delete">
-              <button class="tiny danger" type="submit">remover</button>
-            </form>
-          </td>
+          <td>{{ pf.description }}</td>
+          <td><form method="post" action="/firewall/forward/{{ loop.index0 }}/delete">{{ action('Remover', readonly) }}</form></td>
         </tr>
       {% else %}
-        <tr><td colspan="7" style="color:var(--text-faint)">Nenhuma porta publicada para fora.</td></tr>
+        <tr><td colspan="7" class="muted">Nenhuma porta aberta para dentro.</td></tr>
       {% endfor %}
-    </tbody>
-  </table>
-</div>
-
-<div class="card" style="margin-top:0.9rem">
-  <form method="post" action="/firewall/forward">
-    <div class="fields">
-      <div>
-        <label>WAN de entrada</label>
-        <select name="interface">
-          {% for wan in cfg.wans %}<option value="{{ wan.name }}">{{ wan.description or wan.name }}</option>{% endfor %}
-        </select>
-      </div>
-      <div><label>Porta externa</label><input type="number" name="wan_port" min="1" max="65535" required></div>
-      <div>
-        <label>Protocolo</label>
-        <select name="proto"><option value="tcp">tcp</option><option value="udp">udp</option><option value="tcp/udp">tcp/udp</option></select>
-      </div>
-      <div><label>IP interno</label><input type="text" name="to_ip" placeholder="10.0.0.105" required></div>
-      <div><label>Porta interna</label><input type="number" name="to_port" min="1" max="65535" required></div>
-      <div><label>Origem permitida</label><input type="text" name="source_filter" placeholder="opcional, ex 203.0.113.0/24"></div>
-      <div><label>Descrição</label><input type="text" name="description"></div>
-    </div>
-    <div class="row"><button type="submit">Publicar porta</button></div>
-  </form>
-</div>
-
-<h2>NAT de saída</h2>
-<div class="card">
-  <p style="margin:0 0 0.5rem;color:var(--text-dim);font-size:0.9rem">Interfaces que mascaram o tráfego da LAN:</p>
-  <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
-    {% for name in cfg.firewall.masquerade %}<span class="pill ok">{{ name }}</span>{% endfor %}
+      </tbody>
+    </table>
   </div>
-</div>
+</section>
+
+<section class="card" aria-labelledby="h-nat">
+  <div class="card-h"><h2 class="h2" id="h-nat">NAT de saída</h2></div>
+  <div class="row"><span class="grow">Mascaramento nas interfaces <span class="mono">{{ fw.masquerade|join(', ') or '—' }}</span>. Tabelas de outros serviços que o motor preserva: <span class="mono">{{ fw.preserve_tables|join(', ') or '—' }}</span>.</span></div>
+</section>
 
 {% endblock %}

@@ -1,87 +1,125 @@
 {% extends "base.html" %}
-{% block title %}Sistema{% endblock %}
+{% from "_icons.html" import action, icon %}
+{% block title %}{{ t.system }}{% endblock %}
 {% block body %}
 
-<h1>Sistema</h1>
-<p class="lede">Onde as propostas viram realidade — e onde dá para voltar atrás.</p>
-
-<h2>Estado do apply</h2>
-<div class="card">
-  <pre class="out" id="estado" hx-get="/system/state" hx-trigger="every 5s" hx-swap="innerHTML">{{ state }}</pre>
-
-  <div class="row">
-    {% if pending %}
-      <form method="post" action="/system/apply">
-        <input type="hidden" name="yes" value="1">
-        <button class="primary" type="submit">Aplicar alterações</button>
-      </form>
-      <form method="post" action="/system/discard">
-        <button type="submit">Descartar proposta</button>
-      </form>
-    {% endif %}
-    <form method="post" action="/system/confirm"><button type="submit">Confirmar</button></form>
-    <form method="post" action="/system/rollback"><button class="danger" type="submit">Reverter</button></form>
-    <a class="btn" href="/system/config">Baixar config.yaml</a>
-  </div>
-
-  <div class="note" style="margin:1rem 0 0">
-    <b>Como o apply protege você</b>
-    A config é validada pelo modelo, os arquivos são gerados fora de <code>/etc</code>
-    e passam por <code>nft -c</code>, <code>dnsmasq --test</code> e <code>ifquery</code>.
-    Só então são instalados atomicamente. Depois disso, você tem
-    {{ cfg.system.confirm_timeout }}s para confirmar — se a mudança derrubar a LAN,
-    ninguém confirma e o firewall volta sozinho.
-  </div>
+<div class="page-h">
+  <div><h1>{{ t.system }}</h1><p class="lede">{% if readonly %}O que o motor faria se assumisse esta máquina, o estado dos serviços e a configuração para guardar.{% else %}Aplicar o que foi editado, guardar a configuração e cuidar dos serviços e da máquina.{% endif %}</p></div>
+  <span class="muted mono">{{ cfg.system.hostname }} · kernel {{ system.kernel }} · ligado há {{ system.uptime }}</span>
 </div>
 
-{% if pending and diff %}
-  <h2>O que vai mudar</h2>
-  <pre class="out">{{ diff }}</pre>
+{% if readonly %}
+<section class="card{% if changes %} warn{% endif %}" id="mudancas" aria-labelledby="h-chg">
+  <div class="card-h"><h2 class="h2" id="h-chg">O que o motor mudaria</h2><span class="chip {{ 'warn' if changes else 'ok' }}">{{ changes|length }}</span>
+    <span class="muted">se aplicasse o modelo lido desta máquina; nada disso foi feito</span></div>
+  <ol class="list">
+    {% for c in changes %}<li><span class="n">{{ loop.index }}</span><span>{{ c }}</span></li>
+    {% else %}<li><span>Nada: aplicar o modelo reproduziria exatamente o que está rodando.</span></li>{% endfor %}
+  </ol>
+</section>
+
+<section class="card" id="decisoes" aria-labelledby="h-fnd">
+  <div class="card-h"><h2 class="h2" id="h-fnd">Ajustes do importador</h2><span class="chip mute">{{ findings|length }}</span>
+    <span class="muted">o que ele adaptou ao ler, sem mudar o comportamento</span></div>
+  <ol class="list">
+    {% for f in findings %}<li><span class="n">{{ loop.index }}</span><span>{{ f }}</span></li>
+    {% else %}<li><span>Nenhum.</span></li>{% endfor %}
+  </ol>
+</section>
+{% else %}
+<section class="card" aria-labelledby="h-apply">
+  <div class="card-h"><h2 class="h2" id="h-apply">Alterações pendentes</h2>{% if pending %}<span class="chip warn">aguardando</span>{% endif %}<div class="fill"></div>
+    {% if pending %}
+      <form method="post" action="/system/discard"><button class="btn" type="submit">Descartar</button></form>
+      <form method="post" action="/system/apply"><input type="hidden" name="yes" value="1"><button class="btn primary" type="submit">Aplicar</button></form>
+    {% endif %}
+    <form method="post" action="/system/confirm"><button class="btn" type="submit">Confirmar</button></form>
+    <form method="post" action="/system/rollback"><button class="btn danger" type="submit">Reverter</button></form>
+  </div>
+  <pre class="out">{{ state }}</pre>
+  {% if pending and diff %}<pre class="out" style="border-top:1px solid #1E293B">{{ diff }}</pre>{% endif %}
+</section>
 {% endif %}
 
-<h2>Histórico da configuração</h2>
-<div class="tablewrap">
-  <table>
-    <thead><tr><th>Commit</th><th>Quando</th><th>Mudança</th></tr></thead>
-    <tbody>
-      {% for entry in history %}
+<section class="card" aria-labelledby="h-svc">
+  <div class="card-h"><h2 class="h2" id="h-svc">Serviços</h2></div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Unidade</th><th>Situação</th><th>Sobe no boot</th><th>Estado</th><th><span class="vh">Ações</span></th></tr></thead>
+      <tbody>
+      {% for s in services %}
         <tr>
-          <td class="mono">{{ entry.hash }}</td>
-          <td class="nowrap" style="color:var(--text-dim)">{{ entry.when }}</td>
-          <td>{{ entry.subject }}</td>
+          <td class="mono">{{ s.unit }}</td>
+          <td><span class="chip {{ 'ok' if s.ok else ('mute' if s.active == 'unknown' else 'bad') }}">{{ s.active }}</span></td>
+          <td class="muted">{{ s.enabled }}</td>
+          <td style="white-space:nowrap">
+            <label style="margin-right:14px"><input type="radio" name="svc-{{ loop.index }}" {% if s.ok %}checked{% endif %} disabled> Ativo</label>
+            <label><input type="radio" name="svc-{{ loop.index }}" {% if not s.ok %}checked{% endif %} disabled> Parado</label>
+          </td>
+          <td><button class="btn" type="button" disabled title="{{ 'Somente leitura' if readonly else 'Entra com as ações' }}">Reiniciar</button></td>
         </tr>
-      {% else %}
-        <tr><td colspan="3" style="color:var(--text-faint)">Nenhum commit ainda — o histórico começa no primeiro apply confirmado.</td></tr>
       {% endfor %}
-    </tbody>
-  </table>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="grid two">
+  <section class="card" aria-labelledby="h-tpl">
+    <div class="card-h"><h2 class="h2" id="h-tpl">Template de configuração</h2></div>
+    <div class="row"><div class="grow"><b>Salvar em arquivo</b><div class="muted">Rede, firewall, DHCP, domínio e VPN num YAML só, sem segredos.{% if readonly %} É o modelo lido desta máquina.{% endif %}</div></div>
+      <a class="btn primary" href="/system/config">{{ icon('download', 16) }}Baixar .yaml</a></div>
+    <div class="row"><div class="grow"><b>Enviar um template</b><div class="muted">O arquivo vira alterações pendentes para revisar; nada é aplicado na hora.</div></div>
+      <button class="btn" type="button" disabled title="{{ 'Somente leitura' if readonly else 'Entra com as ações' }}">Enviar</button></div>
+  </section>
+
+  <section class="card" aria-labelledby="h-pwr">
+    <div class="card-h"><h2 class="h2" id="h-pwr">Energia</h2></div>
+    <div class="row"><div class="grow"><b>Reiniciar o firewall</b><div class="muted">A LAN fica sem internet por cerca de 1 minuto.</div></div><button class="btn danger" type="button" disabled>Reiniciar</button></div>
+    <div class="row"><div class="grow"><b>Desligar</b><div class="muted">A LAN fica sem internet até alguém religar a máquina no local.</div></div><button class="btn danger" type="button" disabled>Desligar</button></div>
+  </section>
 </div>
 
-<h2>Auditoria</h2>
-<div class="tablewrap">
-  <table>
-    <thead><tr><th>Quando</th><th>Usuário</th><th>Origem</th><th>Ação</th></tr></thead>
-    <tbody>
+<section class="card" id="diag" aria-labelledby="h-diag">
+  <div class="card-h"><h2 class="h2" id="h-diag">Diagnóstico</h2><span class="muted">só olha, não muda nada</span></div>
+  <form method="post" action="/system/diag#diag">
+    <div class="form-grid">
+      <div class="field"><label for="d-tool">Ferramenta</label>
+        <select id="d-tool" name="tool" class="input">
+          {% for value, label in [('ping', 'ping'), ('traceroute', 'traceroute'), ('dns', 'consulta DNS'), ('routes', 'rotas'), ('journal', 'log de um serviço')] %}
+            <option value="{{ value }}" {% if tool == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select></div>
+      <div class="field"><label for="d-target">Alvo</label><input id="d-target" name="target" class="input mono" value="{{ target or '' }}" placeholder="8.8.8.8, nome ou unidade"></div>
+      <div class="field"><label for="d-iface">Sair pela interface</label><input id="d-iface" name="iface" class="input mono" placeholder="opcional"></div>
+    </div>
+    <div class="row"><span class="grow"></span><button class="btn primary" type="submit">Rodar</button></div>
+  </form>
+  {% if result %}<pre class="out">{% if result.command %}$ {{ result.command }}
+{% endif %}{{ result.output }}</pre>{% endif %}
+</section>
+
+<section class="card" id="auditoria" aria-labelledby="h-aud">
+  <div class="card-h"><h2 class="h2" id="h-aud">Atividade no painel</h2></div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Quando</th><th>Usuário</th><th>Origem</th><th>Ação</th></tr></thead>
+      <tbody>
       {% for row in audit %}
-        <tr>
-          <td class="nowrap mono" style="color:var(--text-dim)">{{ row['at'] | int | timestamp }}</td>
-          <td>{{ row['username'] or '—' }}</td>
-          <td class="mono">{{ row['address'] or '—' }}</td>
-          <td>{{ row['action'] }}</td>
-        </tr>
+        <tr><td class="mono muted">{{ row['at']|int|timestamp }}</td><td>{{ row['username'] or '—' }}</td><td class="mono">{{ row['address'] or '—' }}</td><td>{{ row['action'] }}</td></tr>
       {% else %}
-        <tr><td colspan="4" style="color:var(--text-faint)">Sem registros.</td></tr>
+        <tr><td colspan="4" class="muted">Sem registros.</td></tr>
       {% endfor %}
-    </tbody>
-  </table>
-</div>
+      </tbody>
+    </table>
+  </div>
+</section>
 
-<h2>Máquina</h2>
-<div class="grid">
-  <div class="card stat"><div class="k">Uptime</div><div class="v" style="font-size:1.1rem">{{ system.uptime }}</div></div>
-  <div class="card stat"><div class="k">Kernel</div><div class="v" style="font-size:1.1rem">{{ system.kernel }}</div></div>
-  <div class="card stat"><div class="k">Memória</div><div class="v" style="font-size:1.1rem">{{ system.memory }}</div></div>
-  <div class="card stat"><div class="k">Disco</div><div class="v" style="font-size:1.1rem">{{ system.disk }}</div></div>
-</div>
+{% if history %}
+<section class="card" aria-labelledby="h-git">
+  <div class="card-h"><h2 class="h2" id="h-git">Histórico da configuração</h2></div>
+  {% for e in history %}<div class="row"><span class="mono muted">{{ e.hash }}</span><span class="grow">{{ e.subject }}</span><span class="muted">{{ e.when }}</span></div>{% endfor %}
+</section>
+{% endif %}
 
 {% endblock %}

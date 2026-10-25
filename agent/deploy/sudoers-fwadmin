@@ -19,7 +19,8 @@
 Cmnd_Alias FWADMIN_RO = /usr/local/sbin/fwctl check, \
                         /usr/local/sbin/fwctl status, \
                         /usr/local/sbin/fwctl diff, \
-                        /usr/local/sbin/fwctl inventory
+                        /usr/local/sbin/fwctl inventory, \
+                        /usr/local/sbin/fwctl observe
 
 Cmnd_Alias FWADMIN_RW = /usr/local/sbin/fwctl apply, \
                         /usr/local/sbin/fwctl apply --yes, \

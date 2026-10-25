@@ -8,10 +8,16 @@ de subcomandos.
 Consequencia pratica: um bug aqui — ou alguem que consiga falar com este
 processo — nao consegue escrever uma regra de firewall arbitraria. So consegue
 propor uma config, que ainda passa pelo modelo e pelo nft -c antes de valer.
+
+Modo somente leitura (FWADMIN_READONLY, ligado por padrao): o painel mostra o
+sistema vivo, lido pelo importador a partir da fotografia do `fwctl observe`,
+e recusa qualquer POST que mude alguma coisa. As rotas de escrita continuam
+aqui, prontas para quando o modo for desligado.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from datetime import datetime
@@ -25,7 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from fwadmin import db, ownership, paths, status
+from fwadmin import db, i18n, live, paths, status
 from fwadmin.models import (
     Config,
     Failover,
@@ -89,13 +95,44 @@ async def form(request: Request) -> FormData:
 Fields = Annotated[FormData, Depends(form)]
 
 FWCTL = "/usr/local/sbin/fwctl"
-ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff"}
+ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff", "observe"}
+
+READONLY = os.environ.get("FWADMIN_READONLY", "1") != "0"
+"""Ligado por padrao: desligar e' decisao explicita de quem instala."""
+
+READONLY_ALLOWED = {"/login", "/logout", "/system/diag"}
+"""POSTs que nao mudam nada no firewall e por isso valem no somente leitura."""
 
 app = FastAPI(title="fwadmin", docs_url=None, redoc_url=None, openapi_url=None)
 templates = Jinja2Templates(directory=str(TEMPLATES))
 templates.env.filters["timestamp"] = lambda value: datetime.fromtimestamp(value).strftime(
     "%d/%m %H:%M"
 )
+
+
+def _size(value: int | float) -> str:
+    """Bytes em unidade de gente: 1536 -> '1,5 KB'."""
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            text = f"{value:.0f}" if unit == "B" else f"{value:.1f}"
+            return f"{text.replace('.', ',')} {unit}"
+        value /= 1024
+    return ""
+
+
+def _ago(seconds: int | float) -> str:
+    """Segundos -> 'ha 3 min'. Negativo ou zero e' 'nunca'."""
+    seconds = int(seconds)
+    if seconds < 0:
+        return "nunca"
+    for size, unit in ((86400, "d"), (3600, "h"), (60, "min")):
+        if seconds >= size:
+            return f"há {seconds // size} {unit}"
+    return f"há {seconds} s"
+
+
+templates.env.filters["size"] = _size
+templates.env.filters["ago"] = _ago
 
 
 # ---------------------------------------------------------------------------
@@ -129,9 +166,30 @@ def fwctl(*args: str, timeout: int = 180) -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 
+class Unavailable(Exception):
+    """Nao ha modelo para mostrar: a pagina vira a explicacao do porque."""
+
+
+def snap() -> live.Snapshot:
+    """A fotografia do sistema vivo. Tambem serve ao modo de edicao, que tira
+    dela o estado de execucao (handshakes, banidos, contadores)."""
+    return live.snapshot(fwctl)
+
+
 def current() -> Config:
-    """A config que a UI mostra: a pendente, se houver, senao a viva."""
+    """A config que a UI mostra.
+
+    Somente leitura: o sistema vivo, pelo importador. Edicao: a proposta
+    pendente, se houver, senao a config aplicada pelo motor.
+    """
+    if READONLY:
+        snapshot = snap()
+        if snapshot.cfg is None:
+            raise Unavailable(snapshot.error)
+        return snapshot.cfg
     source = paths.PENDING if paths.PENDING.exists() else paths.CONFIG
+    if not source.exists():
+        raise Unavailable(f"o motor ainda nao tem config em {source}")
     return load(source)
 
 
@@ -191,6 +249,10 @@ def user_of(request: Request) -> str:
     return session.username if session else ""
 
 
+def session_of(request: Request) -> db.Session | None:
+    return db.get_session(request.cookies.get(SESSION_COOKIE, ""))
+
+
 async def require_login(request: Request) -> str:
     session = db.get_session(request.cookies.get(SESSION_COOKIE, ""))
     if session is None:
@@ -208,32 +270,229 @@ async def redirect_unauthenticated(request: Request, exc: HTTPException) -> Resp
     return HTMLResponse(f"<h1>{exc.status_code}</h1><p>{exc.detail}</p>", status_code=exc.status_code)
 
 
+@app.exception_handler(Unavailable)
+async def show_unavailable(request: Request, exc: Unavailable) -> Response:
+    return page(request, "unavailable.html", nav="", reason=str(exc), status_code=503)
+
+
+@app.middleware("http")
+async def readonly_guard(request: Request, call_next: Callable) -> Response:
+    """No somente leitura, nenhum POST que mude algo chega a uma rota.
+
+    O bloqueio e' aqui, e nao no template: botao desabilitado e' conforto,
+    quem garante e' o servidor.
+    """
+    if (
+        READONLY
+        and request.method not in ("GET", "HEAD")
+        and request.url.path not in READONLY_ALLOWED
+    ):
+        return HTMLResponse(
+            "<h1>403</h1><p>painel em modo somente leitura: nada foi alterado</p>",
+            status_code=403,
+        )
+    return await call_next(request)
+
+
 # ---------------------------------------------------------------------------
 # render
 # ---------------------------------------------------------------------------
 
 
-def page(request: Request, template: str, **ctx: Any) -> HTMLResponse:
+NAV = [
+    # (chave do texto, endereco, servico por baixo, recuado)
+    ("status", "/", "", False),
+    None,
+    ("network", "/network", "WAN · LAN", False),
+    ("firewall", "/firewall", "nftables", False),
+    ("fail2ban", "/fail2ban", "", True),
+    ("dhcp", "/dhcp", "dnsmasq", False),
+    ("domain", "/domain", "dnsmasq", False),
+    ("dns", "/dns", "unbound", False),
+    ("vpn", "/vpn", "WireGuard", False),
+]
+"""O menu da esquerda, de cima para baixo. None e' o separador; Sistema fica
+preso no fundo e por isso esta fora da lista."""
+
+LANG_COOKIE = "fwadmin_lang"
+
+
+def version() -> str:
+    """O que o instalador gravou em VERSION; 'dev' rodando do repositorio."""
+    try:
+        return (paths.CODE / "VERSION").read_text().strip() or "dev"
+    except OSError:
+        return "dev"
+
+
+def page(
+    request: Request, template: str, nav: str = "", status_code: int = 200, **ctx: Any
+) -> HTMLResponse:
+    lang = i18n.pick(request.cookies.get(LANG_COOKIE))
+    session = session_of(request)
     base = {
         "request": request,
-        "user": user_of(request),
+        "user": session.username if session else "",
+        "session_until": datetime.fromtimestamp(session.expires_at).strftime("%H:%M")
+        if session
+        else "",
+        "client": client_ip(request),
         "pending": has_pending(),
+        "readonly": READONLY,
         "nav": NAV,
+        "here": nav,
+        "lang": lang,
+        "langs": i18n.LANGS,
+        "t": i18n.TEXT[lang],
+        "version": version(),
         "path": request.url.path,
     }
-    return templates.TemplateResponse(request, template, base | ctx)
+    if session:
+        base["snapshot_age"] = snap().age
+        try:
+            base["alerts"] = alerts(current(), snap())
+        except Unavailable:
+            base["alerts"] = []
+    return templates.TemplateResponse(request, template, base | ctx, status_code=status_code)
 
 
-NAV = [
-    ("/", "Painel", "▦"),
-    ("/interfaces", "Interfaces", "⇄"),
-    ("/routing", "Roteamento", "⇱"),
-    ("/dns", "DNS e DHCP", "◎"),
-    ("/firewall", "Firewall", "⛨"),
-    ("/services", "Serviços", "▤"),
-    ("/diag", "Diagnóstico", "◈"),
-    ("/system", "Sistema", "⚙"),
-]
+def alerts(cfg: Config, snapshot: live.Snapshot) -> list[dict[str, str]]:
+    """O que pede atencao, do mais grave para o menos. Vai para o sino do
+    cabecalho e para o topo do Status."""
+    out: list[dict[str, str]] = []
+    down = [svc.unit for svc in services_of(cfg) if svc.active not in ("active", "unknown")]
+    if len(down) == 1:
+        out.append(
+            {"level": "bad", "title": f"{down[0]} não está rodando", "detail": "", "href": "/system"}
+        )
+    elif down:
+        out.append(
+            {
+                "level": "bad",
+                "title": f"{len(down)} serviços parados",
+                "detail": ", ".join(down),
+                "href": "/system",
+            }
+        )
+    for wan in status.wans(cfg):
+        if not wan.up:
+            out.append(
+                {
+                    "level": "bad",
+                    "title": f"{wan.description or wan.name} sem link",
+                    "detail": f"interface {wan.device}",
+                    "href": "/network",
+                }
+            )
+    if not READONLY and has_pending():
+        out.append(
+            {
+                "level": "warn",
+                "title": "Alterações aguardando aplicação",
+                "detail": "a proposta está gravada e ainda não vale no firewall",
+                "href": "/system",
+            }
+        )
+    for conflict in domain_conflicts(cfg):
+        out.append(
+            {
+                "level": "warn",
+                "title": f"{conflict['name']} aponta para o IP errado",
+                "detail": f"o domínio diz {conflict['dns']}; o DHCP entrega {conflict['dhcp']}",
+                "href": "/domain",
+            }
+        )
+    if snapshot.missing:
+        out.append(
+            {
+                "level": "warn",
+                "title": (
+                    "1 arquivo de config não foi lido"
+                    if len(snapshot.missing) == 1
+                    else f"{len(snapshot.missing)} arquivos de config não foram lidos"
+                ),
+                "detail": ", ".join(snapshot.missing),
+                "href": "/system",
+            }
+        )
+    if READONLY and snapshot.changes:
+        out.append(
+            {
+                "level": "info",
+                "title": f"O motor mudaria {len(snapshot.changes)} coisas se assumisse",
+                "detail": "o que o modelo ainda não representa; nada foi aplicado",
+                "href": "/system#mudancas",
+            }
+        )
+    for peer in vpn_peers(cfg, snapshot):
+        if peer["stale"]:
+            out.append(
+                {
+                    "level": "mute",
+                    "title": f"{peer['name']} sem contato na VPN {peer['seen']}",
+                    "detail": "se o aparelho foi perdido, revogue o peer",
+                    "href": "/vpn",
+                }
+            )
+    return out
+
+
+def services_of(cfg: Config) -> list[status.ServiceState]:
+    """As unidades da stack, com o tunel do WireGuard pelo nome que tem."""
+    extra = (f"wg-quick@{cfg.wireguard.device}",) if cfg.wireguard.enabled else ()
+    return status.services(extra)
+
+
+def domain_conflicts(cfg: Config) -> list[dict[str, str]]:
+    """Nome que o DNS local resolve para um IP e o DHCP reserva para outro."""
+    reserved = {r.name: r.ip for r in cfg.dhcp.reservations}
+    out = []
+    for host in cfg.hosts:
+        if host.dns and host.name in reserved and reserved[host.name] != host.ip:
+            out.append(
+                {
+                    "name": f"{host.name}.{cfg.dns.domain}",
+                    "dns": host.ip,
+                    "dhcp": reserved[host.name],
+                }
+            )
+    return out
+
+
+STALE_PEER = 3 * 86400
+"""Peer sem handshake ha mais que isso vira alerta."""
+
+
+def vpn_peers(cfg: Config, snapshot: live.Snapshot) -> list[dict[str, Any]]:
+    """Peers do modelo com o que o 'wg show' diz deles agora."""
+    if not cfg.wireguard.enabled:
+        return []
+    seen = {
+        p["public_key"]: p
+        for p in snapshot.wireguard.get(cfg.wireguard.device, {}).get("peers", [])
+    }
+    now = time.time()
+    out = []
+    for peer in cfg.wireguard.peers:
+        state = seen.get(peer.public_key, {})
+        handshake = state.get("handshake", 0)
+        age = int(now - handshake) if handshake else -1
+        out.append(
+            {
+                "name": peer.description or peer.name,
+                "ip": ", ".join(peer.allowed_ips),
+                "enabled": peer.enabled,
+                "known": bool(state),
+                "online": 0 <= age < 180,
+                "stale": peer.enabled and bool(snapshot.wireguard) and (age < 0 or age > STALE_PEER),
+                "seen": _ago(age),
+                "endpoint": state.get("endpoint", ""),
+                "rx": state.get("rx", 0),
+                "tx": state.get("tx", 0),
+                "key": peer.public_key,
+            }
+        )
+    return out
 
 
 def back(path: str, error: str | None = None) -> RedirectResponse:
@@ -295,48 +554,122 @@ async def logout(request: Request) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# painel
+# telas — uma por item do menu; as rotas de escrita vem depois, por assunto
 # ---------------------------------------------------------------------------
+
+
+@app.get("/lang/{code}")
+async def set_lang(code: str, back_to: str = "/") -> Response:
+    """Troca o idioma da moldura. GET de proposito: vale no somente leitura."""
+    if not back_to.startswith("/") or back_to.startswith("//"):
+        back_to = "/"
+    response = RedirectResponse(back_to, status_code=303)
+    response.set_cookie(
+        LANG_COOKIE, i18n.pick(code), max_age=365 * 86400, samesite="strict", path="/"
+    )
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, user: User) -> Response:
     cfg = current()
+    snapshot = snap()
+    peers = vpn_peers(cfg, snapshot)
+    jails = (snapshot.fail2ban or {}).get("jails", [])
     return page(
         request,
-        "dashboard.html",
+        "status.html",
+        nav="status",
         cfg=cfg,
+        snapshot=snapshot,
         wans=status.wans(cfg),
-        system=status.system(),
-        services=status.services(),
-        posses=ownership.survey(cfg),
         leases=status.leases(cfg),
+        services=services_of(cfg),
+        system=status.system(),
+        peers=peers,
+        online=sum(1 for p in peers if p["online"]),
+        banned=sum(int(j["banned"] or 0) for j in jails),
         failover=status.failover_state(),
-        route_dev=status.default_route()[0],
+        audit=db.recent(6),
     )
 
 
-@app.get("/fragment/wans", response_class=HTMLResponse)
-async def fragment_wans(request: Request, user: User) -> Response:
-    """Atualizado sozinho pelo htmx a cada 10s."""
+@app.get("/network", response_class=HTMLResponse)
+async def network(request: Request, user: User) -> Response:
     cfg = current()
     return page(
         request,
-        "_wans.html",
+        "network.html",
+        nav="network",
         cfg=cfg,
+        links=status.links(),
         wans=status.wans(cfg),
         failover=status.failover_state(),
+        route=status.default_route(),
+        routes=status.routes(),
+    )
+
+
+@app.get("/firewall", response_class=HTMLResponse)
+async def firewall(request: Request, user: User) -> Response:
+    return page(request, "firewall.html", nav="firewall", cfg=current())
+
+
+@app.get("/fail2ban", response_class=HTMLResponse)
+async def fail2ban(request: Request, user: User) -> Response:
+    return page(
+        request, "fail2ban.html", nav="fail2ban", cfg=current(), f2b=snap().fail2ban
+    )
+
+
+@app.get("/dhcp", response_class=HTMLResponse)
+async def dhcp(request: Request, user: User) -> Response:
+    cfg = current()
+    return page(request, "dhcp.html", nav="dhcp", cfg=cfg, leases=status.leases(cfg))
+
+
+@app.get("/domain", response_class=HTMLResponse)
+async def domain(request: Request, user: User) -> Response:
+    cfg = current()
+    return page(
+        request, "domain.html", nav="domain", cfg=cfg, conflicts=domain_conflicts(cfg)
+    )
+
+
+@app.get("/dns", response_class=HTMLResponse)
+async def dns(request: Request, user: User) -> Response:
+    snapshot = snap()
+    return page(
+        request,
+        "dns.html",
+        nav="dns",
+        cfg=current(),
+        unbound=snapshot.unbound,
+        stats=snapshot.unbound_stats,
+    )
+
+
+@app.get("/vpn", response_class=HTMLResponse)
+async def vpn(request: Request, user: User) -> Response:
+    cfg = current()
+    snapshot = snap()
+    outside = [t for t in snapshot.tunnels if not (cfg.wireguard.enabled and t == cfg.wireguard.device)]
+    return page(
+        request,
+        "vpn.html",
+        nav="vpn",
+        cfg=cfg,
+        peers=vpn_peers(cfg, snapshot),
+        runtime=snapshot.wireguard.get(cfg.wireguard.device) if cfg.wireguard.enabled else None,
+        observed=bool(snapshot.wireguard),
+        outside=outside,
+        up=list(snapshot.wireguard),
     )
 
 
 # ---------------------------------------------------------------------------
 # interfaces
 # ---------------------------------------------------------------------------
-
-
-@app.get("/interfaces", response_class=HTMLResponse)
-async def interfaces(request: Request, user: User) -> Response:
-    return page(request, "interfaces.html", cfg=current(), links=status.links())
 
 
 @app.post("/interfaces/{name}")
@@ -353,25 +686,12 @@ async def save_interface(request: Request, user: User, name: str, fields: Fields
             iface.pppoe.mtu = mtu
             iface.pppoe.mru = mtu
 
-    return back("/interfaces", edit(request, mutate, f"interface:{name}"))
+    return back("/network", edit(request, mutate, f"interface:{name}"))
 
 
 # ---------------------------------------------------------------------------
 # roteamento
 # ---------------------------------------------------------------------------
-
-
-@app.get("/routing", response_class=HTMLResponse)
-async def routing(request: Request, user: User) -> Response:
-    cfg = current()
-    return page(
-        request,
-        "routing.html",
-        cfg=cfg,
-        wans=status.wans(cfg),
-        failover=status.failover_state(),
-        routes=status.routes(),
-    )
 
 
 @app.post("/routing")
@@ -386,18 +706,12 @@ async def save_routing(request: Request, user: User, fields: Fields) -> Response
             ping_targets=fields.csv("ping_targets") or ["8.8.8.8"],
         )
 
-    return back("/routing", edit(request, mutate, "routing"))
+    return back("/network", edit(request, mutate, "routing"))
 
 
 # ---------------------------------------------------------------------------
 # DNS e DHCP
 # ---------------------------------------------------------------------------
-
-
-@app.get("/dns", response_class=HTMLResponse)
-async def dns(request: Request, user: User) -> Response:
-    cfg = current()
-    return page(request, "dns.html", cfg=cfg, leases=status.leases(cfg))
 
 
 @app.post("/dns/settings")
@@ -411,7 +725,7 @@ async def save_dns(request: Request, user: User, fields: Fields) -> Response:
         cfg.dhcp.range.end = fields.text("range_end", cfg.dhcp.range.end)
         cfg.dhcp.range.lease = fields.text("lease", cfg.dhcp.range.lease)
 
-    return back("/dns", edit(request, mutate, "dns"))
+    return back("/domain", edit(request, mutate, "dns"))
 
 
 @app.post("/dns/reservation")
@@ -426,7 +740,7 @@ async def add_reservation(request: Request, user: User, fields: Fields) -> Respo
             )
         )
 
-    return back("/dns", edit(request, mutate, f"reserva+:{fields.text('name')}"))
+    return back("/dhcp", edit(request, mutate, f"reserva+:{fields.text('name')}"))
 
 
 @app.post("/dns/reservation/{mac}/delete")
@@ -437,7 +751,7 @@ async def del_reservation(request: Request, user: User, mac: str) -> Response:
             raise ValueError(f"reserva inexistente: {mac}")
         cfg.dhcp.reservations = remaining
 
-    return back("/dns", edit(request, mutate, f"reserva-:{mac}"))
+    return back("/dhcp", edit(request, mutate, f"reserva-:{mac}"))
 
 
 @app.post("/dns/host")
@@ -452,7 +766,7 @@ async def add_host(request: Request, user: User, fields: Fields) -> Response:
             )
         )
 
-    return back("/dns", edit(request, mutate, f"host+:{fields.text('name')}"))
+    return back("/domain", edit(request, mutate, f"host+:{fields.text('name')}"))
 
 
 @app.post("/dns/host/{name}/delete")
@@ -463,17 +777,12 @@ async def del_host(request: Request, user: User, name: str) -> Response:
             raise ValueError(f"host inexistente: {name}")
         cfg.hosts = remaining
 
-    return back("/dns", edit(request, mutate, f"host-:{name}"))
+    return back("/domain", edit(request, mutate, f"host-:{name}"))
 
 
 # ---------------------------------------------------------------------------
 # firewall
 # ---------------------------------------------------------------------------
-
-
-@app.get("/firewall", response_class=HTMLResponse)
-async def firewall(request: Request, user: User) -> Response:
-    return page(request, "firewall.html", cfg=current())
 
 
 @app.post("/firewall/policy")
@@ -567,18 +876,6 @@ async def del_forward(request: Request, user: User, index: int) -> Response:
 # ---------------------------------------------------------------------------
 
 
-@app.get("/services", response_class=HTMLResponse)
-async def services_page(request: Request, user: User) -> Response:
-    cfg = current()
-    grouped = {}
-    for group in sorted(cfg.portal.groups, key=lambda g: g.order):
-        members = [h for h in cfg.hosts if h.group == group.id and h.services]
-        if members:
-            grouped[group.id] = (group, members)
-    loose = [h for h in cfg.hosts if h.services and (not h.group or h.group not in grouped)]
-    return page(request, "services.html", cfg=cfg, grouped=grouped, loose=loose)
-
-
 @app.post("/services/add")
 async def add_service(request: Request, user: User, fields: Fields) -> Response:
     def mutate(cfg: Config) -> None:
@@ -597,7 +894,7 @@ async def add_service(request: Request, user: User, fields: Fields) -> Response:
             )
         )
 
-    return back("/services", edit(request, mutate, f"servico+:{fields.text('name')}"))
+    return back("/domain", edit(request, mutate, f"servico+:{fields.text('name')}"))
 
 
 @app.post("/services/{host}/{index}/delete")
@@ -608,7 +905,7 @@ async def del_service(request: Request, user: User, host: str, index: int) -> Re
             raise ValueError("serviço inexistente")
         target.services.pop(index)
 
-    return back("/services", edit(request, mutate, f"servico-:{host}:{index}"))
+    return back("/domain", edit(request, mutate, f"servico-:{host}:{index}"))
 
 
 # ---------------------------------------------------------------------------
@@ -616,12 +913,7 @@ async def del_service(request: Request, user: User, host: str, index: int) -> Re
 # ---------------------------------------------------------------------------
 
 
-@app.get("/diag", response_class=HTMLResponse)
-async def diag(request: Request, user: User) -> Response:
-    return page(request, "diag.html", cfg=current(), result=None)
-
-
-@app.post("/diag", response_class=HTMLResponse)
+@app.post("/system/diag", response_class=HTMLResponse)
 async def run_diag(
     request: Request,
     user: User,
@@ -648,7 +940,7 @@ async def run_diag(
         result = status.Probe(False, f"ferramenta desconhecida: {tool}")
 
     db.log(f"diag:{tool}", username=user, address=client_ip(request))
-    return page(request, "diag.html", cfg=current(), result=result, tool=tool, target=target)
+    return system_view(request, result=result, tool=tool, target=target)
 
 
 # ---------------------------------------------------------------------------
@@ -658,17 +950,30 @@ async def run_diag(
 
 @app.get("/system", response_class=HTMLResponse)
 async def system_page(request: Request, user: User) -> Response:
-    ok, state = fwctl("status", timeout=20)
-    _, diff = fwctl("diff", timeout=60) if has_pending() else (True, "")
+    return system_view(request)
+
+
+def system_view(request: Request, **extra: Any) -> HTMLResponse:
+    cfg = current()
+    ctx: dict[str, Any] = {}
+    if READONLY:
+        snapshot = snap()
+        ctx = {"findings": snapshot.findings, "changes": snapshot.changes, "snapshot": snapshot}
+    else:
+        _, state = fwctl("status", timeout=20)
+        _, diff = fwctl("diff", timeout=60) if has_pending() else (True, "")
+        ctx = {"state": state, "diff": diff}
     return page(
         request,
         "system.html",
-        cfg=current(),
-        state=state,
-        diff=diff,
+        nav="system",
+        cfg=cfg,
+        services=services_of(cfg),
         history=git_history(),
         audit=db.recent(30),
         system=status.system(),
+        **ctx,
+        **extra,
     )
 
 
@@ -683,21 +988,21 @@ async def do_apply(request: Request, user: User, fields: Fields) -> Response:
     args = ["apply", "--yes"] if fields.flag("yes") else ["apply"]
     ok, output = fwctl(*args)
     db.log("apply", username=user, address=client_ip(request), ok=ok)
-    return page(request, "result.html", title="Aplicar", ok=ok, output=output, cfg=current())
+    return page(request, "result.html", nav="system", title="Aplicar", ok=ok, output=output, cfg=current())
 
 
 @app.post("/system/confirm")
 async def do_confirm(request: Request, user: User) -> Response:
     ok, output = fwctl("confirm")
     db.log("confirm", username=user, address=client_ip(request), ok=ok)
-    return page(request, "result.html", title="Confirmar", ok=ok, output=output, cfg=current())
+    return page(request, "result.html", nav="system", title="Confirmar", ok=ok, output=output, cfg=current())
 
 
 @app.post("/system/rollback")
 async def do_rollback(request: Request, user: User) -> Response:
     ok, output = fwctl("rollback")
     db.log("rollback", username=user, address=client_ip(request), ok=ok)
-    return page(request, "result.html", title="Reverter", ok=ok, output=output, cfg=current())
+    return page(request, "result.html", nav="system", title="Reverter", ok=ok, output=output, cfg=current())
 
 
 @app.post("/system/discard")
@@ -716,9 +1021,15 @@ async def system_state(request: Request, user: User) -> str:
 
 @app.get("/system/config", response_class=PlainTextResponse)
 async def download_config(request: Request, user: User) -> Response:
-    source = paths.PENDING if has_pending() else paths.CONFIG
+    """O template da config em YAML. No somente leitura, e' o sistema vivo
+    passado pelo importador: o config.yaml que o motor usaria se assumisse."""
+    header = (
+        "# Lido do sistema vivo pelo importador. O motor ainda NAO aplicou isto.\n"
+        if READONLY
+        else ""
+    )
     return PlainTextResponse(
-        source.read_text(),
+        dump(current(), header=header),
         headers={"Content-Disposition": 'attachment; filename="fwadmin-config.yaml"'},
     )
 
