@@ -66,5 +66,5 @@
 </section>
 {% endfor %}
 
-{% if cfg.wireguard.enabled %}{{ actionbar('page-form', readonly, pending) }}{% else %}{{ actionbar('', readonly, pending, 'não há túnel no modelo') }}{% endif %}
+{% if cfg.wireguard.enabled %}{{ actionbar('page-form', readonly, applicable) }}{% else %}{{ actionbar('', readonly, applicable, 'não há túnel no modelo') }}{% endif %}
 {% endblock %}

@@ -37,16 +37,18 @@
 
 {% if not readonly %}
 <section class="card" aria-labelledby="h-apply">
-  <div class="card-h"><h2 class="h2" id="h-apply">Alterações pendentes</h2>{% if pending %}<span class="chip warn">aguardando</span>{% endif %}<div class="fill"></div>
+  <div class="card-h"><h2 class="h2" id="h-apply">{{ 'Primeiro apply (adoção)' if adopting and not pending else 'Alterações pendentes' }}</h2>{% if applicable %}<span class="chip warn">aguardando</span>{% endif %}<div class="fill"></div>
     {% if pending %}
       <form method="post" action="/system/discard"><button class="btn" type="submit">Descartar</button></form>
-      <form method="post" action="/system/apply"><input type="hidden" name="yes" value="1"><button class="btn primary" type="submit">Aplicar</button></form>
+    {% endif %}
+    {% if applicable %}
+      <form method="post" action="/system/apply"><input type="hidden" name="yes" value="1"><button class="btn primary" type="submit" {% if adopt_pending %}disabled title="Há mudanças da adoção sem marcação"{% endif %}>Aplicar</button></form>
     {% endif %}
     <form method="post" action="/system/confirm"><button class="btn" type="submit">Confirmar</button></form>
     <form method="post" action="/system/rollback"><button class="btn danger" type="submit">Reverter</button></form>
   </div>
   <pre class="out">{{ state }}</pre>
-  {% if pending and diff %}<pre class="out" style="border-top:1px solid #1E293B">{{ diff }}</pre>{% endif %}
+  {% if applicable and diff %}<pre class="out" style="border-top:1px solid #1E293B">{{ diff }}</pre>{% endif %}
 </section>
 {% endif %}
 

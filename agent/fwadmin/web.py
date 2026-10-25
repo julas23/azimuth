@@ -33,7 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from fwadmin import acks, db, i18n, live, paths, secretstore, status
+from fwadmin import acks, db, i18n, live, ownership, paths, secretstore, status
 from fwadmin.models import (
     Config,
     Failover,
@@ -265,6 +265,17 @@ def has_pending() -> bool:
     return paths.PENDING.exists()
 
 
+def adopting() -> bool:
+    """Maquina adotada que o motor ainda nao selou: a config importada e' a
+    viva, mas o /etc ainda e' o de antes. O primeiro apply e' o que falta, e
+    ele nao depende de haver proposta salva."""
+    return paths.CONFIG.exists() and not ownership.read_seal()
+
+
+def applicable() -> bool:
+    return not READONLY and (has_pending() or adopting())
+
+
 def edit(request: Request, mutate: Callable[[Config], Any], action: str) -> str | None:
     """Aplica uma mudanca no modelo, valida e grava como pendente.
 
@@ -412,6 +423,8 @@ def page(
         else "",
         "client": client_ip(request),
         "pending": has_pending(),
+        "applicable": applicable(),
+        "adopting": not READONLY and adopting(),
         "readonly": READONLY,
         "nav": NAV,
         "here": nav,
@@ -1169,7 +1182,7 @@ def system_view(request: Request, **extra: Any) -> HTMLResponse:
     ctx = {"findings": snapshot.findings, "adopt_pending": pending, "adopt_accepted": accepted}
     if not READONLY:
         _, state = fwctl("status", timeout=20)
-        _, diff = fwctl("diff", timeout=60) if has_pending() else (True, "")
+        _, diff = fwctl("diff", timeout=60) if applicable() else (True, "")
         ctx |= {"state": state, "diff": diff}
     return page(
         request,

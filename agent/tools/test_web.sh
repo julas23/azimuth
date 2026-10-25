@@ -65,6 +65,13 @@ for rota in $TELAS; do
 done
 echo
 
+echo "== adocao: sem proposta salva, o primeiro apply continua possivel =="
+code "http://127.0.0.1:$PORT/system" >/dev/null
+check "Sistema chama de primeiro apply" "$(grep -c 'Primeiro apply (adoção)' "$SANDBOX/body")" "1"
+code "http://127.0.0.1:$PORT/network" >/dev/null
+check "Aplicar da barra ligado" "$(grep -A2 'action="/system/apply"' "$SANDBOX/body" | grep -c 'Nada salvo para aplicar')" "0"
+echo
+
 echo "== nenhuma proposta ainda =="
 check "config.pending nao existe" "$([ -e "$SANDBOX/etc/fwadmin/config.pending.yaml" ] && echo sim || echo nao)" "nao"
 echo
