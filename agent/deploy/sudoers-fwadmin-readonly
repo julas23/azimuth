@@ -1,0 +1,11 @@
+# /etc/sudoers.d/fwadmin — instalacao somente leitura (install-readonly.sh)
+#
+# O painel so precisa fotografar o sistema. Nenhum comando que escreve esta
+# liberado: nem apply, nem seal, nem confirm. Quando as acoes forem ligadas,
+# este arquivo da lugar ao sudoers-fwadmin completo.
+
+Cmnd_Alias FWADMIN_OBSERVE = /usr/local/sbin/fwctl observe
+
+netadm ALL=(root) NOPASSWD: FWADMIN_OBSERVE
+
+Defaults!FWADMIN_OBSERVE !requiretty

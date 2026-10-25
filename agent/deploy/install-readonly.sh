@@ -1,0 +1,151 @@
+#!/bin/bash
+# Instala o painel em modo somente leitura num firewall que NAO tem o motor.
+#
+# E' o caminho para olhar uma maquina de verdade sem mexer nela. Diferente do
+# install.sh, este:
+#   - nao instala config.yaml nem cria /etc/fwadmin: o painel le o sistema
+#     vivo pelo `fwctl observe` e pelo importador;
+#   - nao toca no nginx, no crontab nem no wan-failover.sh;
+#   - nao instala o timer de failover;
+#   - libera no sudoers so o `fwctl observe`.
+#
+# O que ele escreve, e nada alem disso:
+#   /opt/fwadmin/                          codigo
+#   /usr/local/sbin/fwctl
+#   /var/lib/fwadmin/                      banco de usuarios e certificado
+#   /etc/sudoers.d/fwadmin                 so o observe
+#   /etc/systemd/system/fwadmin.service    e o drop-in readonly.conf
+#   o usuario de sistema netadm
+#
+# Uso, como root, com o diretorio agent/ do repositorio copiado para a maquina:
+#
+#   ./deploy/install-readonly.sh              detecta a LAN pelo dnsmasq
+#   LAN=ens18 ./deploy/install-readonly.sh    escolhe a placa
+#   PORT=9443 ./deploy/install-readonly.sh    outra porta (padrao 8443)
+#   ./deploy/install-readonly.sh --remover    desfaz tudo o que esta lista diz
+set -euo pipefail
+
+[ "$(id -u)" -eq 0 ] || { echo "rode como root"; exit 1; }
+SRC="$(cd "$(dirname "$0")/.." && pwd)"
+PORT="${PORT:-8443}"
+UNIT=/etc/systemd/system/fwadmin.service
+DROPIN=/etc/systemd/system/fwadmin.service.d/readonly.conf
+
+# O motor completo usa os mesmos caminhos. Instalar ou remover por cima dele
+# trocaria o sudoers dele por um que nao aplica nada, ou apagaria o banco.
+if [ -e /etc/fwadmin/config.yaml ]; then
+    echo "esta maquina tem o motor completo (/etc/fwadmin/config.yaml); este instalador e' para quem nao tem"
+    exit 1
+fi
+
+if [ "${1:-}" = "--remover" ]; then
+    echo "== removendo o painel somente leitura =="
+    systemctl disable --now fwadmin.service 2>/dev/null || true
+    rm -f "$DROPIN" "$UNIT" /etc/sudoers.d/fwadmin /usr/local/sbin/fwctl
+    rmdir /etc/systemd/system/fwadmin.service.d 2>/dev/null || true
+    systemctl daemon-reload
+    rm -rf /opt/fwadmin /var/lib/fwadmin /run/fwadmin
+    if id netadm >/dev/null 2>&1; then userdel netadm; fi
+    echo "   removido. nada fora da lista do cabecalho foi tocado."
+    exit 0
+fi
+
+echo "== 1. dependencias =="
+missing=()
+for mod in fastapi:python3-fastapi uvicorn:python3-uvicorn jinja2:python3-jinja2 \
+           pydantic:python3-pydantic yaml:python3-yaml argon2:python3-argon2; do
+    python3 -c "import ${mod%%:*}" 2>/dev/null || missing+=("${mod#*:}")
+done
+command -v sudo    >/dev/null || missing+=(sudo)
+command -v openssl >/dev/null || missing+=(openssl)
+if [ ${#missing[@]} -gt 0 ]; then
+    echo "   faltam pacotes. Instale e rode de novo:"
+    echo "   apt install ${missing[*]}"
+    exit 1
+fi
+python3 -c 'import pydantic, sys; sys.exit(0 if pydantic.VERSION.startswith("2") else 1)' \
+    || { echo "   o modelo exige pydantic 2"; exit 1; }
+echo "   ok"
+
+echo "== 2. onde o painel vai atender =="
+if [ -z "${LAN:-}" ]; then
+    LAN="$(sed -n 's/^interface=\([^ ,#]*\).*/\1/p' /etc/dnsmasq.conf 2>/dev/null | head -1)"
+fi
+[ -n "$LAN" ] || { echo "   nao achei a placa da LAN; rode com LAN=<placa>"; exit 1; }
+CIDR="$(ip -4 -o addr show dev "$LAN" 2>/dev/null | awk '{print $4; exit}')"
+[ -n "$CIDR" ] || { echo "   a placa $LAN nao tem IPv4"; exit 1; }
+LAN_IP="${CIDR%/*}"
+LAN_NET="$(python3 -c "import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).network)" "$CIDR")"
+# Numa reinstalacao quem ocupa a porta e' o proprio painel; ai segue.
+ours=no
+if systemctl is-active --quiet fwadmin.service && grep -q -- "--port $PORT " "$DROPIN" 2>/dev/null; then
+    ours=yes
+fi
+if [ "$ours" = no ] && ss -Hltn "sport = :$PORT" | grep -q .; then
+    echo "   a porta $PORT ja esta em uso; rode com PORT=<outra>"
+    exit 1
+fi
+echo "   https://$LAN_IP:$PORT, aceitando so $LAN_NET (placa $LAN)"
+
+echo "== 3. usuario de servico =="
+if ! id netadm >/dev/null 2>&1; then
+    useradd --system --home-dir /var/lib/fwadmin --no-create-home --shell /usr/sbin/nologin netadm
+    echo "   netadm criado"
+else
+    echo "   netadm ja existe"
+fi
+# A tela de diagnostico le o journal dos servicos.
+usermod -aG systemd-journal netadm
+
+echo "== 4. codigo =="
+install -d -m 0755 /opt/fwadmin
+rm -rf /opt/fwadmin/fwadmin
+cp -r "$SRC/fwadmin" /opt/fwadmin/
+find /opt/fwadmin -name __pycache__ -prune -exec rm -rf {} +
+install -m 0755 "$SRC/sbin/fwctl" /usr/local/sbin/fwctl
+VERSION="$(git -C "$SRC" describe --always --dirty 2>/dev/null || cat "$SRC/VERSION" 2>/dev/null || echo dev)"
+echo "$VERSION" > /opt/fwadmin/VERSION
+echo "   versao $VERSION"
+
+echo "== 5. estado e certificado =="
+install -d -m 0750 -o netadm -g netadm /var/lib/fwadmin
+install -d -m 0700 -o netadm -g netadm /var/lib/fwadmin/tls
+if [ ! -e /var/lib/fwadmin/tls/fwadmin.crt ]; then
+    openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+        -keyout /var/lib/fwadmin/tls/fwadmin.key \
+        -out    /var/lib/fwadmin/tls/fwadmin.crt \
+        -subj "/CN=$(hostname)" \
+        -addext "subjectAltName=DNS:$(hostname),IP:$LAN_IP" 2>/dev/null
+    chmod 0600 /var/lib/fwadmin/tls/fwadmin.key
+    chown -R netadm:netadm /var/lib/fwadmin/tls
+    echo "   self-signed gerado"
+else
+    echo "   certificado ja existe — preservado"
+fi
+
+echo "== 6. sudoers =="
+install -m 0440 "$SRC/deploy/sudoers-fwadmin-readonly" /etc/sudoers.d/fwadmin
+visudo -c -q || { rm -f /etc/sudoers.d/fwadmin; echo "   sudoers invalido — removido"; exit 1; }
+echo "   so o fwctl observe"
+
+echo "== 7. systemd =="
+install -m 0644 "$SRC/deploy/fwadmin.service" "$UNIT"
+install -d -m 0755 "$(dirname "$DROPIN")"
+sed -e "s|@LAN_IP@|$LAN_IP|" -e "s|@LAN_NET@|$LAN_NET|" -e "s|@PORT@|$PORT|" \
+    "$SRC/deploy/fwadmin-readonly.conf" > "$DROPIN"
+chmod 0644 "$DROPIN"
+systemctl daemon-reload
+systemctl enable fwadmin.service >/dev/null 2>&1
+systemctl restart fwadmin.service
+echo "   fwadmin.service com o drop-in readonly.conf"
+
+echo "== 8. primeira fotografia =="
+# Feita aqui, como root, para o painel abrir ja com dados. Depois ele mesmo
+# pede outra ao fwctl, via sudo, quando a fotografia passa de 20 s.
+/usr/local/sbin/fwctl observe || echo "   o observe falhou; o painel vai mostrar o motivo na tela"
+
+echo
+echo "pronto: https://$LAN_IP:$PORT — o primeiro acesso cria o usuario administrador."
+echo "nenhum arquivo de configuracao do firewall foi alterado."
+echo
+systemctl --no-pager --lines=5 status fwadmin.service || true

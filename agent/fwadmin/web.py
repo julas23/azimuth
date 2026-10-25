@@ -17,6 +17,7 @@ aqui, prontas para quando o modo for desligado.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import subprocess
 import time
@@ -102,6 +103,17 @@ READONLY = os.environ.get("FWADMIN_READONLY", "1") != "0"
 
 READONLY_ALLOWED = {"/login", "/logout", "/system/diag"}
 """POSTs que nao mudam nada no firewall e por isso valem no somente leitura."""
+
+ALLOW = [
+    ipaddress.ip_network(cidr.strip(), strict=False)
+    for cidr in os.environ.get("FWADMIN_ALLOW", "").split(",")
+    if cidr.strip()
+]
+"""Redes de onde o painel aceita conexao. Vazio = qualquer uma.
+
+Atras do nginx quem filtra a origem e' ele, e isto fica vazio. O instalador
+enxuto nao toca no nginx: o uvicorn atende direto no IP da LAN, e esta lista
+passa a ser o allow/deny que o nginx faria."""
 
 app = FastAPI(title="fwadmin", docs_url=None, redoc_url=None, openapi_url=None)
 templates = Jinja2Templates(directory=str(TEMPLATES))
@@ -273,6 +285,18 @@ async def redirect_unauthenticated(request: Request, exc: HTTPException) -> Resp
 @app.exception_handler(Unavailable)
 async def show_unavailable(request: Request, exc: Unavailable) -> Response:
     return page(request, "unavailable.html", nav="", reason=str(exc), status_code=503)
+
+
+@app.middleware("http")
+async def source_guard(request: Request, call_next: Callable) -> Response:
+    if ALLOW:
+        try:
+            origin = ipaddress.ip_address(client_ip(request))
+        except ValueError:
+            origin = None
+        if origin is None or not any(origin in net for net in ALLOW):
+            return PlainTextResponse("origem nao autorizada", status_code=403)
+    return await call_next(request)
 
 
 @app.middleware("http")

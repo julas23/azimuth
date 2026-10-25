@@ -171,5 +171,16 @@ check "idioma troca a moldura" "$(grep -c 'Netzwerk' "$SANDBOX/body")" "1"
 check "idioma desconhecido cai no padrao" "$(code "http://127.0.0.1:$PORT/lang/xx?back_to=//evil.example")" "303"
 echo
 
+echo "== origem fora da LAN, sem nginx na frente =="
+kill "$APP_PID" 2>/dev/null; wait "$APP_PID" 2>/dev/null
+FWADMIN_ALLOW=10.9.9.0/24 python3 -m uvicorn fwadmin.web:app --host 127.0.0.1 --port "$PORT" --log-level warning &
+APP_PID=$!
+for _ in $(seq 1 50); do
+    [ "$(code "http://127.0.0.1:$PORT/login")" != "000" ] && break
+    sleep 0.2
+done
+check "origem fora da lista recusada" "$(code "http://127.0.0.1:$PORT/login")" "403"
+echo
+
 printf '\033[1m%d passaram, %d falharam\033[0m\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
