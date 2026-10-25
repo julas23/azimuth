@@ -162,6 +162,7 @@ def parse_dnsmasq(text: str) -> dict[str, list[str]]:
 DNSMASQ_MODELED = {
     "interface", "bind-interfaces", "domain", "expand-hosts", "local",
     "dhcp-range", "dhcp-option", "dhcp-host", "address", "server",
+    "no-resolv", "proxy-dnssec", "dhcp-authoritative",
 }
 
 ZERO_MAC = "00:00:00:00:00:00"
@@ -516,13 +517,22 @@ def build_dns(dns_raw: dict[str, list[str]], domain: str) -> dict[str, Any]:
 
     upstream = []
     for server in dns_raw.get("server", []):
-        if is_ipv4(server):
+        ip, sep, port = server.partition("#")
+        if is_ipv4(ip) and (not sep or (port.isdigit() and 0 < int(port) < 65536)):
             upstream.append(server)
         else:
             change(
-                f"dnsmasq: upstream 'server={server}' sai — o modelo so aceita IPv4 sem porta. "
-                "Sem ele o dnsmasq gerado consulta o que estiver no /etc/resolv.conf"
+                f"dnsmasq: upstream 'server={server}' sai — o modelo aceita IPv4, com ou sem "
+                "#porta. Sem ele o dnsmasq gerado consulta o que estiver no /etc/resolv.conf"
             )
+
+    no_resolv = "no-resolv" in dns_raw
+    if no_resolv and not upstream:
+        change(
+            "dnsmasq: 'no-resolv' sai, porque nenhum upstream sobrou; sem ele e sem upstream o "
+            "dnsmasq ficaria sem ninguem para perguntar"
+        )
+        no_resolv = False
 
     return {
         "domain": domain,
@@ -530,6 +540,8 @@ def build_dns(dns_raw: dict[str, list[str]], domain: str) -> dict[str, Any]:
         "local_only": bool(dns_raw.get("local")),
         "bind_interfaces": "bind-interfaces" in dns_raw,
         "upstream": upstream,
+        "no_resolv": no_resolv,
+        "proxy_dnssec": "proxy-dnssec" in dns_raw,
     }
 
 
@@ -572,7 +584,7 @@ def build_dhcp(
     seen_macs: dict[str, str] = {}
     seen_ips: set[str] = set()
     taken: set[str] = set()
-    placeholders = 0
+    held: list[str] = []
     for entry in dns_raw.get("dhcp-host", []):
         parts = entry.split(",")
         if len(parts) not in (2, 3):
@@ -582,7 +594,7 @@ def build_dhcp(
         name = parts[2] if len(parts) == 3 else ""
 
         if mac == ZERO_MAC:
-            placeholders += 1
+            held.append(ip)
             continue
 
         if not name:
@@ -599,9 +611,12 @@ def build_dhcp(
         if clean != name:
             note(f"reserva '{name}' renomeada para '{clean}' (o modelo nao aceita '_')")
         if mac in seen_macs:
+            # O aparelho fica com a primeira; o IP desta continua fora da
+            # distribuicao dinamica, como o dhcp-host vivo deixava.
+            held.append(ip)
             note(
                 f"reserva '{name}' ({ip}) DESCARTADA: reusa o MAC {mac}, ja usado por "
-                f"'{seen_macs[mac]}'. O dnsmasq so honra a primeira — era config quebrada"
+                f"'{seen_macs[mac]}'. O aparelho fica com a primeira, e {ip} vira IP segurado"
             )
             continue
         if ip in seen_ips:
@@ -616,10 +631,14 @@ def build_dhcp(
         taken.add(clean)
         reservations.append({"mac": mac, "ip": ip, "name": clean})
 
-    if placeholders:
+    reserved_ips = {r["ip"] for r in reservations}
+    for ip in sorted(set(held) & reserved_ips):
+        note(f"IP {ip} segurado e tambem reservado para um aparelho; vale a reserva")
+    held = sorted(set(held) - reserved_ips, key=lambda a: ipaddress.IPv4Address(a))
+    if held:
         note(
-            f"{placeholders} reservas com MAC {ZERO_MAC} ignoradas: marcam faixa na planilha "
-            "e nunca casam com aparelho nenhum"
+            f"{len(held)} reservas com MAC {ZERO_MAC} viram IPs segurados: nunca casam com "
+            "aparelho nenhum, mas tiram o IP da distribuicao dinamica"
         )
 
     # Reserva e registro com o mesmo nome precisam concordar (o modelo exige).
@@ -650,7 +669,9 @@ def build_dhcp(
         "range": {"start": start, "end": end, "netmask": netmask, "lease": lease},
         "router": router,
         "dns_servers": dns_servers,
+        "authoritative": "dhcp-authoritative" in dns_raw,
         "reservations": reservations,
+        "held": held,
     }
 
 

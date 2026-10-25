@@ -19,6 +19,10 @@
       <div class="field"><label for="f-gw">Gateway anunciado</label><input id="f-gw" class="input mono" value="{{ d.router or cfg.lan.ipv4.ip }}" disabled></div>
       <div class="field"><label for="f-dns">DNS anunciado</label><input id="f-dns" class="input mono" value="{{ d.dns_servers|join(', ') or cfg.lan.ipv4.ip }}" disabled></div>
     </div>
+    <div class="row">
+      <label style="display:flex;gap:8px;align-items:center" class="grow"><input type="checkbox" name="authoritative" value="1" {% if d.authoritative %}checked{% endif %} {% if readonly %}disabled{% endif %}>
+        <span><b>Servidor único da LAN</b><span class="muted"> · responde na hora a quem pede um IP que não conhece, em vez de deixá-lo esperando</span></span></label>
+    </div>
     <div class="row"><span class="grow muted">Máscara <span class="mono">{{ d.range.netmask }}</span>.</span>{{ action('Salvar faixa', readonly, 'primary') }}</div>
   </form>
 </section>
@@ -58,5 +62,12 @@
     </table>
   </div>
 </section>
+
+{% if d.held %}
+<section class="card quiet" aria-labelledby="h-held">
+  <div class="card-h"><h2 class="h2" id="h-held">IPs segurados</h2><span class="chip mute">{{ d.held|length }}</span><span class="muted">fora da distribuição dinâmica, sem aparelho dono</span></div>
+  <div class="row"><span class="mono grow">{{ d.held|join(' · ') }}</span></div>
+</section>
+{% endif %}
 
 {% endblock %}

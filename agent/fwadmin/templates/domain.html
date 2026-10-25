@@ -19,7 +19,9 @@
     <div class="kv"><span>Só responde localmente</span><span>{{ 'sim' if cfg.dns.local_only else 'não' }}</span></div>
     <div class="kv"><span>Nome do DHCP vira registro</span><span>{{ 'sim' if cfg.dns.expand_hosts else 'não' }}</span></div>
     <div class="kv"><span>Escuta só na interface da LAN</span><span>{{ 'sim' if cfg.dns.bind_interfaces else 'não' }}</span></div>
-    <div class="kv"><span>Encaminha para</span><span class="mono">{{ cfg.dns.upstream|join(', ') or '—' }}</span></div>
+    <div class="kv"><span>Encaminha para</span><span class="mono">{{ cfg.dns.upstream|join(', ') or 'o que estiver no /etc/resolv.conf' }}</span></div>
+    <div class="kv"><span>Ignora o /etc/resolv.conf</span><span>{{ 'sim' if cfg.dns.no_resolv else 'não' }}</span></div>
+    <div class="kv"><span>Repassa o selo DNSSEC</span><span>{{ 'sim' if cfg.dns.proxy_dnssec else 'não' }}</span></div>
   </div>
 </section>
 

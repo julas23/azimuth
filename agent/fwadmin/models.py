@@ -257,7 +257,26 @@ class DHCP(Base):
     dns_servers: list[str] = []
     """DNS anunciado. Vazio = o proprio firewall."""
 
+    authoritative: bool = True
+    """dhcp-authoritative: o firewall e' o unico DHCP da LAN. Responde na hora
+    a quem pede um IP que nao conhece (aparelho que voltou de outra rede, lease
+    que se perdeu num reinicio), em vez de deixa-lo esperando o timeout. Ligado
+    por padrao porque e' a caixa; desligar so faz sentido com outro servidor
+    DHCP na mesma rede."""
+
     reservations: list[Reservation] = []
+
+    held: list[str] = []
+    """IPs que o DHCP nunca entrega dinamicamente, sem aparelho dono.
+
+    O dnsmasq nao distribui um endereco que aparece num dhcp-host, mesmo que o
+    MAC nunca case; e' assim que se segura um pedaco da faixa ('RESERVADO' com
+    MAC zerado, nos firewalls montados a mao). Gerado do mesmo jeito."""
+
+    @field_validator("held")
+    @classmethod
+    def _check_held(cls, v: list[str]) -> list[str]:
+        return [_ipv4(ip) for ip in v]
 
     @field_validator("router")
     @classmethod
@@ -274,6 +293,7 @@ class DHCP(Base):
         _reject_dups([r.mac for r in self.reservations], "MAC duplicado nas reservas")
         _reject_dups([r.ip for r in self.reservations], "IP duplicado nas reservas")
         _reject_dups([r.name for r in self.reservations], "nome duplicado nas reservas")
+        _reject_dups([r.ip for r in self.reservations] + self.held, "IP segurado e reservado ao mesmo tempo")
         return self
 
 
@@ -287,12 +307,38 @@ class DNS(Base):
     """True limita o dnsmasq a escutar so na LAN, em vez do wildcard."""
 
     upstream: list[str] = []
-    """Vazio = herda o /etc/resolv.conf (que o pppd atualiza)."""
+    """Para quem o dnsmasq pergunta o que nao e' da LAN. Vazio = herda o
+    /etc/resolv.conf (que o pppd atualiza). Aceita porta no formato do
+    dnsmasq — '127.0.0.1#5335' e' o unbound da stack, atras do dnsmasq."""
+
+    no_resolv: bool = False
+    """no-resolv: ignora o /etc/resolv.conf e pergunta so ao upstream. Sem isso
+    o dnsmasq tambem consulta o que o pppd escreveu la, e uma resposta pode
+    sair da operadora em vez do unbound."""
+
+    proxy_dnssec: bool = False
+    """proxy-dnssec: repassa aos clientes o selo DNSSEC que o upstream deu.
+    So faz sentido com um upstream que valida, como o unbound local."""
 
     @field_validator("upstream")
     @classmethod
     def _check_upstream(cls, v: list[str]) -> list[str]:
-        return [_ipv4(s) for s in v]
+        out = []
+        for item in v:
+            ip, sep, port = item.partition("#")
+            if sep and not (port.isdigit() and 0 < int(port) < 65536):
+                raise ValueError(f"porta invalida no upstream: {item!r}")
+            out.append(_ipv4(ip) + (f"#{port}" if sep else ""))
+        return out
+
+    @model_validator(mode="after")
+    def _resolve_algum(self) -> DNS:
+        if self.no_resolv and not self.upstream:
+            raise ValueError(
+                "no_resolv sem upstream deixa o dnsmasq sem ninguem para perguntar: "
+                "a LAN ficaria sem DNS"
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------

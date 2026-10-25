@@ -188,12 +188,26 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
 
     print("\n== DNS e DHCP ==")
     check("bind-interfaces importado", cfg.dns.bind_interfaces, True)
-    check("upstream com porta nao entra", cfg.dns.upstream, [])
-    check("upstream com porta vira mudanca", mentions(changes, "server=127.0.0.1#5335"), True)
-    check("diretivas sem modelo viram mudanca",
-          [mentions(changes, f"'{k}'") for k in ("dhcp-authoritative", "no-resolv")], [True, True])
+    check("upstream com porta entra (o unbound atras do dnsmasq)", cfg.dns.upstream, ["127.0.0.1#5335"])
+    check("no-resolv entra", cfg.dns.no_resolv, True)
+    check("dhcp-authoritative entra", cfg.dhcp.authoritative, True)
+    check("nenhuma delas vira mudanca",
+          [mentions(changes, k) for k in ("5335", "dhcp-authoritative", "no-resolv")], [False, False, False])
+    gerado = render_all(cfg)["dnsmasq.conf"]
+    check("e o dnsmasq gerado traz as tres",
+          [line in gerado.splitlines() for line in ("dhcp-authoritative", "no-resolv", "server=127.0.0.1#5335")],
+          [True, True, True])
+    try:
+        Config.model_validate(cfg.model_dump() | {"dns": cfg.dns.model_dump() | {"upstream": []}})
+        sem_dns = False
+    except ValidationError:
+        sem_dns = True
+    check("no-resolv sem upstream e' recusado (LAN sem DNS)", sem_dns, True)
     names = {r.ip: r.name for r in cfg.dhcp.reservations}
-    check("placeholders de MAC zerado ficam de fora", "10.0.0.12" in names or "10.0.0.13" in names, False)
+    check("MAC zerado nao vira reserva de aparelho", "10.0.0.12" in names or "10.0.0.13" in names, False)
+    check("mas segura o IP fora da distribuicao", cfg.dhcp.held, ["10.0.0.12", "10.0.0.13"])
+    check("e o gerado segura do mesmo jeito",
+          "dhcp-host=00:00:00:00:00:00,10.0.0.12" in render_all(cfg)["dnsmasq.conf"], True)
     check("reserva sem nome empresta o do DNS", names.get("10.0.0.14"), "kali")
     check("'_' vira '-'", names.get("10.0.0.11"), "desk-1")
     tv = next(h for h in cfg.hosts if h.name == "tv")

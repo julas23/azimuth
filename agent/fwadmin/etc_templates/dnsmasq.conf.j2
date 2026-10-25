@@ -17,6 +17,9 @@ local=/{{ dns.domain }}/
 
 {% if dhcp.enabled %}
 # --- DHCP -------------------------------------------------------------------
+{% if dhcp.authoritative %}
+dhcp-authoritative
+{% endif %}
 dhcp-range={{ dhcp.range.start }},{{ dhcp.range.end }},{{ dhcp.range.netmask }},{{ dhcp.range.lease }}
 dhcp-option=option:router,{{ dhcp.router or lan.ipv4.address.split('/')[0] }}
 dhcp-option=6,{{ (dhcp.dns_servers or [lan.ipv4.address.split('/')[0]]) | join(',') }}
@@ -26,6 +29,13 @@ dhcp-option=6,{{ (dhcp.dns_servers or [lan.ipv4.address.split('/')[0]]) | join('
 dhcp-host={{ r.mac }},{{ r.ip }},{{ r.name }}{% if r.description %}  # {{ r.description }}{% endif %}
 
 {% endfor %}
+{% if dhcp.held %}
+
+# --- IPs segurados: o MAC zerado nunca casa, e o dnsmasq nao entrega o IP ---
+{% for ip in dhcp.held %}
+dhcp-host=00:00:00:00:00:00,{{ ip }}
+{% endfor %}
+{% endif %}
 {% endif %}
 
 # --- registros de host ------------------------------------------------------
@@ -35,8 +45,14 @@ address=/{{ h.fqdn(dns.domain) }}/{{ h.ip }}
 {% endif %}
 {% endfor %}
 
-{% if dns.upstream %}
+{% if dns.upstream or dns.no_resolv or dns.proxy_dnssec %}
 # --- resolvedores upstream --------------------------------------------------
+{% if dns.no_resolv %}
+no-resolv
+{% endif %}
+{% if dns.proxy_dnssec %}
+proxy-dnssec
+{% endif %}
 {% for s in dns.upstream %}
 server={{ s }}
 {% endfor %}
