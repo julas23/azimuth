@@ -74,5 +74,9 @@ table ip nat {
 {% for name in firewall.masquerade %}
         oifname "{{ cfg.iface(name).ppp_device }}" masquerade comment "NAT {{ name }}"
 {% endfor %}
+{% for m in firewall.masquerade_rules %}
+        oifname "{{ device_of(m.interface) }}"{% if m.source %} ip saddr {{ m.source }}{% endif %} masquerade{% if m.description %} comment "{{ m.description }}"{% endif %}
+
+{% endfor %}
     }
 }

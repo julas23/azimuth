@@ -215,28 +215,35 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
     check("e a divergencia vira mudanca", mentions(changes, "'tv': DHCP entrega 10.0.0.15"), True)
 
     print("\n== nftables ==")
-    check("bloqueios de input viram redundantes", cfg.firewall.input_rules, [])
+    check("bloqueios de input viram redundantes",
+          [r.description for r in cfg.firewall.input_rules if r.action.value != "accept"], [])
     check("e saem com aviso", mentions(findings, "redundante com a entrada fechada"), True)
     check("entrada sempre fechada", cfg.firewall.input_policy.value, "drop")
     check("a troca de politica vira mudanca", mentions(changes, "lista negra vira lista branca"), True)
-    check("forward lan -> wan lido",
+    check("forward lan -> wan e vpn -> lan lidos",
           [(r.source.value, r.destination.value) for r in cfg.firewall.forward_rules],
-          [("lan", "wan")])
+          [("lan", "wan"), ("vpn", "lan")])
     pf = cfg.firewall.port_forwards
     check("DNAT vira port-forward",
           [(p.interface, p.wan_port, p.to_ip, p.to_port) for p in pf],
           [("wan_vivo", 18096, "10.0.0.15", 8096)])
     check("accept do port-forward absorvido, nao duplicado", mentions(changes, "midia"), False)
-    check("regra de interface sem zona vira mudanca", mentions(changes, "VPN entra na LAN"), True)
+    check("o tunel do modelo vira a zona vpn, sem mudanca", mentions(changes, "VPN entra na LAN"), False)
     check("masquerade lido na ordem", cfg.firewall.masquerade, ["wan_vivo", "wan_star"])
-    check("masquerade fora das WANs vira mudanca", mentions(changes, "VPN para o site"), True)
+    check("masquerade com origem pelo outro tunel entra",
+          [(m.interface, m.source) for m in cfg.firewall.masquerade_rules], [("wgsite", "10.80.0.0/24")])
+    check("e nao vira mudanca", mentions(changes, "VPN para o site"), False)
 
     print("\n== WireGuard ==")
     check("tunel com ListenPort entra", (cfg.wireguard.enabled, cfg.wireguard.device), (True, "wg0"))
     check("chave continua fora do modelo", cfg.wireguard.private_key_file, "/etc/wireguard/wg0.key")
     check("comentario vira nome do peer", [p.name for p in cfg.wireguard.peers], ["celular"])
     check("o outro tunel fica de fora, com aviso", mentions(findings, "'wgsite' fica fora"), True)
-    check("e o bloqueio dele na entrada vira mudanca", mentions(changes, "tunel 'wgsite' ao"), True)
+    check("e vira outra interface do firewall",
+          [(o.name, o.device) for o in cfg.firewall.other_interfaces], [("wgsite", "wgsite")])
+    check("que entrava pela entrada aberta e continua entrando, como excecao explicita",
+          [(r.source, r.destination.value, r.action.value) for r in cfg.firewall.input_rules],
+          [("wgsite", "this", "accept")])
 
     print("\n== nftables gerado: entrada fechada, com a base ==")
     nft = render_all(cfg)["nftables.conf"]
@@ -246,6 +253,10 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
     check("established antes de tudo", "ct state established,related accept" in input_chain, True)
     check("WireGuard aberto na WAN", "iifname $WAN udp dport 51820 accept" in input_chain, True)
     check("peers da VPN entram", 'iifname "wg0" accept' in input_chain, True)
+    check("excecao do outro tunel gerada", 'iifname "wgsite" counter accept' in input_chain, True)
+    check("regra da zona vpn gerada com o device", 'iifname "wg0" oifname "lan0" counter accept' in nft, True)
+    check("masquerade com origem gerado",
+          'oifname "wgsite" ip saddr 10.80.0.0/24 masquerade comment "VPN para o site"' in nft, True)
     check("DHCP do provedor responde na WAN dhcp", 'iifname "wand" udp sport 67 udp dport 68 accept' in input_chain, True)
     try:
         Config.model_validate(cfg.model_dump() | {"firewall": cfg.firewall.model_dump() | {"input_policy": "accept"}})

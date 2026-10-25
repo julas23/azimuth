@@ -58,7 +58,20 @@ def _endpoint_expr(cfg: Config, value: Zone | str, direction: str) -> list[str]:
             return [f'{ifkey} "{cfg.lan.device}"']
         if value is Zone.wan:
             return [f"{ifkey} $WAN"]
+        if value is Zone.vpn:
+            return [f'{ifkey} "{cfg.wireguard.device}"']
+    for other in cfg.firewall.other_interfaces:
+        if value == other.name:
+            return [f'{ifkey} "{other.device}"']
     return [f"{ipkey} {value}"]
+
+
+def device_of(cfg: Config, name: str) -> str:
+    """Nome logico (WAN, LAN ou outra interface) -> device do kernel."""
+    for other in cfg.firewall.other_interfaces:
+        if other.name == name:
+            return other.device
+    return cfg.iface(name).ppp_device
 
 
 def rule_to_nft(cfg: Config, rule: Rule) -> list[str]:
@@ -179,6 +192,7 @@ def render_all(cfg: Config) -> dict[str, str]:
         "routing": cfg.routing,
         "rule_to_nft": lambda r: rule_to_nft(cfg, r),
         "base_input": base_input(cfg),
+        "device_of": lambda name: device_of(cfg, name),
         "IPv4Mode": IPv4Mode,
     }
 

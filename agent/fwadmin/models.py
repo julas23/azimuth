@@ -436,6 +436,9 @@ class Zone(str, Enum):
 
     lan = "lan"
     wan = "wan"
+    vpn = "vpn"
+    """Os peers do tunel WireGuard do modelo (wireguard.device)."""
+
     any = "any"
     this = "this"
     """O proprio firewall (usado no destino das regras de input)."""
@@ -452,7 +455,8 @@ class Rule(Base):
     description: Annotated[str, Field(max_length=120)] = ""
     proto: Proto = Proto.any
     source: Zone | str = Zone.any
-    """Zona (lan/wan/any) ou CIDR literal: 10.0.0.0/24, 10.0.0.15/32."""
+    """Zona (lan/wan/vpn/any), CIDR literal (10.0.0.0/24, 10.0.0.15/32) ou o
+    nome de uma das firewall.other_interfaces."""
 
     destination: Zone | str = Zone.any
     dest_ports: str = ""
@@ -488,11 +492,13 @@ class Rule(Base):
             return Zone(v)
         except ValueError:
             pass
+        if OTHER_IFACE_RE.match(v):
+            return v  # nome de outra interface; o Config confere se existe
         try:
             ipaddress.IPv4Network(v, strict=False)
         except ValueError as exc:
             raise ValueError(
-                f"{v!r} nao e' zona (lan/wan/any/this) nem CIDR valido"
+                f"{v!r} nao e' zona (lan/wan/vpn/any/this), CIDR valido nem nome de interface"
             ) from exc
         return v
 
@@ -531,6 +537,44 @@ class PortForward(Base):
         return v
 
 
+OTHER_IFACE_RE = re.compile(r"^[a-z][a-z0-9_-]{0,14}$")
+
+
+class OtherInterface(Base):
+    """Interface que o firewall filtra mas o motor nao configura.
+
+    E' o caso do tunel WireGuard para a VPS: o .conf dele e' do administrador,
+    mas as regras que deixam a LAN falar com ele sao do firewall. Com nome
+    aqui, uma regra pode dizer 'vps -> lan' em vez de repetir o device.
+    """
+
+    name: Annotated[str, Field(pattern=OTHER_IFACE_RE.pattern)]
+    device: Annotated[str, Field(pattern=DEVICE_RE.pattern)]
+    description: Annotated[str, Field(max_length=120)] = ""
+
+
+class Masquerade(Base):
+    """NAT de saida com origem: 'o que sai por X vindo de Y leva o IP de X'.
+
+    O mascaramento simples das WANs fica em firewall.masquerade; este e' para
+    quando so uma rede deve ser mascarada, como os peers da VPN saindo pelo
+    tunel da VPS.
+    """
+
+    interface: str
+    """Nome de WAN ou de outra interface."""
+
+    source: str = ""
+    """CIDR de origem. Vazio = qualquer."""
+
+    description: Annotated[str, Field(max_length=120)] = ""
+
+    @field_validator("source")
+    @classmethod
+    def _check_source(cls, v: str) -> str:
+        return str(ipaddress.IPv4Network(v, strict=False)) if v else v
+
+
 class Firewall(Base):
     """Bloqueia tudo e abre so as excecoes, nas duas cadeias.
 
@@ -554,6 +598,10 @@ class Firewall(Base):
     port_forwards: list[PortForward] = []
     masquerade: list[str] = []
     """Nomes logicos das interfaces que fazem NAT de saida."""
+
+    masquerade_rules: list[Masquerade] = []
+
+    other_interfaces: list[OtherInterface] = []
 
     preserve_tables: list[str] = ["inet f2b-table"]
     """Tabelas de terceiros que o reload NAO pode apagar (fail2ban)."""
@@ -748,6 +796,32 @@ class Config(Base):
         for name in self.firewall.masquerade:
             if name not in names:
                 raise ValueError(f"masquerade aponta para interface inexistente: {name!r}")
+
+        others = {o.name: o for o in self.firewall.other_interfaces}
+        _reject_dups([o.name for o in self.firewall.other_interfaces], "outra interface duplicada")
+        for o in self.firewall.other_interfaces:
+            if o.name in names or o.name in {z.value for z in Zone}:
+                raise ValueError(f"outra interface {o.name!r} usa nome de zona ou de interface do modelo")
+            taken = {i.device for i in self.interfaces} | {i.ppp_device for i in self.interfaces}
+            if self.wireguard.enabled:
+                taken.add(self.wireguard.device)
+            if o.device in taken:
+                raise ValueError(f"outra interface {o.name!r}: o device {o.device} ja e' do modelo")
+        for chain in ("input", "forward"):
+            for rule in getattr(self.firewall, f"{chain}_rules"):
+                for end in (rule.source, rule.destination):
+                    if end is Zone.vpn and not self.wireguard.enabled:
+                        raise ValueError(f"regra '{rule.description}' usa a zona vpn, mas o wireguard esta desligado")
+                    if isinstance(end, str) and not isinstance(end, Zone) and "/" not in end and end not in others:
+                        try:
+                            ipaddress.IPv4Address(end)
+                        except ValueError:
+                            raise ValueError(
+                                f"regra '{rule.description}' cita {end!r}, que nao e' outra interface conhecida"
+                            ) from None
+        for m in self.firewall.masquerade_rules:
+            if m.interface not in names and m.interface not in others:
+                raise ValueError(f"mascaramento aponta para interface inexistente: {m.interface!r}")
         for pf in self.firewall.port_forwards:
             if pf.interface not in wan_names:
                 raise ValueError(

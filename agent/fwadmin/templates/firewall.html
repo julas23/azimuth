@@ -90,7 +90,27 @@
 
 <section class="card" aria-labelledby="h-nat">
   <div class="card-h"><h2 class="h2" id="h-nat">NAT de saída</h2></div>
-  <div class="row"><span class="grow">Mascaramento nas interfaces <span class="mono">{{ fw.masquerade|join(', ') or '—' }}</span>. Tabelas de outros serviços que o motor preserva: <span class="mono">{{ fw.preserve_tables|join(', ') or '—' }}</span>.</span></div>
+  <div class="row"><span class="grow">Mascaramento nas WANs <span class="mono">{{ fw.masquerade|join(', ') or '—' }}</span>.</span></div>
+  {% for m in fw.masquerade_rules %}
+    <div class="row"><span class="grow">Sai por <span class="mono">{{ m.interface }}</span>{% if m.source %} vindo de <span class="mono">{{ m.source }}</span>{% endif %} com o IP de <span class="mono">{{ m.interface }}</span></span><span class="muted">{{ m.description }}</span></div>
+  {% endfor %}
+  <div class="row muted">Tabelas de outros serviços que o motor preserva: <span class="mono">{{ fw.preserve_tables|join(', ') or '—' }}</span>.</div>
+</section>
+
+<section class="card" aria-labelledby="h-zones">
+  <div class="card-h"><h2 class="h2" id="h-zones">Zonas e interfaces</h2><span class="muted">os nomes que as regras usam</span></div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Nome</th><th>Interface</th><th>O que é</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">lan</td><td class="mono">{{ cfg.lan.device }}</td><td>a rede de casa</td></tr>
+        <tr><td class="mono">wan</td><td class="mono">{{ cfg.wans|map(attribute='ppp_device')|join(', ') }}</td><td>as saídas para a internet</td></tr>
+        {% if cfg.wireguard.enabled %}<tr><td class="mono">vpn</td><td class="mono">{{ cfg.wireguard.device }}</td><td>os peers da VPN</td></tr>{% endif %}
+        {% for o in fw.other_interfaces %}<tr><td class="mono">{{ o.name }}</td><td class="mono">{{ o.device }}</td><td>{{ o.description or 'outra interface' }} <span class="chip mute">fora do motor</span></td></tr>{% endfor %}
+        <tr><td class="mono">this</td><td class="muted">—</td><td>o próprio firewall</td></tr>
+      </tbody>
+    </table>
+  </div>
 </section>
 
 {% endblock %}

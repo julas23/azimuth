@@ -230,7 +230,9 @@ NFT_DNAT = re.compile(
     rf"{COUNTER}?dnat to (?P<ip>[\d.]+):(?P<to_port>\d+)" + COMMENT + "$"
 )
 
-NFT_MASQ = re.compile(r'^oifname "(?P<dev>[^"]+)" masquerade' + COMMENT + "$")
+NFT_MASQ = re.compile(
+    r'^oifname "(?P<dev>[^"]+)" (?:ip saddr (?P<saddr>[\d./]+) )?masquerade' + COMMENT + "$"
+)
 
 FORWARD_FIXED = {
     "ct state established,related accept",
@@ -676,13 +678,20 @@ def build_dhcp(
 
 
 def build_firewall(
-    nft: dict[str, Any], lan_dev: str, wan_by_dev: dict[str, str]
+    nft: dict[str, Any],
+    lan_dev: str,
+    wan_by_dev: dict[str, str],
+    vpn_dev: str | None = None,
+    other_devs: list[str] | None = None,
 ) -> dict[str, Any]:
     """Traduz o ruleset vivo para o modelo, regra a regra.
 
     'wan_by_dev' mapeia o device que aparece no nft (ppp0, ens17) para o nome
-    logico da WAN. O que nao tiver traducao exata vira mudanca.
+    logico da WAN. 'vpn_dev' e' o tunel do modelo (zona vpn); 'other_devs' sao
+    os tuneis que o motor nao configura, que viram outras interfaces com o
+    proprio device como nome. O que nao tiver traducao exata vira mudanca.
     """
+    other_by_dev = {dev: label(dev) for dev in other_devs or []}
     wan_devs = set(wan_by_dev)
     defined = set(nft["defines"].get("WAN", []))
     if defined and defined != wan_devs:
@@ -703,6 +712,10 @@ def build_firewall(
             return "wan"
         if expr == f'"{lan_dev}"':
             return "lan"
+        if vpn_dev and expr == f'"{vpn_dev}"':
+            return "vpn"
+        if expr.strip('"') in other_by_dev:
+            return other_by_dev[expr.strip('"')]
         return None
 
     def to_rule(line: str, chain: str) -> dict[str, Any] | None:
@@ -819,12 +832,43 @@ def build_firewall(
             forward_rules.append(rule)
 
     masquerade = []
+    masquerade_rules = []
     for line in postrouting["rules"]:
         m = NFT_MASQ.match(line)
-        if not m or m.group("dev") not in wan_by_dev:
-            change(f"nftables/postrouting: regra sem traducao sai: {line}")
-        else:
+        if m and m.group("dev") in wan_by_dev and not m.group("saddr"):
             masquerade.append(wan_by_dev[m.group("dev")])
+            continue
+        dev = m.group("dev") if m else None
+        target = wan_by_dev.get(dev) or other_by_dev.get(dev) if dev else None
+        if not target:
+            change(f"nftables/postrouting: regra sem traducao sai: {line}")
+            continue
+        masquerade_rules.append(
+            {
+                "interface": target,
+                "source": m.group("saddr") or "",
+                "description": m.group("comment") or "",
+            }
+        )
+
+    # Com a entrada aberta, tudo o que chegava por um tunel de terceiros ao
+    # proprio firewall passava. Para importar sem mudar nada, isso vira uma
+    # excecao explicita — larga de proposito, para ser revista com calma.
+    if (filter_input.get("policy") or "accept") != "drop":
+        for dev, name in other_by_dev.items():
+            input_rules.append(
+                {
+                    "action": "accept",
+                    "description": f"tudo o que chega pelo tunel {dev} (era a entrada aberta)",
+                    "source": name,
+                    "destination": "this",
+                    "counter": True,
+                }
+            )
+            note(
+                f"nftables/input: o tunel '{dev}' entrava inteiro no firewall pela entrada "
+                "aberta; virou uma excecao explicita e larga — vale restringir a porta"
+            )
 
     for chain, body in (("input", filter_input), ("forward", filter_forward)):
         if (body.get("policy") or "accept") != "drop":
@@ -847,6 +891,11 @@ def build_firewall(
         "forward_rules": forward_rules,
         "port_forwards": port_forwards,
         "masquerade": masquerade,
+        "masquerade_rules": masquerade_rules,
+        "other_interfaces": [
+            {"name": name, "device": dev, "description": "tunel WireGuard fora do modelo"}
+            for dev, name in other_by_dev.items()
+        ],
         "preserve_tables": ["inet f2b-table"],
     }
 
@@ -869,11 +918,7 @@ def build_wireguard(live: Path) -> dict[str, Any] | None:
                 f"tunel WireGuard '{dev}' fica fora do modelo (que tem um tunel so); o motor "
                 "nao e' dono do arquivo dele, entao ele continua como esta"
             )
-            change(
-                f"nftables/input: com a entrada fechada, o que chega pelo tunel '{dev}' ao "
-                "proprio firewall passa a ser bloqueado (so os peers do tunel do modelo "
-                "entram); se algo dele usa o firewall, como DNS, precisa de excecao"
-            )
+
     if server is None:
         return None
 
@@ -1013,8 +1058,13 @@ def build(live: Path, portal_html: Path | None = None) -> dict[str, Any]:
     wan_by_dev = {"ppp0": "wan_vivo"}
     if dhcp_wan:
         wan_by_dev[dhcp_wan] = "wan_star"
+    # O WireGuard vem antes: o firewall precisa saber qual tunel e' a zona vpn
+    # e quais ficam como outras interfaces.
+    wireguard = build_wireguard(live)
+    vpn_dev = wireguard["device"] if wireguard else None
+    others = [c.stem for c in sorted((live / "wireguard").glob("*.conf")) if c.stem != vpn_dev]
     firewall = build_firewall(
-        parse_nft((live / "nftables.conf").read_text()), lan_dev, wan_by_dev
+        parse_nft((live / "nftables.conf").read_text()), lan_dev, wan_by_dev, vpn_dev, others
     )
 
     config: dict[str, Any] = {
@@ -1033,7 +1083,6 @@ def build(live: Path, portal_html: Path | None = None) -> dict[str, Any]:
         "portal": portal,
         "firewall": firewall,
     }
-    wireguard = build_wireguard(live)
     if wireguard:
         config["wireguard"] = wireguard
     return config
