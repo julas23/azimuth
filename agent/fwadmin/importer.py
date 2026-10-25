@@ -34,6 +34,7 @@ O portal e' opcional: sem o arquivo, o config sai sem cards.
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 import sys
 from html import unescape
@@ -124,22 +125,6 @@ def parse_ppp_peer(text: str) -> dict[str, Any]:
         else:
             out[key] = parts[1].strip().strip('"')
     return out
-
-
-PPP_FIXED = {
-    "plugin": "rp-pppoe.so",
-    "maxfail": "0",
-}
-"""Opcoes com valor que o template escreve sempre igual."""
-
-PPP_FIXED_FLAGS = {
-    "noipdefault", "hide-password", "noauth", "persist", "noaccomp",
-    "default-asyncmap", "nodefaultroute",
-}
-PPP_MODELED = {
-    "user", "mtu", "mru", "lcp-echo-interval", "lcp-echo-failure", "holdoff",
-    "linkname", "ipparam",
-}
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +356,12 @@ class PortalParser:
 
 
 def build_interfaces(
-    ifaces_raw: dict[str, dict[str, Any]], iface_text: str, lan_dev: str, ppp_raw: dict[str, Any]
+    ifaces_raw: dict[str, dict[str, Any]],
+    iface_text: str,
+    lan_dev: str,
+    ppp_raw: dict[str, Any],
+    peer: str = "vivo",
+    ppp_unit: str | None = None,
 ) -> tuple[list[dict[str, Any]], str, str | None]:
     """Devolve (interfaces, device do PPPoE, device da WAN DHCP ou None)."""
     lan_cfg = ifaces_raw[lan_dev]
@@ -395,7 +385,14 @@ def build_interfaces(
     )
 
     pppoe_mode = ifaces_raw[pppoe_dev]["mode"]
-    if pppoe_mode != "manual":
+    carrier = "manual"
+    if pppoe_mode == "dhcp":
+        carrier = "dhcp"
+        note(
+            f"{pppoe_dev} (placa do PPPoE) sobe em 'inet dhcp' e continua assim; o dhclient "
+            "pede IP a quem nunca responde — vale trocar para manual"
+        )
+    elif pppoe_mode != "manual":
         change(
             f"{pppoe_dev} (placa do PPPoE) sobe hoje em 'inet {pppoe_mode}'; o motor gera "
             "'inet manual', porque quem poe IP no link e' o pppd"
@@ -406,7 +403,17 @@ def build_interfaces(
             continue
         change(f"interface {dev} ('inet {cfg['mode']}') nao tem papel no modelo e sai do arquivo")
 
-    expected = {lan_dev: {"address", "netmask", "gateway"}, pppoe_dev: set(), dhcp_wan: set()}
+    expected = {
+        lan_dev: {"address", "netmask", "gateway", "dns-nameservers"},
+        pppoe_dev: {"dns-nameservers"},
+        dhcp_wan: {"dns-nameservers"},
+    }
+
+    def nameservers(dev: str | None) -> list[str]:
+        if dev is None:
+            return []
+        return ifaces_raw[dev]["options"].get("dns-nameservers", "").split()
+
     for dev, allowed in expected.items():
         if dev is None:
             continue
@@ -431,6 +438,7 @@ def build_interfaces(
                 "mode": "static",
                 "address": lan_addr,
                 "gateway": lan_cfg["options"].get("gateway"),
+                "dns_nameservers": nameservers(lan_dev),
             },
         },
     ]
@@ -441,7 +449,7 @@ def build_interfaces(
                 "device": dhcp_wan,
                 "role": "wan",
                 "description": "Starlink",
-                "ipv4": {"mode": "dhcp"},
+                "ipv4": {"mode": "dhcp", "dns_nameservers": nameservers(dhcp_wan)},
             }
         )
     interfaces.append(
@@ -450,16 +458,21 @@ def build_interfaces(
             "device": pppoe_dev,
             "role": "wan",
             "description": "Vivo Fibra (PPPoE)",
-            "ipv4": {"mode": "pppoe"},
+            "ipv4": {"mode": "pppoe", "dns_nameservers": nameservers(pppoe_dev)},
             "pppoe": {
-                "peer": ppp_raw.get("linkname", "vivo"),
+                "peer": ppp_raw.get("linkname", peer),
                 "username": ppp_raw.get("user", ""),
-                "password_ref": ppp_raw.get("linkname", "vivo"),
-                "mtu": int(ppp_raw.get("mtu", 1492)),
-                "mru": int(ppp_raw.get("mru", 1492)),
-                "lcp_echo_interval": int(ppp_raw.get("lcp-echo-interval", 20)),
+                "password_ref": ppp_raw.get("linkname", peer),
+                # o que o peer vivo nao escreve, o gerado tambem nao escreve
+                "mtu": int(ppp_raw["mtu"]) if "mtu" in ppp_raw else None,
+                "mru": int(ppp_raw["mru"]) if "mru" in ppp_raw else None,
+                "lcp_echo_interval": int(ppp_raw.get("lcp-echo-interval", 0)),
                 "lcp_echo_failure": int(ppp_raw.get("lcp-echo-failure", 3)),
                 "holdoff": int(ppp_raw.get("holdoff", 5)),
+                "default_route": bool({"defaultroute", "replacedefaultroute"} & ppp_raw["flags"])
+                and "nodefaultroute" not in ppp_raw["flags"],
+                "carrier": carrier,
+                "unit": ppp_unit,
             },
         }
     )
@@ -467,12 +480,12 @@ def build_interfaces(
 
 
 def check_ppp(ppp_raw: dict[str, Any], peer: str, pppoe_dev: str) -> None:
-    """Tudo o que o peers/ vivo faz e o template nao escreve."""
+    """A senha. O resto do peer e' conferido contra o gerado, em compare_ppp."""
     if "password" in ppp_raw:
         change(
-            f"a senha do PPPoE esta no proprio peers/{peer}, e o arquivo gerado nao a traz: "
-            "sem ela em /etc/ppp/chap-secrets (ou pap-secrets) antes do apply, o link "
-            "para de autenticar"
+            f"a senha do PPPoE esta no proprio peers/{peer}, e o arquivo gerado nao a traz "
+            "(segredo nao entra em arquivo gerado): sem ela em /etc/ppp/chap-secrets ou "
+            "pap-secrets antes do apply, o link para de autenticar"
         )
     else:
         note(
@@ -480,29 +493,44 @@ def check_ppp(ppp_raw: dict[str, Any], peer: str, pppoe_dev: str) -> None:
             "/etc/ppp/chap-secrets e vai para /etc/fwadmin/secrets.yaml (0600, fora do git)"
         )
 
-    owns_route = {"defaultroute", "replacedefaultroute"} & ppp_raw["flags"]
-    if owns_route:
-        change(
-            f"o pppd e' dono da rota padrao hoje ({', '.join(sorted(owns_route))}); o motor "
-            "gera 'nodefaultroute' e passa a rota para o wan-failover.sh, que roda por timer. "
-            "Entre o link subir e o timer disparar, nao ha rota padrao"
-        )
 
-    for key, want in PPP_FIXED.items():
-        if key in ppp_raw and ppp_raw[key] != want:
-            change(f"peers/{peer}: '{key} {ppp_raw[key]}' vira '{key} {want}'")
-    for key in ppp_raw:
-        if key not in PPP_FIXED and key not in PPP_MODELED and key not in ("flags", "password"):
-            change(f"peers/{peer}: '{key} {ppp_raw[key]}' nao existe no modelo e sai do arquivo")
-    for flag in ppp_raw["flags"] - PPP_FIXED_FLAGS - owns_route - {pppoe_dev}:
-        change(f"peers/{peer}: '{flag}' nao existe no modelo e sai do arquivo")
+PPP_HARMLESS = {"noipdefault", "hide-password", "noaccomp", "default-asyncmap"}
+"""O que o peer gerado sempre escreve e nao muda nada no PPPoE: o IP vem do
+provedor de qualquer jeito, a senha so some do log, e accomp e asyncmap sao do
+PPP serial — o PPPoE e' sincrono e ignora os dois."""
 
-    implicit = [k for k in ("mtu", "mru") if k not in ppp_raw]
-    if implicit:
-        note(
-            f"peers/{peer} nao fixa {' nem '.join(implicit)}; o modelo escreve 1492, que e' o "
-            "que o rp-pppoe ja negocia"
-        )
+
+def _ppp_lines(text: str) -> set[str]:
+    out = set()
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line and not line.lower().startswith("password") and line not in PPP_HARMLESS:
+            out.add(" ".join(line.split()))
+    return out
+
+
+def compare_ppp(cfg: Config, live: Path) -> None:
+    """Gera cada peer pelo modelo e compara com o vivo, linha a linha.
+
+    Conferir so o que o vivo tem deixava passar o que o gerado acrescenta
+    (eco LCP, MTU fixo, linkname). Comparar com o arquivo que o motor de fato
+    escreveria pega as duas direcoes.
+    """
+    from fwadmin.render import render_all
+
+    rendered = render_all(cfg)
+    for wan in cfg.wans:
+        if not wan.pppoe:
+            continue
+        name = f"ppp-peers-{wan.pppoe.peer}"
+        source = live / name
+        if not source.exists() or name not in rendered:
+            continue
+        vivo, gerado = _ppp_lines(source.read_text()), _ppp_lines(rendered[name])
+        for line in sorted(vivo - gerado):
+            change(f"peers/{wan.pppoe.peer}: '{line}' sai do arquivo")
+        for line in sorted(gerado - vivo):
+            change(f"peers/{wan.pppoe.peer}: '{line}' entra no arquivo")
 
 
 def build_dns(dns_raw: dict[str, list[str]], domain: str) -> dict[str, Any]:
@@ -972,10 +1000,19 @@ def build(live: Path, portal_html: Path | None = None) -> dict[str, Any]:
     peer_file = next(iter(sorted(live.glob("ppp-peers-*"))), live / "ppp-peers-vivo")
     ppp_raw = parse_ppp_peer(peer_file.read_text())
     peer = ppp_raw.get("linkname", peer_file.name.removeprefix("ppp-peers-"))
+    try:
+        runtime = json.loads((live / "runtime.json").read_text())
+    except (OSError, ValueError):
+        runtime = {}
+    ppp_units = runtime.get("ppp_units") or []
+    if len(ppp_units) > 1:
+        note(f"mais de uma unidade ppp@ rodando ({', '.join(ppp_units)}); o modelo fica com a primeira")
 
     # -- interfaces --------------------------------------------------------
     lan_dev = dns_raw["interface"][0]
-    interfaces, pppoe_dev, dhcp_wan = build_interfaces(ifaces_raw, iface_text, lan_dev, ppp_raw)
+    interfaces, pppoe_dev, dhcp_wan = build_interfaces(
+        ifaces_raw, iface_text, lan_dev, ppp_raw, peer, ppp_units[0] if ppp_units else None
+    )
     lan_net = ipaddress.IPv4Interface(interfaces[0]["ipv4"]["address"]).network
     check_ppp(ppp_raw, peer, pppoe_dev)
 
@@ -1098,6 +1135,7 @@ def run(live: Path, portal_html: Path | None = None) -> tuple[Config, list[str],
     FINDINGS.clear()
     CHANGES.clear()
     cfg = Config.model_validate(build(live, portal_html))
+    compare_ppp(cfg, live)
     return cfg, list(FINDINGS), list(CHANGES)
 
 
@@ -1111,6 +1149,7 @@ def main() -> int:
     # A validacao e' o ponto do exercicio: se o modelo nao aceita o estado
     # atual, ou o modelo esta errado ou a config viva esta.
     cfg = Config.model_validate(raw)
+    compare_ppp(cfg, live)
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(

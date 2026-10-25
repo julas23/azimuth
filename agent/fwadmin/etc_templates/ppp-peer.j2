@@ -10,14 +10,29 @@ noauth
 persist
 maxfail 0
 holdoff {{ ppp.holdoff }}
+{% if ppp.mtu %}
 mtu {{ ppp.mtu }}
+{% endif %}
+{% if ppp.mru %}
 mru {{ ppp.mru }}
+{% endif %}
 noaccomp
 default-asyncmap
-{# a rota default e' responsabilidade do fwadmin (link primario/failover),
-   nunca do pppd — senao os dois brigam pela tabela de rotas #}
+{% if ppp.default_route %}
+{# sem failover, o pppd e' o dono da rota padrao (pppoe.default_route) #}
+defaultroute
+replacedefaultroute
+{% else %}
+{# com failover, a rota default e' do wan-failover.sh, nunca do pppd —
+   senao os dois brigam pela tabela de rotas #}
 nodefaultroute
+{% endif %}
+{% if ppp.lcp_echo_interval %}
 lcp-echo-interval {{ ppp.lcp_echo_interval }}
 lcp-echo-failure {{ ppp.lcp_echo_failure }}
+{% endif %}
+{% if not ppp.unit %}
+{# o poff acha o pppd pelo linkname; com o systemd, quem acha e' ele #}
 linkname {{ ppp.peer }}
 ipparam {{ ppp.peer }}
+{% endif %}

@@ -22,9 +22,15 @@ iface {{ i.device }} inet static
 {% endif %}
 {% elif i.ipv4.mode == IPv4Mode.dhcp %}
 iface {{ i.device }} inet dhcp
+{% elif i.pppoe and i.pppoe.carrier == 'dhcp' %}
+{# importado assim; o dhclient aqui pede IP a quem nunca responde #}
+iface {{ i.device }} inet dhcp
 {% else %}
 {# PPPoE: o ifupdown so levanta o link; quem configura o IP e' o pppd #}
 iface {{ i.device }} inet manual
+{% endif %}
+{% if i.ipv4.dns_nameservers %}
+    dns-nameservers {{ i.ipv4.dns_nameservers|join(' ') }}
 {% endif %}
 
 {% endfor %}

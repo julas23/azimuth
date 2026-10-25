@@ -18,10 +18,11 @@ def targets(cfg: Config) -> dict[str, str]:
 
 
 def units(cfg: Config) -> frozenset[str]:
-    # PPPoE nao tem unidade propria: quem sobe o link e' o 'pon', chamado pelo
-    # ifup da interface fisica. Reivindicar uma unidade aqui seria reivindicar
-    # o que este modulo nao controla — a linha do inventario e' do interfaces.
-    return frozenset()
+    # Sem pppoe.unit, quem sobe o link e' o 'pon', chamado pelo ifup da
+    # interface fisica, e nao ha unidade para reivindicar — a linha do
+    # inventario e' do interfaces. Com ela (ppp@provider no Debian), o link
+    # e' do systemd, e a unidade e' deste modulo.
+    return frozenset(w.pppoe.unit for w in cfg.wans if w.pppoe and w.pppoe.unit)
 
 
 def _peers(files: list[str]) -> list[str]:
@@ -37,7 +38,7 @@ def _interface(cfg: Config | None, peer: str):
     return None
 
 
-def _restart(peer: str, device: str | None) -> Reload:
+def _restart(peer: str, device: str | None, unit: str | None = None) -> Reload:
     """Derruba e resobe um peer.
 
     A espera pela interface de baixo cobre o caminho do rollback, onde as
@@ -51,13 +52,20 @@ def _restart(peer: str, device: str | None) -> Reload:
     sucesso com a WAN caida. Como prova, a mesma verificacao passa a disparar
     rollback em vez de virar uma linha de FALHOU que ninguem le.
     """
-    steps = [f"poff {peer} || true"]
-    if device:
-        steps.append(
+    wait = (
+        [
             f"for i in $(seq 1 20); do "
             f"ip link show {device} 2>/dev/null | grep -q LOWER_UP && break; sleep 1; done"
-        )
-    steps.append(f"pon {peer}")
+        ]
+        if device
+        else []
+    )
+    if unit:
+        # pon/poff ao lado de um ppp@ do systemd subiria um segundo pppd na
+        # mesma placa: com a unidade, quem reinicia e' o systemctl.
+        steps = [*wait, f"systemctl restart {unit}"]
+    else:
+        steps = [f"poff {peer} || true", *wait, f"pon {peer}"]
     return Reload(f"PPPoE {peer}", ["sh", "-c", "; ".join(steps)], disruptive=True)
 
 
@@ -71,7 +79,13 @@ def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Re
     out = []
     for peer in _peers(changed):
         iface = _interface(cfg, peer)
-        out.append(_restart(peer, iface.device if iface else None))
+        out.append(
+            _restart(
+                peer,
+                iface.device if iface else None,
+                iface.pppoe.unit if iface else None,
+            )
+        )
     return out
 
 
@@ -79,7 +93,13 @@ def rollback(cfg: Config | None, files: list[str]) -> list[Reload]:
     out = []
     for peer in _peers(files):
         iface = _interface(cfg, peer)
-        out.append(_restart(peer, iface.device if iface else None))
+        out.append(
+            _restart(
+                peer,
+                iface.device if iface else None,
+                iface.pppoe.unit if iface else None,
+            )
+        )
     return out
 
 

@@ -5,9 +5,11 @@ o importador sabe ler para /run/fwadmin/live, no formato achatado dele, e
 grava em runtime.json o que so se ve com o servico rodando (handshakes do
 WireGuard, banidos do fail2ban, contadores do unbound).
 
-Nenhum segredo sai daqui. As linhas de chave do WireGuard e de senha do PPP
-sao cortadas na copia, e a coluna de chave privada do 'wg show dump' e'
-descartada na leitura. O painel, que roda sem privilegio, so ve o resultado.
+Nenhum segredo sai daqui. Nas linhas de chave do WireGuard e de senha do PPP
+o valor vira '<oculto>' na copia — a chave fica, porque o importador precisa
+saber que o segredo mora naquele arquivo —, e a coluna de chave privada do
+'wg show dump' e' descartada na leitura. O painel, que roda sem privilegio,
+so ve o resultado.
 """
 
 from __future__ import annotations
@@ -39,8 +41,9 @@ FILES = {
 
 SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
 
-WG_SECRET = re.compile(r"^\s*(PrivateKey|PresharedKey)\s*=", re.IGNORECASE)
-PPP_SECRET = re.compile(r"^\s*password\b", re.IGNORECASE)
+WG_SECRET = re.compile(r"^(\s*(?:PrivateKey|PresharedKey)\s*=).*$", re.IGNORECASE)
+PPP_SECRET = re.compile(r"^(\s*password\b).*$", re.IGNORECASE)
+HIDDEN = "<oculto>"
 
 UNBOUND_STATS = (
     "total.num.queries",
@@ -63,7 +66,11 @@ def _run(*args: str, timeout: int = 10) -> str:
 
 
 def _strip(text: str, secret: re.Pattern[str]) -> str:
-    return "".join(line for line in text.splitlines(keepends=True) if not secret.match(line))
+    """Troca o valor do segredo por '<oculto>', linha a linha."""
+    return "".join(
+        secret.sub(lambda m: f"{m.group(1)} {HIDDEN}", line.rstrip("\n")) + "\n"
+        for line in text.splitlines()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -87,8 +94,10 @@ def _copy_files(dest: Path) -> list[str]:
             missing.append(source)
 
     peers = paths.sys_path("/etc/ppp/peers")
+    # Link simbolico (provider -> vivo, no Debian) e' o mesmo peer com outro
+    # nome; copiar os dois faria o importador ver dois links discados.
     for peer in sorted(peers.glob("*")) if peers.is_dir() else []:
-        if peer.is_file() and SAFE_NAME.match(peer.name):
+        if peer.is_file() and not peer.is_symlink() and SAFE_NAME.match(peer.name):
             put(f"ppp-peers-{peer.name}", _strip(peer.read_text(), PPP_SECRET))
 
     wg = paths.sys_path("/etc/wireguard")
@@ -133,6 +142,12 @@ def wireguard_dump() -> dict[str, Any]:
                 }
             )
     return out
+
+
+def ppp_units() -> list[str]:
+    """Unidades ppp@<peer> rodando: quem sobe o PPPoE, quando e' o systemd."""
+    out = _run("systemctl", "list-units", "ppp@*.service", "--plain", "--no-legend", "--all")
+    return [line.split()[0] for line in out.splitlines() if line.split()[2:3] == ["active"]]
 
 
 def _f2b_fields(text: str) -> dict[str, str]:
@@ -215,9 +230,14 @@ def collect() -> Path:
         # de execucao vem de um arquivo de mentira, se houver.
         fixture = paths.SYSROOT / "runtime-fixture.json"
         fake = json.loads(fixture.read_text()) if fixture.exists() else {}
-        runtime |= {key: fake.get(key) for key in ("wireguard", "fail2ban", "unbound")}
+        runtime |= {key: fake.get(key) for key in ("wireguard", "fail2ban", "unbound", "ppp_units")}
     else:
-        runtime |= {"wireguard": wireguard_dump(), "fail2ban": fail2ban(), "unbound": unbound_stats()}
+        runtime |= {
+            "wireguard": wireguard_dump(),
+            "fail2ban": fail2ban(),
+            "unbound": unbound_stats(),
+            "ppp_units": ppp_units(),
+        }
     (fresh / "runtime.json").write_text(json.dumps(runtime, indent=1))
     _share(fresh)
 

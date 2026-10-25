@@ -142,6 +142,7 @@ table ip nat {
     }
 }
 """,
+    "runtime.json": '{"ppp_units": ["ppp@provider.service"]}',
     "wireguard/wg0.conf": """\
 [Interface]
 Address = 10.80.0.1/24
@@ -178,12 +179,31 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
     check("LAN em CIDR", cfg.lan.ipv4.address, "10.0.0.1/24")
     check("placa do PPPoE em 'inet dhcp' nao vira a WAN DHCP", cfg.iface("wan_star").device, "wand")
     check("PPPoE no device certo", cfg.iface("wan_vivo").device, "wanp")
-    check("'inet dhcp' do PPPoE vira mudanca", mentions(changes, "sobe hoje em 'inet dhcp'"), True)
-    check("dns-nameservers vira mudanca", mentions(changes, "dns-nameservers 9.9.9.9"), True)
+    vivo_if = cfg.iface("wan_vivo")
+    check("'inet dhcp' do PPPoE fica como esta", vivo_if.pppoe.carrier, "dhcp")
+    check("e so com aviso", mentions(findings, "vale trocar para manual"), True)
+    check("dns-nameservers importado", cfg.lan.ipv4.dns_nameservers, ["9.9.9.9"])
+    gerado_if = render_all(cfg)["interfaces"]
+    check("e gerado de volta", "dns-nameservers 9.9.9.9" in gerado_if, True)
+    check("nenhum dos dois vira mudanca",
+          [mentions(changes, k) for k in ("inet dhcp", "dns-nameservers")], [False, False])
 
     print("\n== PPPoE ==")
     check("senha no peers/ vira mudanca", mentions(changes, "senha do PPPoE esta no proprio"), True)
-    check("rota padrao do pppd vira mudanca", mentions(changes, "dono da rota padrao"), True)
+    check("sem failover, o pppd continua dono da rota", cfg.iface("wan_vivo").pppoe.default_route, True)
+    check("o link e' do systemd", cfg.iface("wan_vivo").pppoe.unit, "ppp@provider.service")
+    from fwadmin.services import pppoe as pppoe_svc
+    recarga = pppoe_svc.reloads(cfg, None, ["ppp-peers-vivo"])[0].argv[-1]
+    check("e o reinicio passa pelo systemctl, sem pon/poff",
+          ("systemctl restart ppp@provider.service" in recarga, "pon " in recarga), (True, False))
+    peer = render_all(cfg)["ppp-peers-vivo"]
+    check("o peer gerado pede a rota como o vivo",
+          ["defaultroute" in peer.split(), "replacedefaultroute" in peer.split(), "nodefaultroute" in peer.split()],
+          [True, True, False])
+    check("o que o vivo nao escreve, o gerado nao escreve",
+          [k in peer for k in ("lcp-echo-interval", "mtu ", "mru ")], [False, False, False])
+    check("o peer gerado bate com o vivo, fora a senha",
+          [c for c in changes if c.startswith("peers/")], [])
     check("sem failover vivo, failover importado desligado", cfg.routing.failover.enabled, False)
 
     print("\n== DNS e DHCP ==")

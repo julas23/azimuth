@@ -86,11 +86,30 @@ class PPPoE(Base):
     password_ref: Annotated[str, Field(pattern=r"^[a-z0-9_-]{1,32}$")]
     """Chave em /etc/fwadmin/secrets.yaml (modo 0600, fora do git)."""
 
-    mtu: Annotated[int, Field(ge=576, le=1500)] = 1492
-    mru: Annotated[int, Field(ge=576, le=1500)] = 1492
+    mtu: Annotated[int, Field(ge=576, le=1500)] | None = 1492
+    """None = nao escreve; o rp-pppoe negocia (1492 no PPPoE comum)."""
+
+    mru: Annotated[int, Field(ge=576, le=1500)] | None = 1492
     lcp_echo_interval: Annotated[int, Field(ge=0, le=300)] = 20
+    """Segundos entre ecos LCP. 0 = nao escreve: o pppd so percebe o link
+    morto quando o kernel avisa, o que no PPPoE pode nunca acontecer."""
+
     lcp_echo_failure: Annotated[int, Field(ge=0, le=100)] = 3
     holdoff: Annotated[int, Field(ge=0, le=600)] = 5
+
+    default_route: bool = False
+    """O pppd poe a rota padrao (defaultroute + replacedefaultroute). So vale
+    sem failover: com ele, quem decide a rota e' o wan-failover.sh, e os dois
+    brigariam pela tabela."""
+
+    carrier: Literal["manual", "dhcp"] = "manual"
+    """Como o ifupdown sobe a placa de baixo. 'manual' e' o certo — quem poe
+    IP no link e' o pppd. 'dhcp' existe para importar sem mudar maquina que
+    subia assim (o dhclient fica pedindo IP a quem nunca responde)."""
+
+    unit: Annotated[str, Field(pattern=r"^ppp@[a-z0-9_-]{1,32}\.service$")] | None = None
+    """Unidade do systemd que mantem o link (ppp@provider.service, no Debian).
+    None = o motor sobe e derruba com pon/poff."""
 
 
 class IPv4Config(Base):
@@ -100,6 +119,15 @@ class IPv4Config(Base):
 
     gateway: str | None = None
     """Opcional em static. Em dhcp/pppoe vem do provedor."""
+
+    dns_nameservers: list[str] = []
+    """'dns-nameservers' do ifupdown: com o resolvconf instalado, e' o que o
+    proprio firewall usa para resolver nomes. Nao mexe no DNS da LAN."""
+
+    @field_validator("dns_nameservers")
+    @classmethod
+    def _check_ns(cls, v: list[str]) -> list[str]:
+        return [_ipv4(s) for s in v]
 
     @field_validator("address")
     @classmethod
@@ -792,6 +820,14 @@ class Config(Base):
                 raise ValueError("routing.backup nao pode ser igual ao primary")
         if self.routing.failover.enabled and not self.routing.backup:
             raise ValueError("failover ligado exige routing.backup")
+        route_owners = [w.name for w in self.wans if w.pppoe and w.pppoe.default_route]
+        if route_owners and self.routing.failover.enabled:
+            raise ValueError(
+                f"{route_owners[0]}: o pppd dono da rota padrao e o failover ligado brigariam "
+                "pela tabela; escolha um"
+            )
+        if len(route_owners) > 1:
+            raise ValueError(f"mais de um pppd dono da rota padrao: {route_owners}")
 
         for name in self.firewall.masquerade:
             if name not in names:
