@@ -8,13 +8,21 @@
   <span class="muted mono">{{ cfg.system.hostname }} · kernel {{ system.kernel }} · ligado há {{ system.uptime }}</span>
 </div>
 
-{% if readonly %}
-<section class="card{% if changes %} warn{% endif %}" id="mudancas" aria-labelledby="h-chg">
-  <div class="card-h"><h2 class="h2" id="h-chg">O que o motor mudaria</h2><span class="chip {{ 'warn' if changes else 'ok' }}">{{ changes|length }}</span>
-    <span class="muted">se aplicasse o modelo lido desta máquina; nada disso foi feito</span></div>
+<section class="card{% if adopt_pending %} warn{% endif %}" id="mudancas" aria-labelledby="h-chg">
+  <div class="card-h"><h2 class="h2" id="h-chg">O que o motor mudaria ao assumir</h2>
+    <span class="chip {{ 'warn' if adopt_pending else 'ok' }}">{{ adopt_pending|length }} sem marcação</span>
+    {% if adopt_accepted %}<span class="chip mute">{{ adopt_accepted|length }} intencionais</span>{% endif %}
+    <span class="muted">o primeiro apply fica travado até não sobrar nenhuma sem marcação</span></div>
   <ol class="list">
-    {% for c in changes %}<li><span class="n">{{ loop.index }}</span><span>{{ c }}</span></li>
-    {% else %}<li><span>Nada: aplicar o modelo reproduziria exatamente o que está rodando.</span></li>{% endfor %}
+    {% for cid, text in adopt_pending %}
+      <li><span class="n">{{ loop.index }}</span><span class="grow" style="flex:1">{{ text }}<div class="muted mono" style="font-size:11.5px">{{ cid }}</div></span>
+        <form method="post" action="/system/ack" style="margin:0"><input type="hidden" name="id" value="{{ cid }}"><button class="btn" type="submit">É intencional</button></form></li>
+    {% endfor %}
+    {% for cid, text, mark in adopt_accepted %}
+      <li style="background:var(--surface-2)"><span class="n">✓</span><span style="flex:1">{{ text }}<div class="muted" style="font-size:12px">intencional · {{ mark.by }} · {{ mark.at|int|timestamp }}</div></span>
+        <form method="post" action="/system/unack" style="margin:0"><input type="hidden" name="id" value="{{ cid }}"><button class="btn" type="submit">Desfazer</button></form></li>
+    {% endfor %}
+    {% if not adopt_pending and not adopt_accepted %}<li><span>Nada: aplicar o modelo reproduziria exatamente o que está rodando.</span></li>{% endif %}
   </ol>
 </section>
 
@@ -26,7 +34,8 @@
     {% else %}<li><span>Nenhum.</span></li>{% endfor %}
   </ol>
 </section>
-{% else %}
+
+{% if not readonly %}
 <section class="card" aria-labelledby="h-apply">
   <div class="card-h"><h2 class="h2" id="h-apply">Alterações pendentes</h2>{% if pending %}<span class="chip warn">aguardando</span>{% endif %}<div class="fill"></div>
     {% if pending %}

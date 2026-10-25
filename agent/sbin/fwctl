@@ -14,6 +14,7 @@ da UI vira caminho, argumento de shell ou nome de arquivo.
     fwctl inventory  o que o motor possui, e o que roda aqui sem dono
     fwctl seal       sela o /etc atual como referencia de posse
     fwctl observe    fotografa o /etc vivo, sem segredos, para o painel ler
+    fwctl ack        lista as mudancas da adocao e marca as intencionais
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.environ.get("FWADMIN_CODE", "/opt/fwadmin"))
 
-from fwadmin import observe, ownership, paths, services  # noqa: E402
+from fwadmin import acks, importer, observe, ownership, paths, services  # noqa: E402
 from fwadmin.apply import (  # noqa: E402
     ApplyError,
     Plan,
@@ -199,6 +200,24 @@ def cmd_apply(args: argparse.Namespace) -> int:
             f"ja existe um apply aguardando confirmacao ({state.remaining}s restantes).\n"
             "       Rode 'fwctl confirm' ou 'fwctl rollback' antes de aplicar de novo."
         )
+
+    # ---- adocao: o que este apply mudaria que ninguem disse que queria? --
+    if not ownership.read_seal():
+        pending = adoption_pending()
+        if pending is None:
+            return fail("nao consegui ler a maquina para conferir a adocao — nada foi tocado")
+        if pending:
+            say()
+            say(f"{RED}{BOLD}adocao: {len(pending)} mudancas ainda nao marcadas como intencionais:{OFF}")
+            for cid, text in pending:
+                say(f"  {DIM}{cid}{OFF}  {text}")
+            say()
+            return fail(
+                "o primeiro apply nesta maquina mudaria o que esta acima, e ninguem marcou\n"
+                "       essas mudancas como intencionais — nada foi tocado.\n"
+                "       Marque no painel (Sistema) ou com 'fwctl ack <id>'. O que nao for\n"
+                "       intencional precisa virar config antes: e' o modelo que esta errado."
+            )
 
     source = paths.PENDING if paths.PENDING.exists() else paths.CONFIG
     proposed, current = load_configs(source)
@@ -443,6 +462,53 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def adoption_changes() -> list[str] | None:
+    """Tudo o que a adocao mudaria. None = nao deu para ler a maquina.
+
+    Le o /etc vivo do mesmo jeito que o painel — fotografia e importador —,
+    para que a lista que trava aqui seja a mesma que a pessoa viu na tela.
+    """
+    try:
+        observe.collect()
+        _, _, changes = importer.run(observe.LIVE)
+    except Exception as exc:  # noqa: BLE001 — root: diz o motivo, nao trava em traceback
+        say(f"{YELLOW}leitura da maquina falhou: {type(exc).__name__}: {exc}{OFF}")
+        return None
+    return changes
+
+
+def adoption_pending() -> list[tuple[str, str]] | None:
+    changes = adoption_changes()
+    return None if changes is None else acks.split(changes)[0]
+
+
+def cmd_ack(args: argparse.Namespace) -> int:
+    """Sem argumento, lista. Com ids, marca. Com --undo, desmarca."""
+    require_root()
+    changes = adoption_changes()
+    if changes is None:
+        return fail("nao consegui ler a maquina")
+    pending, accepted = acks.split(changes)
+    if not args.ids:
+        for cid, text in pending:
+            say(f"  {YELLOW}pendente{OFF}     {cid}  {text}")
+        for cid, text, mark in accepted:
+            say(f"  {GREEN}intencional{OFF}  {cid}  {text}  {DIM}({mark.get('by', '?')}){OFF}")
+        if not pending:
+            say(f"{GREEN}nenhuma mudanca pendente{OFF}")
+        return 0
+    by_id = dict(pending)
+    for cid in args.ids:
+        if args.undo:
+            say(f"  {cid}: {'desmarcada' if acks.unmark(cid) else 'nao estava marcada'}")
+        elif cid in by_id:
+            acks.mark(by_id[cid], by=os.environ.get("SUDO_USER") or "root")
+            say(f"  {cid}: marcada como intencional")
+        else:
+            say(f"  {RED}{cid}: nao e' uma mudanca pendente desta maquina{OFF}")
+    return 0
+
+
 def cmd_observe(args: argparse.Namespace) -> int:
     """So le o sistema. E' o que o painel em modo somente leitura chama."""
     require_root()
@@ -603,6 +669,11 @@ def main() -> int:
     sub.add_parser("observe", help="fotografa o /etc vivo para o painel").set_defaults(
         fn=cmd_observe
     )
+
+    p_ack = sub.add_parser("ack", help="mudancas da adocao: lista, marca ou desmarca")
+    p_ack.add_argument("ids", nargs="*", help="ids a marcar como intencionais")
+    p_ack.add_argument("--undo", action="store_true", help="desmarca os ids")
+    p_ack.set_defaults(fn=cmd_ack)
 
     p_apply = sub.add_parser("apply", help="aplica a config pendente")
     p_apply.add_argument("--yes", action="store_true", help="aceita recargas que derrubam trafego")

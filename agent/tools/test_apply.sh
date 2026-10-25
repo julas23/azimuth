@@ -46,6 +46,17 @@ check "validacao passa" "$(grep -c 'FALHOU' "$SANDBOX/out")" "0"
 echo
 
 # --- muda a config: um host novo + uma reserva DHCP -------------------------
+echo "== 1b. a adocao trava ate as mudancas serem marcadas =="
+"$FWCTL" apply --yes > "$SANDBOX/out" 2>&1 && rc=0 || rc=$?
+check "apply de adocao recusado"        "$rc" "1"
+check "e diz o que falta marcar"        "$(grep -c 'nao marcadas como intencionais' "$SANDBOX/out")" "1"
+ids="$("$FWCTL" ack | awk '$1 == "pendente" {print $2}')"
+check "fwctl ack lista a pendente"      "$([ -n "$ids" ] && echo sim || echo nao)" "sim"
+"$FWCTL" ack $ids > /dev/null
+check "depois de marcar, nada pendente" "$("$FWCTL" ack | grep -c 'nenhuma mudanca pendente')" "1"
+check "id falso nao marca nada"         "$("$FWCTL" ack 000000000000 | grep -c 'nao e. uma mudanca pendente')" "1"
+echo
+
 echo "== 2. apply de uma mudanca (host novo) =="
 python3 - "$SANDBOX" <<'PY'
 import sys, os

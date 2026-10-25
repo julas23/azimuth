@@ -159,6 +159,16 @@ code "http://127.0.0.1:$PORT/firewall" >/dev/null
 check "denuncia a lista negra viva" "$(grep -c 'trabalha com lista negra' "$SANDBOX/body")" "1"
 code "http://127.0.0.1:$PORT/system" >/dev/null
 check "lista o que o motor mudaria" "$(grep -qi 'O que o motor mudaria' "$SANDBOX/body" && echo sim || echo nao)" "sim"
+cid="$(grep -o 'name="id" value="[0-9a-f]*"' "$SANDBOX/body" | head -1 | grep -o '[0-9a-f]\{12\}')"
+check "cada mudanca tem botao de marcar" "$([ -n "$cid" ] && echo sim || echo nao)" "sim"
+check "marcar vale no somente leitura" "$(code -X POST -d "id=$cid" "http://127.0.0.1:$PORT/system/ack")" "303"
+check "marcacao gravada em /var/lib" "$(grep -c "\"$cid\"" "$SANDBOX/var/lib/fwadmin/intencionais.json")" "1"
+code "http://127.0.0.1:$PORT/system" >/dev/null
+check "aparece como intencional" "$(grep -c 'intencional · admin' "$SANDBOX/body")" "1"
+code -X POST -d "id=ffffffffffff" "http://127.0.0.1:$PORT/system/ack" >/dev/null
+check "id que nao esta na lista nao marca" "$(grep -c ffffffffffff "$SANDBOX/var/lib/fwadmin/intencionais.json")" "0"
+code -X POST -d "id=$cid" "http://127.0.0.1:$PORT/system/unack" >/dev/null
+check "desfazer tira a marcacao" "$(grep -c "\"$cid\"" "$SANDBOX/var/lib/fwadmin/intencionais.json")" "0"
 check "template baixa" "$(code "http://127.0.0.1:$PORT/system/config")" "200"
 check "template avisa que nao aplicou" "$(grep -c 'NAO aplicou' "$SANDBOX/body")" "1"
 check "edicao recusada com 403" "$(code -X POST -d 'name=nas&ip=10.0.0.60' "http://127.0.0.1:$PORT/dns/host")" "403"

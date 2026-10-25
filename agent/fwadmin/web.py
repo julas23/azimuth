@@ -32,7 +32,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from fwadmin import db, i18n, live, paths, status
+from fwadmin import acks, db, i18n, live, paths, status
 from fwadmin.models import (
     Config,
     Failover,
@@ -101,8 +101,9 @@ ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff", "obs
 READONLY = os.environ.get("FWADMIN_READONLY", "1") != "0"
 """Ligado por padrao: desligar e' decisao explicita de quem instala."""
 
-READONLY_ALLOWED = {"/login", "/logout", "/system/diag"}
-"""POSTs que nao mudam nada no firewall e por isso valem no somente leitura."""
+READONLY_ALLOWED = {"/login", "/logout", "/system/diag", "/system/ack", "/system/unack"}
+"""POSTs que nao mudam nada no firewall e por isso valem no somente leitura.
+Marcar uma mudanca como intencional so grava em /var/lib/fwadmin."""
 
 ALLOW = [
     ipaddress.ip_network(cidr.strip(), strict=False)
@@ -451,12 +452,13 @@ def alerts(cfg: Config, snapshot: live.Snapshot) -> list[dict[str, str]]:
                 "href": "/system",
             }
         )
-    if READONLY and snapshot.changes:
+    pending, _ = acks.split(snapshot.changes)
+    if pending:
         out.append(
             {
                 "level": "info",
-                "title": f"O motor mudaria {len(snapshot.changes)} coisas se assumisse",
-                "detail": "o que o modelo ainda não representa; nada foi aplicado",
+                "title": f"{len(pending)} mudanças da adoção sem marcação",
+                "detail": "o primeiro apply fica travado até cada uma ser marcada como intencional",
                 "href": "/system#mudancas",
             }
         )
@@ -1063,13 +1065,13 @@ async def system_page(request: Request, user: User) -> Response:
 def system_view(request: Request, **extra: Any) -> HTMLResponse:
     cfg = current()
     ctx: dict[str, Any] = {}
-    if READONLY:
-        snapshot = snap()
-        ctx = {"findings": snapshot.findings, "changes": snapshot.changes, "snapshot": snapshot}
-    else:
+    snapshot = snap()
+    pending, accepted = acks.split(snapshot.changes)
+    ctx = {"findings": snapshot.findings, "adopt_pending": pending, "adopt_accepted": accepted}
+    if not READONLY:
         _, state = fwctl("status", timeout=20)
         _, diff = fwctl("diff", timeout=60) if has_pending() else (True, "")
-        ctx = {"state": state, "diff": diff}
+        ctx |= {"state": state, "diff": diff}
     return page(
         request,
         "system.html",
@@ -1081,6 +1083,30 @@ def system_view(request: Request, **extra: Any) -> HTMLResponse:
         **ctx,
         **extra,
     )
+
+
+@app.post("/system/ack")
+async def ack_change(request: Request, user: User, fields: Fields) -> Response:
+    """Marca como intencional uma mudanca que esta na lista agora.
+
+    So aceita id de mudanca da fotografia atual: o texto gravado vem do
+    importador, nunca do formulario.
+    """
+    cid = fields.text("id")
+    by_id = dict(acks.split(snap().changes)[0])
+    if cid not in by_id:
+        return back("/system#mudancas", "essa mudança não está na lista atual")
+    acks.mark(by_id[cid], by=user)
+    db.log(f"intencional:{cid}", username=user, address=client_ip(request))
+    return RedirectResponse("/system#mudancas", status_code=303)
+
+
+@app.post("/system/unack")
+async def unack_change(request: Request, user: User, fields: Fields) -> Response:
+    cid = fields.text("id")
+    acks.unmark(cid)
+    db.log(f"intencional-desfeito:{cid}", username=user, address=client_ip(request))
+    return RedirectResponse("/system#mudancas", status_code=303)
 
 
 @app.post("/system/apply")
