@@ -587,5 +587,3 @@ firewall:
   masquerade:
   - wan_star
   - wan_vivo
-  preserve_tables:
-  - inet f2b-table

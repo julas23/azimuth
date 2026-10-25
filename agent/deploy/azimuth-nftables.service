@@ -1,0 +1,24 @@
+[Unit]
+Description=Azimuth — tabela inet azimuth do nftables
+Documentation=file:/opt/fwadmin/README.md
+# A tabela do motor convive com o /etc/nftables.conf do administrador. Ela
+# sobe depois dele e, pelo PartOf, volta junto quando ele reinicia: um
+# /etc/nftables.conf com 'flush ruleset' apagaria a tabela do motor, e o
+# firewall ficaria so com as regras do administrador sem ninguem perceber.
+After=nftables.service
+PartOf=nftables.service
+Before=network-pre.target
+Wants=network-pre.target
+# Antes do primeiro apply nao ha tabela do motor: a unidade fica quieta.
+ConditionPathExists=/etc/nftables.d/azimuth.nft
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/nftables.d/azimuth.nft
+ExecReload=/usr/sbin/nft -f /etc/nftables.d/azimuth.nft
+# Parar a unidade tira so a tabela do motor; o resto do ruleset fica.
+ExecStop=/usr/sbin/nft delete table inet azimuth
+
+[Install]
+WantedBy=multi-user.target nftables.service

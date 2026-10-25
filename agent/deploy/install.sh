@@ -72,6 +72,8 @@ echo "   validado com visudo"
 
 echo "== 5. systemd =="
 install -m 0644 "$SRC/deploy/fwadmin.service"          /etc/systemd/system/
+install -m 0644 "$SRC/deploy/azimuth-nftables.service" /etc/systemd/system/
+install -d -m 0755 /etc/nftables.d
 install -m 0644 "$SRC/deploy/fwadmin-failover.service" /etc/systemd/system/
 install -m 0644 "$SRC/deploy/fwadmin-failover.timer"   /etc/systemd/system/
 systemctl daemon-reload
@@ -117,6 +119,8 @@ cp /usr/local/bin/wan-failover.sh /usr/local/bin/wan-failover.sh.pre-fwadmin 2>/
 
 echo "== 9. subindo =="
 systemctl enable --now fwadmin.service
+# so habilita: a tabela do motor so existe depois do primeiro apply
+systemctl enable azimuth-nftables.service
 systemctl enable --now fwadmin-failover.timer
 
 # restart, nao reload: o nginx antigo escuta em 0.0.0.0:80 e o novo vhost pede

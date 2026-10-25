@@ -631,8 +631,6 @@ class Firewall(Base):
 
     other_interfaces: list[OtherInterface] = []
 
-    preserve_tables: list[str] = ["inet f2b-table"]
-    """Tabelas de terceiros que o reload NAO pode apagar (fail2ban)."""
 
     @field_validator("input_policy", "forward_policy")
     @classmethod

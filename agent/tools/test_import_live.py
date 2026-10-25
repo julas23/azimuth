@@ -266,8 +266,13 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
           [("wgsite", "this", "accept")])
 
     print("\n== nftables gerado: entrada fechada, com a base ==")
-    nft = render_all(cfg)["nftables.conf"]
+    nft = render_all(cfg)["azimuth.nft"]
     input_chain = nft.split("chain input {")[1].split("chain forward {")[0]
+    check("so a tabela do motor", [t for t in ("table inet azimuth {", "table inet filter", "table ip nat") if t in nft],
+          ["table inet azimuth {"])
+    check("apaga so a propria tabela", [l for l in nft.splitlines() if l.startswith("delete table")],
+          ["delete table inet azimuth"])
+    check("DNAT no formato da familia inet", "dnat ip to 10.0.0.15:8096" in nft, True)
     check("politica drop", "policy drop;" in input_chain, True)
     check("LAN entra", 'iifname "lan0" accept' in input_chain, True)
     check("established antes de tudo", "ct state established,related accept" in input_chain, True)

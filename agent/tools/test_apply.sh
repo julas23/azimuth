@@ -66,7 +66,7 @@ check "dnsmasq.conf foi instalado"   "$(grep -c 'testehost' "$SANDBOX/etc/dnsmas
 check "config virou a viva"          "$(grep -c 'testehost' "$SANDBOX/etc/fwadmin/config.yaml")" "1"
 check "pendente foi consumida"       "$([ -e "$SANDBOX/etc/fwadmin/config.pending.yaml" ] && echo sim || echo nao)" "nao"
 check "estado aguarda confirmacao"   "$([ -e "$SANDBOX/var/lib/fwadmin/state.json" ] && echo sim || echo nao)" "sim"
-check "nftables NAO foi tocado"      "$(grep -c 'testehost' "$SANDBOX/etc/nftables.conf" || true)" "0"
+check "nftables.conf do administrador NAO foi tocado"      "$(grep -c 'testehost' "$SANDBOX/etc/nftables.conf" || true)" "0"
 echo
 
 echo "== 3. status =="
@@ -207,11 +207,12 @@ echo
 
 echo "== 9. o selo nunca afirma o que nao viu =="
 "$FWCTL" confirm > /dev/null 2>&1 || true
-echo "# outra edicao a mao" >> "$SANDBOX/etc/nftables.conf"
+mkdir -p "$SANDBOX/etc/nftables.d"
+echo "# outra edicao a mao" >> "$SANDBOX/etc/nftables.d/azimuth.nft"
 "$FWCTL" seal > "$SANDBOX/out" 2>&1 && rc=0 || rc=$?
 sed 's/^/     /' "$SANDBOX/out"
 check "seal recusa o arquivo divergente" "$rc" "1"
-check "e diz qual foi"                   "$(grep -c 'nao selado nftables.conf' "$SANDBOX/out")" "1"
+check "e diz qual foi"                   "$(grep -c 'nao selado azimuth.nft' "$SANDBOX/out")" "1"
 check "os outros seguem selados"         "$(grep -c 'selado dnsmasq.conf' "$SANDBOX/out")" "1"
 echo
 

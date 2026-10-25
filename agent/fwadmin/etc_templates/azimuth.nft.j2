@@ -1,22 +1,24 @@
 #!/usr/sbin/nft -f
 # ATENCAO: arquivo gerado pelo fwadmin a partir de /etc/fwadmin/config.yaml.
 # Edicoes manuais sao perdidas no proximo apply. Edite o config.yaml.
+#
+# O motor e' dono so da tabela 'inet azimuth'. O resto do ruleset — o
+# /etc/nftables.conf do administrador, a tabela do fail2ban — fica como esta:
+# este arquivo apaga e recria apenas a propria tabela, numa transacao so.
+#
+# Convivencia: um pacote passa por todas as cadeias-base do mesmo gancho, e
+# um drop em qualquer tabela e' final. Por isso a entrada fechada daqui vale
+# mesmo que outra tabela aceite tudo — e uma regra que o modelo nao conhece
+# (NETMAP, por exemplo) continua funcionando no arquivo do administrador.
 
-# Recria somente as tabelas que gerenciamos. NAO usar "flush ruleset": isso
-# apagaria as tabelas de terceiros e todos os IPs banidos a cada reload.
-{% for t in firewall.preserve_tables %}
-# preservada: {{ t }}
-{% endfor %}
-table inet filter
-delete table inet filter
-table ip nat
-delete table ip nat
+table inet azimuth
+delete table inet azimuth
 
 define WAN = {{ wan_devices | nft_set }}
 
-table inet filter {
+table inet azimuth {
     chain input {
-        type filter hook input priority 0; policy {{ firewall.input_policy.value }};
+        type filter hook input priority filter; policy {{ firewall.input_policy.value }};
 
         # base: o que toda caixa precisa com a entrada fechada (render.base_input)
 {% for line, why in base_input %}
@@ -32,7 +34,7 @@ table inet filter {
     }
 
     chain forward {
-        type filter hook forward priority 0; policy {{ firewall.forward_policy.value }};
+        type filter hook forward priority filter; policy {{ firewall.forward_policy.value }};
 
         # trafego de volta e ajuste de MSS: precisam vir antes das regras
         ct state established,related accept
@@ -51,17 +53,15 @@ table inet filter {
 {% endif %}
 {% endfor %}
     }
-}
 
-table ip nat {
 {% if firewall.port_forwards %}
     chain prerouting {
-        type nat hook prerouting priority -100; policy accept;
+        type nat hook prerouting priority dstnat; policy accept;
 
 {% for pf in firewall.port_forwards %}
 {% if pf.enabled %}
 {% for proto in (['tcp','udp'] if pf.proto == 'tcp/udp' else [pf.proto]) %}
-        iifname "{{ cfg.iface(pf.interface).ppp_device }}"{% if pf.source_filter %} ip saddr {{ pf.source_filter }}{% endif %} {{ proto }} dport {{ pf.wan_port }} counter dnat to {{ pf.to_ip }}:{{ pf.to_port }} comment "{{ pf.description or 'port-forward' }}"
+        iifname "{{ cfg.iface(pf.interface).ppp_device }}"{% if pf.source_filter %} ip saddr {{ pf.source_filter }}{% endif %} {{ proto }} dport {{ pf.wan_port }} counter dnat ip to {{ pf.to_ip }}:{{ pf.to_port }} comment "{{ pf.description or 'port-forward' }}"
 {% endfor %}
 {% endif %}
 {% endfor %}
@@ -69,7 +69,7 @@ table ip nat {
 
 {% endif %}
     chain postrouting {
-        type nat hook postrouting priority 100; policy accept;
+        type nat hook postrouting priority srcnat; policy accept;
 
 {% for name in firewall.masquerade %}
         oifname "{{ cfg.iface(name).ppp_device }}" masquerade comment "NAT {{ name }}"

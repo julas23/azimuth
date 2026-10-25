@@ -18,7 +18,7 @@
   <div class="card tile"><div class="top"><span class="lbl">Entrada</span><span class="chip ok">bloqueia tudo</span>{% if 'input' in open_now %}<span class="chip bad">hoje: aberta</span>{% endif %}</div><span class="big">{{ base|length + fw.input_rules|length }} exceções</span><span class="muted">tráfego para o próprio firewall</span></div>
   <div class="card tile"><div class="top"><span class="lbl">Encaminhamento</span><span class="chip ok">bloqueia tudo</span>{% if 'forward' in open_now %}<span class="chip bad">hoje: aberto</span>{% endif %}</div><span class="big">{{ fw.forward_rules|length + fw.port_forwards|length }} exceções</span><span class="muted">tráfego que atravessa</span></div>
   <div class="card tile"><div class="top"><span class="lbl">Redirecionamentos</span></div><span class="big">{{ fw.port_forwards|length }}</span><span class="muted">portas abertas para a LAN</span></div>
-  <a class="card tile" href="/fail2ban"><div class="top"><span class="lbl">Fail2Ban</span></div><span class="big">{{ t.fail2ban }} →</span><span class="muted">tabela {{ fw.preserve_tables|join(', ') or 'própria' }}</span></a>
+  <a class="card tile" href="/fail2ban"><div class="top"><span class="lbl">Fail2Ban</span></div><span class="big">{{ t.fail2ban }} →</span><span class="muted">tabela própria, que o motor não toca</span></a>
 </div>
 
 {% macro rules(title, id, list, chain) %}
@@ -94,7 +94,7 @@
   {% for m in fw.masquerade_rules %}
     <div class="row"><span class="grow">Sai por <span class="mono">{{ m.interface }}</span>{% if m.source %} vindo de <span class="mono">{{ m.source }}</span>{% endif %} com o IP de <span class="mono">{{ m.interface }}</span></span><span class="muted">{{ m.description }}</span></div>
   {% endfor %}
-  <div class="row muted">Tabelas de outros serviços que o motor preserva: <span class="mono">{{ fw.preserve_tables|join(', ') or '—' }}</span>.</div>
+  <div class="row muted">O motor escreve só a tabela <span class="mono">inet azimuth</span>, em <span class="mono">/etc/nftables.d/azimuth.nft</span>. O <span class="mono">/etc/nftables.conf</span> e a tabela do fail2ban são de quem os escreveu e continuam valendo junto.</div>
 </section>
 
 <section class="card" aria-labelledby="h-zones">

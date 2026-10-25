@@ -190,7 +190,7 @@ def parse_nft(text: str) -> dict[str, Any]:
         elif chain:
             out["chains"][(table, chain)]["rules"].append(line)
         else:
-            change(f"nftables: linha fora de chain nao reconhecida: {line}")
+            note(f"nftables: linha fora de chain nao reconhecida, fica no arquivo do administrador: {line}")
     return out
 
 
@@ -803,13 +803,16 @@ def build_firewall(
     prerouting = chains.pop(("ip nat", "prerouting"), {"rules": []})
     postrouting = chains.pop(("ip nat", "postrouting"), {"rules": []})
     for (table, chain), body in chains.items():
-        change(f"nftables: chain '{chain}' da tabela '{table}' inteira sai ({len(body['rules'])} regras)")
+        note(
+            f"nftables: chain '{chain}' da tabela '{table}' fica no arquivo do administrador "
+            f"({len(body['rules'])} regras); o motor so escreve a propria tabela"
+        )
 
     port_forwards = []
     for line in prerouting["rules"]:
         m = NFT_DNAT.match(line)
         if not m or m.group("dev") not in wan_by_dev:
-            change(f"nftables/prerouting: regra sem traducao sai: {line}")
+            note(f"nftables/prerouting: regra sem traducao fica no arquivo do administrador e continua valendo: {line}")
             continue
         port_forwards.append(
             {
@@ -833,7 +836,10 @@ def build_firewall(
             continue
         rule = to_rule(line, "input")
         if rule is None:
-            change(f"nftables/input: regra sem traducao sai: {line}")
+            change(
+                f"nftables/input: regra sem traducao fica no arquivo do administrador, mas o que ela "
+                f"libera passa a ser barrado pela entrada fechada do motor: {line}"
+            )
         else:
             input_rules.append(rule)
 
@@ -855,7 +861,13 @@ def build_firewall(
                 continue
         rule = to_rule(line, "forward")
         if rule is None:
-            change(f"nftables/forward: regra sem traducao sai: {line}")
+            if re.search(r"\b(drop|reject)\b", line):
+                note(f"nftables/forward: bloqueio sem traducao fica no arquivo do administrador e continua valendo: {line}")
+            else:
+                change(
+                    f"nftables/forward: regra sem traducao fica no arquivo do administrador, mas o "
+                    f"que ela libera passa a ser barrado pelo encaminhamento do motor: {line}"
+                )
         else:
             forward_rules.append(rule)
 
@@ -869,7 +881,7 @@ def build_firewall(
         dev = m.group("dev") if m else None
         target = wan_by_dev.get(dev) or other_by_dev.get(dev) if dev else None
         if not target:
-            change(f"nftables/postrouting: regra sem traducao sai: {line}")
+            note(f"nftables/postrouting: regra sem traducao fica no arquivo do administrador e continua valendo: {line}")
             continue
         masquerade_rules.append(
             {
@@ -898,6 +910,11 @@ def build_firewall(
                 "aberta; virou uma excecao explicita e larga — vale restringir a porta"
             )
 
+    note(
+        "nftables: o motor escreve so a tabela 'inet azimuth'; o /etc/nftables.conf fica como "
+        "esta e vale junto. Liberacao dele nao fura a lista branca do motor (drop em qualquer "
+        "tabela e' final); bloqueio e NAT dele continuam valendo"
+    )
     for chain, body in (("input", filter_input), ("forward", filter_forward)):
         if (body.get("policy") or "accept") != "drop":
             change(
@@ -924,7 +941,6 @@ def build_firewall(
             {"name": name, "device": dev, "description": "tunel WireGuard fora do modelo"}
             for dev, name in other_by_dev.items()
         ],
-        "preserve_tables": ["inet f2b-table"],
     }
 
 
