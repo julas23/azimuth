@@ -189,7 +189,11 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
           [mentions(changes, k) for k in ("inet dhcp", "dns-nameservers")], [False, False])
 
     print("\n== PPPoE ==")
-    check("senha no peers/ vira mudanca", mentions(changes, "senha do PPPoE esta no proprio"), True)
+    check("senha no peers/ nao e' mais mudanca", mentions(changes, "senha"), False)
+    check("vai para o arquivo de senha do motor", cfg.iface("wan_vivo").pppoe.password_file, True)
+    check("e o peer gerado o inclui", "file /etc/ppp/azimuth-vivo.secret" in render_all(cfg)["ppp-peers-vivo"], True)
+    check("sem a senha em nada que o painel renderiza",
+          any('password "segredo"' in v or "segredo\"" in v for v in render_all(cfg).values()), False)
     check("sem failover, o pppd continua dono da rota", cfg.iface("wan_vivo").pppoe.default_route, True)
     check("o link e' do systemd", cfg.iface("wan_vivo").pppoe.unit, "ppp@provider.service")
     from fwadmin.services import pppoe as pppoe_svc
@@ -289,6 +293,13 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
     except ValidationError:
         recusou = True
     check("o modelo recusa entrada aberta", recusou, True)
+
+    print("\n== gravar e recarregar devolve o mesmo modelo ==")
+    import yaml as _yaml
+    from fwadmin.render import dump
+    volta = Config.model_validate(_yaml.safe_load(dump(cfg)))
+    check("o YAML gravado recarrega igual (None que importa nao some)", volta == cfg, True)
+    check("MTU negociado continua negociado", volta.iface("wan_vivo").pppoe.mtu, None)
 
 print("\n== o HP so muda a entrada, que fecha ==")
 cfg, findings, changes = run(ROOT / "legacy" / "live", ROOT / "legacy" / "portal-index.html")

@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+from pydantic import BaseModel
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from fwadmin import services
@@ -208,19 +209,36 @@ def load(path: Path) -> Config:
     return Config.model_validate(yaml.safe_load(path.read_text()))
 
 
-def prune(obj):
-    """Remove chaves None para o YAML ficar legivel na edicao manual."""
-    if isinstance(obj, dict):
-        return {k: prune(v) for k, v in obj.items() if v is not None}
-    if isinstance(obj, list):
-        return [prune(v) for v in obj]
-    return obj
+def prune(model: BaseModel) -> dict:
+    """O modelo como dicionario, sem os None que nao dizem nada.
+
+    Omite None so quando o padrao do campo tambem e' None: ai a ausencia
+    recarrega igual. Onde o padrao e' outro (pppoe.mtu: None = negociado,
+    padrao 1492), o None fica escrito, senao recarregar o YAML trocaria
+    "negociado" por 1492 sem ninguem pedir.
+    """
+    dumped = model.model_dump(mode="json")
+    out = {}
+    for name, field_info in type(model).model_fields.items():
+        value = getattr(model, name)
+        if value is None and field_info.default is None:
+            continue
+        out[name] = _plain(value, dumped[name])
+    return out
+
+
+def _plain(value, dumped):
+    if isinstance(value, BaseModel):
+        return prune(value)
+    if isinstance(value, list):
+        return [_plain(v, d) for v, d in zip(value, dumped)]
+    return dumped
 
 
 def dump(cfg: Config, header: str = "") -> str:
     """Serializa o config de volta para YAML, estavel e legivel."""
     body = yaml.safe_dump(
-        prune(cfg.model_dump(mode="json")),
+        prune(cfg),
         sort_keys=False,
         allow_unicode=True,
         width=100,

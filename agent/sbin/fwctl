@@ -29,7 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.environ.get("FWADMIN_CODE", "/opt/fwadmin"))
 
-from fwadmin import acks, importer, observe, ownership, paths, services  # noqa: E402
+from fwadmin import acks, importer, observe, ownership, paths, secretstore, services  # noqa: E402
 from fwadmin.apply import (  # noqa: E402
     ApplyError,
     Plan,
@@ -272,7 +272,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         shutil.copy2(paths.CONFIG, backup / "config.yaml")
 
     installed = install(
-        paths.STAGING, backup, plan.changed, plan.targets, plan.executable
+        paths.STAGING, backup, plan.changed, plan.targets, plan.executable, plan.secret
     )
     for name in installed:
         say(f"  instalado {plan.targets[name]}")
@@ -364,6 +364,8 @@ def cmd_confirm(args: argparse.Namespace) -> int:
     # pode voltar sozinho, e um selo de estado que o watchdog desfez apontaria
     # para um /etc que deixou de existir.
     seal_now("confirm")
+    # a senha proposta pelo painel vira a definitiva junto com a config
+    secretstore.commit()
 
     git_commit(state.note or "apply via fwadmin")
     return 0
@@ -600,6 +602,11 @@ def cmd_diff(args: argparse.Namespace) -> int:
     import difflib
 
     for name in plan.changed:
+        if name in plan.secret:
+            say(f"{BOLD}--- {plan.targets[name]}{OFF}")
+            say(f"{DIM}(arquivo de senha: o conteudo mudou e nao e' mostrado){OFF}")
+            say()
+            continue
         target = paths.sys_path(plan.targets[name])
         old = target.read_text().splitlines() if target.exists() else []
         new = plan.rendered[name].splitlines()

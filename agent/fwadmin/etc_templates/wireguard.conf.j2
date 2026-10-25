@@ -3,9 +3,9 @@
 # Edicoes manuais sao perdidas no proximo apply. Edite o config.yaml.
 #
 # A chave privada NAO fica aqui: o PostUp abaixo a carrega de
-# {{ wg.private_key_file }} (modo 0600, dona do root). E' o mesmo arranjo do
-# PPPoE, cuja senha mora no chap-secrets — segredo nunca entra em arquivo
-# gerado, porque arquivo gerado passa por staging, backup e 'fwctl diff'.
+# {{ wg.private_key_file }} (modo 0600, dona do root). Arquivo gerado e'
+# mostrado no painel e no 'fwctl diff'; chave nao pode estar nele. (A senha do
+# PPPoE segue a mesma regra: vai num arquivo a parte, que so o fwctl escreve.)
 [Interface]
 Address = {{ wg.address }}
 ListenPort = {{ wg.listen_port }}

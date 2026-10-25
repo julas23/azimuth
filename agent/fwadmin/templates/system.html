@@ -50,6 +50,18 @@
 </section>
 {% endif %}
 
+<section class="card" id="versoes" aria-labelledby="h-ver">
+  <div class="card-h"><h2 class="h2" id="h-ver">Versões salvas</h2><span class="chip mute">{{ saved|length }}</span>
+    <span class="muted">a proposta antes de cada Salvar; restaurar a transforma na proposta pendente, sem aplicar</span></div>
+  {% for v in saved[:30] %}
+    <div class="row"><span class="mono muted" style="flex:0 0 110px">{{ v.when }}</span><span class="grow">antes de <b>{{ v.action }}</b> <span class="muted">· {{ v.user }} · {{ v.origin }}</span></span>
+      <form method="post" action="/system/restore" style="margin:0"><input type="hidden" name="name" value="{{ v.name }}">
+        <button class="btn" type="submit" {% if readonly %}disabled title="Somente leitura"{% endif %}>Restaurar esta</button></form></div>
+  {% else %}
+    <div class="empty">Nenhuma versão ainda: elas começam no primeiro Salvar.</div>
+  {% endfor %}
+</section>
+
 <section class="card" aria-labelledby="h-svc">
   <div class="card-h"><h2 class="h2" id="h-svc">Serviços</h2><div class="fill"></div><a href="/services">{{ t.services }} →</a></div>
   <div class="row muted">Estado, instalação, reinício e parada de cada serviço da stack ficam em <a href="/services">{{ t.services }}</a>.</div>

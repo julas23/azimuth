@@ -85,8 +85,8 @@ code -X POST -d 'mac=nao-e-um-mac&ip=10.0.0.61&name=teste' \
 check "erro volta com 303"   "$(code -o /dev/null -X POST -d 'mac=zz&ip=1.2.3.4&name=x' "http://127.0.0.1:$PORT/dns/reservation")" "303"
 check "MAC invalido nao entrou" "$(grep -c 'nao-e-um-mac' "$SANDBOX/etc/fwadmin/config.pending.yaml" || true)" "0"
 
-code -X POST -d 'primary=wan_que_nao_existe&backup=&enabled=1' \
-     "http://127.0.0.1:$PORT/routing" >/dev/null
+code -X POST -d 'primary=wan_que_nao_existe&backup=&failover=1' \
+     "http://127.0.0.1:$PORT/network" >/dev/null
 check "WAN inexistente barrada" "$(grep -c 'wan_que_nao_existe' "$SANDBOX/etc/fwadmin/config.pending.yaml" || true)" "0"
 
 code -X POST -d 'action=accept&source=lan&destination=wan&proto=tcp&dest_ports=99999&description=x' \
@@ -108,9 +108,37 @@ code -X POST -d 'tool=ping&target=--flag-injetada' "http://127.0.0.1:$PORT/syste
 check "alvo com flag barrado"  "$(grep -qi 'alvo inv' "$SANDBOX/body" && echo sim || echo nao)" "sim"
 echo
 
+echo "== Rede: PPPoE configurado pelo painel =="
+VERSOES_ANTES="$(ls "$SANDBOX/var/lib/fwadmin/versoes" 2>/dev/null | wc -l)"
+check "salvar a Rede" "$(code -X POST --data-urlencode 'wan_vivo.mode=pppoe' --data-urlencode 'wan_vivo.username=novo@provedor' \
+     --data-urlencode 'wan_vivo.password=senha "com" aspas' --data-urlencode 'wan_vivo.mtu=1480' --data-urlencode 'wan_vivo.mru=' \
+     --data-urlencode 'wan_vivo.lcp_interval=30' --data-urlencode 'primary=wan_vivo' --data-urlencode 'backup=wan_star' \
+     --data-urlencode 'failover=1' "http://127.0.0.1:$PORT/network")" "303"
+check "usuario na proposta" "$(grep -c 'novo@provedor' "$SANDBOX/etc/fwadmin/config.pending.yaml")" "1"
+check "MTU 1480 e MRU negociado" "$(grep -cE 'mtu: 1480|mru: null' "$SANDBOX/etc/fwadmin/config.pending.yaml")" "2"
+check "senha FORA da config" "$(grep -c 'aspas' "$SANDBOX/etc/fwadmin/config.pending.yaml" || true)" "0"
+check "senha pendente, 0600" "$(stat -c %a "$SANDBOX/etc/fwadmin/secrets.pending.yaml")" "600"
+check "senha nao aparece na pagina" "$(code "http://127.0.0.1:$PORT/network" >/dev/null; grep -c 'aspas' "$SANDBOX/body" || true)" "0"
+check "barra de acoes na pagina" "$(grep -c 'class="actionbar"' "$SANDBOX/body")" "1"
+check "cada Salvar guarda uma versao" "$(( $(ls "$SANDBOX/var/lib/fwadmin/versoes" | wc -l) > VERSOES_ANTES ))" "1"
+code -X POST --data-urlencode 'wan_vivo.password=a
+b' "http://127.0.0.1:$PORT/network" >/dev/null
+check "senha com quebra de linha recusada" "$(grep -c 'a$' "$SANDBOX/etc/fwadmin/secrets.pending.yaml" || true)" "0"
+echo
+
+echo "== restaurar uma versao =="
+code "http://127.0.0.1:$PORT/system" >/dev/null
+versao="$(grep -o 'name="name" value="[^"]*"' "$SANDBOX/body" | head -1 | sed 's/.*value="//;s/"$//')"
+check "versoes listadas em Sistema" "$([ -n "$versao" ] && echo sim || echo nao)" "sim"
+check "restaurar" "$(code -X POST --data-urlencode "name=$versao" "http://127.0.0.1:$PORT/system/restore")" "303"
+check "a proposta voltou ao que era" "$(grep -c 'novo@provedor' "$SANDBOX/etc/fwadmin/config.pending.yaml" || true)" "0"
+check "nome de versao inventado recusado" "$(code -X POST --data-urlencode 'name=../config.yaml' "http://127.0.0.1:$PORT/system/restore" >/dev/null; grep -c 'novo@provedor' "$SANDBOX/etc/fwadmin/config.pending.yaml" || true)" "0"
+echo
+
 echo "== descartar proposta =="
 code -X POST "http://127.0.0.1:$PORT/system/discard" >/dev/null
 check "proposta sumiu" "$([ -e "$SANDBOX/etc/fwadmin/config.pending.yaml" ] && echo sim || echo nao)" "nao"
+check "e a senha pendente junto" "$([ -e "$SANDBOX/etc/fwadmin/secrets.pending.yaml" ] && echo sim || echo nao)" "nao"
 echo
 
 echo "== logout =="

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import action %}
+{% from "_icons.html" import action, actionbar %}
 {% block title %}{{ t.dhcp }}{% endblock %}
 {% block body %}
 {% set d = cfg.dhcp %}
@@ -11,7 +11,7 @@
 
 <section class="card" aria-labelledby="h-range">
   <div class="card-h"><h2 class="h2" id="h-range">Faixa e opções</h2></div>
-  <form method="post" action="/dns/settings">
+  <form id="page-form" method="post" action="/dhcp">
     <div class="form-grid">
       <div class="field"><label for="f-ini">Início da faixa</label><input id="f-ini" name="range_start" class="input mono" value="{{ d.range.start }}" {% if readonly %}disabled{% endif %}></div>
       <div class="field"><label for="f-fim">Fim da faixa</label><input id="f-fim" name="range_end" class="input mono" value="{{ d.range.end }}" {% if readonly %}disabled{% endif %}></div>
@@ -23,7 +23,7 @@
       <label style="display:flex;gap:8px;align-items:center" class="grow"><input type="checkbox" name="authoritative" value="1" {% if d.authoritative %}checked{% endif %} {% if readonly %}disabled{% endif %}>
         <span><b>Servidor único da LAN</b><span class="muted"> · responde na hora a quem pede um IP que não conhece, em vez de deixá-lo esperando</span></span></label>
     </div>
-    <div class="row"><span class="grow muted">Máscara <span class="mono">{{ d.range.netmask }}</span>.</span>{{ action('Salvar faixa', readonly, 'primary') }}</div>
+    <div class="row"><span class="grow muted">Máscara <span class="mono">{{ d.range.netmask }}</span>.</span></div>
   </form>
 </section>
 
@@ -70,4 +70,5 @@
 </section>
 {% endif %}
 
+{{ actionbar('page-form', readonly, pending) }}
 {% endblock %}

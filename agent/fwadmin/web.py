@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 import subprocess
 import time
 from datetime import datetime
@@ -32,11 +33,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from fwadmin import acks, db, i18n, live, paths, status
+from fwadmin import acks, db, i18n, live, paths, secretstore, status
 from fwadmin.models import (
     Config,
     Failover,
     Host,
+    IPv4Mode,
+    PPPoE,
     PortForward,
     Reservation,
     Rule,
@@ -214,6 +217,50 @@ def save_pending(cfg: Config) -> None:
     )
 
 
+VERSION_KEEP = 200
+"""Versoes guardadas; as mais antigas saem. Cada uma tem poucos KB."""
+
+
+def keep_version(action: str, user: str) -> None:
+    """Guarda a proposta como estava antes deste Salvar.
+
+    E' o que o 'Restaurar' oferece: voltar a qualquer ponto anterior, aplicado
+    ou nao. O backup do /etc continua sendo do apply (paths.BACKUPS); este e'
+    o historico das edicoes.
+    """
+    source = paths.PENDING if paths.PENDING.exists() else paths.CONFIG
+    if not source.exists():
+        return
+    paths.VERSIONS.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    slug = re.sub(r"[^a-z0-9]+", "-", action.lower()).strip("-")[:40] or "edicao"
+    header = (
+        f"# versao de {datetime.now():%d/%m %H:%M}, antes de '{action}' por {user or '?'}\n"
+        f"# origem: {'proposta pendente' if source == paths.PENDING else 'config aplicada'}\n"
+    )
+    (paths.VERSIONS / f"{stamp}-{slug}.yaml").write_text(header + source.read_text())
+    for old in sorted(paths.VERSIONS.glob("*.yaml"))[:-VERSION_KEEP]:
+        old.unlink(missing_ok=True)
+
+
+def versions() -> list[dict[str, str]]:
+    """Mais recentes primeiro: arquivo, quando, antes de que, por quem."""
+    out = []
+    for path in sorted(paths.VERSIONS.glob("*.yaml"), reverse=True):
+        first = path.read_text().split("\n", 2)
+        m = re.match(r"# versao de (.+), antes de '(.*)' por (.*)$", first[0])
+        out.append(
+            {
+                "name": path.name,
+                "when": m.group(1) if m else path.name[:15],
+                "action": m.group(2) if m else "",
+                "user": m.group(3) if m else "",
+                "origin": first[1].removeprefix("# origem: ") if len(first) > 1 else "",
+            }
+        )
+    return out
+
+
 def has_pending() -> bool:
     return paths.PENDING.exists()
 
@@ -233,6 +280,7 @@ def edit(request: Request, mutate: Callable[[Config], Any], action: str) -> str 
     except (ValueError, KeyError) as exc:
         return str(exc)
 
+    keep_version(action, user_of(request))
     save_pending(validated)
     db.log(action, username=user_of(request), address=client_ip(request))
     return None
@@ -777,64 +825,8 @@ async def vpn(request: Request, user: User) -> Response:
 
 
 # ---------------------------------------------------------------------------
-# interfaces
+# reservas e registros — salvos linha a linha
 # ---------------------------------------------------------------------------
-
-
-@app.post("/interfaces/{name}")
-async def save_interface(request: Request, user: User, name: str, fields: Fields) -> Response:
-    def mutate(cfg: Config) -> None:
-        iface = cfg.iface(name)
-        iface.description = fields.text("description")
-        iface.ipv4.mode = fields.text("mode") or iface.ipv4.mode
-        iface.ipv4.address = fields.text("address") or None
-        iface.ipv4.gateway = fields.text("gateway") or None
-        if iface.pppoe:
-            iface.pppoe.username = fields.text("pppoe_username") or iface.pppoe.username
-            mtu = fields.number("pppoe_mtu", iface.pppoe.mtu)
-            iface.pppoe.mtu = mtu
-            iface.pppoe.mru = mtu
-
-    return back("/network", edit(request, mutate, f"interface:{name}"))
-
-
-# ---------------------------------------------------------------------------
-# roteamento
-# ---------------------------------------------------------------------------
-
-
-@app.post("/routing")
-async def save_routing(request: Request, user: User, fields: Fields) -> Response:
-    def mutate(cfg: Config) -> None:
-        cfg.routing.primary = fields.text("primary")
-        cfg.routing.backup = fields.text("backup") or None
-        cfg.routing.failover = Failover(
-            enabled=fields.flag("enabled"),
-            interval_seconds=fields.number("interval_seconds", 60),
-            threshold=fields.number("threshold", 3),
-            ping_targets=fields.csv("ping_targets") or ["8.8.8.8"],
-        )
-
-    return back("/network", edit(request, mutate, "routing"))
-
-
-# ---------------------------------------------------------------------------
-# DNS e DHCP
-# ---------------------------------------------------------------------------
-
-
-@app.post("/dns/settings")
-async def save_dns(request: Request, user: User, fields: Fields) -> Response:
-    def mutate(cfg: Config) -> None:
-        cfg.dns.domain = fields.text("domain", cfg.dns.domain)
-        cfg.dns.upstream = fields.csv("upstream")
-        cfg.dns.bind_interfaces = fields.flag("bind_interfaces")
-        cfg.dhcp.enabled = fields.flag("dhcp_enabled")
-        cfg.dhcp.range.start = fields.text("range_start", cfg.dhcp.range.start)
-        cfg.dhcp.range.end = fields.text("range_end", cfg.dhcp.range.end)
-        cfg.dhcp.range.lease = fields.text("lease", cfg.dhcp.range.lease)
-
-    return back("/domain", edit(request, mutate, "dns"))
 
 
 @app.post("/dns/reservation")
@@ -887,6 +879,113 @@ async def del_host(request: Request, user: User, name: str) -> Response:
         cfg.hosts = remaining
 
     return back("/domain", edit(request, mutate, f"host-:{name}"))
+
+
+# ---------------------------------------------------------------------------
+# salvar por pagina — o "Salvar" da barra de baixo de cada tela
+# ---------------------------------------------------------------------------
+
+
+def _optional_int(fields: FormData, key: str, current: int | None) -> int | None:
+    """Campo ausente mantem o atual; vazio vira None (o servico decide)."""
+    if key not in fields:
+        return current
+    raw = fields.text(key)
+    if raw and not raw.isdigit():
+        raise ValueError(f"{key}: {raw!r} nao e' numero")
+    return int(raw) if raw else None
+
+
+@app.post("/network")
+async def save_network(request: Request, user: User, fields: Fields) -> Response:
+    """Interfaces, PPPoE e qual internet usar — a pagina Rede inteira.
+
+    A senha do PPPoE nao entra na config: vai para secrets.pending.yaml, e so
+    depois que a config validou. Campo de senha vazio mantem a atual.
+    """
+    passwords: dict[str, str] = {}
+
+    def mutate(cfg: Config) -> None:
+        for iface in cfg.interfaces:
+            key = iface.name
+            iface.description = fields.text(f"{key}.description", iface.description)
+            if iface.role.value != "wan":
+                continue
+            mode = fields.text(f"{key}.mode") or iface.ipv4.mode.value
+            if mode == "pppoe":
+                if iface.pppoe is None:
+                    iface.pppoe = PPPoE(peer=key.replace("_", "-"), username="-", password_ref=key.replace("_", "-"))
+                ppp = iface.pppoe
+                iface.ipv4.mode = IPv4Mode.pppoe
+                iface.ipv4.address = iface.ipv4.gateway = None
+                ppp.username = fields.text(f"{key}.username", ppp.username)
+                ppp.mtu = _optional_int(fields, f"{key}.mtu", ppp.mtu)
+                ppp.mru = _optional_int(fields, f"{key}.mru", ppp.mru)
+                ppp.lcp_echo_interval = fields.number(f"{key}.lcp_interval", ppp.lcp_echo_interval)
+                ppp.lcp_echo_failure = fields.number(f"{key}.lcp_failure", ppp.lcp_echo_failure)
+                ppp.holdoff = fields.number(f"{key}.holdoff", ppp.holdoff)
+                ppp.default_route = fields.flag(f"{key}.default_route")
+                password = fields.get(f"{key}.password", "")
+                if password:
+                    if "\n" in password or "\r" in password:
+                        raise ValueError("a senha do PPPoE nao pode ter quebra de linha")
+                    ppp.password_file = True
+                    passwords[ppp.password_ref] = password
+            else:
+                iface.pppoe = None
+                iface.ipv4.mode = IPv4Mode(mode)
+                iface.ipv4.address = fields.text(f"{key}.address") or None if mode == "static" else None
+                iface.ipv4.gateway = fields.text(f"{key}.gateway") or None if mode == "static" else None
+        cfg.routing.primary = fields.text("primary", cfg.routing.primary)
+        cfg.routing.backup = fields.text("backup") or None
+        cfg.routing.failover = Failover(
+            enabled=fields.flag("failover"),
+            interval_seconds=fields.number("interval_seconds", 60),
+            threshold=fields.number("threshold", 3),
+            ping_targets=fields.csv("ping_targets") or ["8.8.8.8"],
+        )
+
+    error = edit(request, mutate, "rede")
+    if error is None:
+        for ref, value in passwords.items():
+            secretstore.propose(ref, value)
+    return back("/network", error)
+
+
+@app.post("/dhcp")
+async def save_dhcp(request: Request, user: User, fields: Fields) -> Response:
+    def mutate(cfg: Config) -> None:
+        cfg.dhcp.range.start = fields.text("range_start", cfg.dhcp.range.start)
+        cfg.dhcp.range.end = fields.text("range_end", cfg.dhcp.range.end)
+        cfg.dhcp.range.lease = fields.text("lease", cfg.dhcp.range.lease)
+        cfg.dhcp.authoritative = fields.flag("authoritative")
+
+    return back("/dhcp", edit(request, mutate, "dhcp"))
+
+
+@app.post("/domain")
+async def save_domain(request: Request, user: User, fields: Fields) -> Response:
+    def mutate(cfg: Config) -> None:
+        cfg.dns.domain = fields.text("domain", cfg.dns.domain)
+        cfg.dns.expand_hosts = fields.flag("expand_hosts")
+        cfg.dns.local_only = fields.flag("local_only")
+        cfg.dns.bind_interfaces = fields.flag("bind_interfaces")
+        cfg.dns.upstream = fields.csv("upstream")
+        cfg.dns.no_resolv = fields.flag("no_resolv")
+        cfg.dns.proxy_dnssec = fields.flag("proxy_dnssec")
+
+    return back("/domain", edit(request, mutate, "dominio"))
+
+
+@app.post("/vpn")
+async def save_vpn(request: Request, user: User, fields: Fields) -> Response:
+    def mutate(cfg: Config) -> None:
+        wg = cfg.wireguard
+        wg.address = fields.text("address", wg.address or "") or None
+        wg.listen_port = fields.number("listen_port", wg.listen_port)
+        wg.mtu = _optional_int(fields, "mtu", wg.mtu)
+
+    return back("/vpn", edit(request, mutate, "vpn"))
 
 
 # ---------------------------------------------------------------------------
@@ -1077,6 +1176,7 @@ def system_view(request: Request, **extra: Any) -> HTMLResponse:
         "system.html",
         nav="system",
         cfg=cfg,
+        saved=versions(),
         history=git_history(),
         audit=db.recent(30),
         system=status.system(),
@@ -1137,9 +1237,28 @@ async def do_rollback(request: Request, user: User) -> Response:
     return page(request, "result.html", nav="system", title="Reverter", ok=ok, output=output, cfg=current())
 
 
+@app.post("/system/restore")
+async def restore_version(request: Request, user: User, fields: Fields) -> Response:
+    """Uma versao guardada vira a proposta pendente. Nao aplica nada."""
+    name = fields.text("name")
+    source = paths.VERSIONS / name
+    if not re.fullmatch(r"[0-9-]+[a-z0-9-]*\.yaml", name) or not source.is_file():
+        return back("/system#versoes", "versão inexistente")
+    try:
+        restored = load(source)
+    except (ValidationError, ValueError, OSError) as exc:
+        return back("/system#versoes", f"a versão não carrega mais: {exc}")
+    keep_version(f"restaurar {name}", user)
+    save_pending(restored)
+    db.log(f"restaurar:{name}", username=user, address=client_ip(request))
+    return back("/system")
+
+
 @app.post("/system/discard")
 async def discard_pending(request: Request, user: User) -> Response:
+    keep_version("descartar", user)
     paths.PENDING.unlink(missing_ok=True)
+    secretstore.discard()
     db.log("descartar-pendente", username=user, address=client_ip(request))
     return back("/system")
 

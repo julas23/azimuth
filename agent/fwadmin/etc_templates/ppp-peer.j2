@@ -1,9 +1,13 @@
 {# gera /etc/ppp/peers/<peer> #}
 # ATENCAO: arquivo gerado pelo fwadmin a partir de /etc/fwadmin/config.yaml.
-# A senha NAO fica aqui: vem de /etc/ppp/chap-secrets (modo 0600).
+# A senha NAO fica aqui: vem de /etc/ppp/azimuth-{{ ppp.peer }}.secret (0600),
+# que so o fwctl escreve, ou do chap-secrets do administrador.
 plugin rp-pppoe.so
 {{ iface.device }}
 user "{{ ppp.username }}"
+{% if ppp.password_file %}
+file /etc/ppp/azimuth-{{ ppp.peer }}.secret
+{% endif %}
 noipdefault
 hide-password
 noauth

@@ -86,6 +86,11 @@ class PPPoE(Base):
     password_ref: Annotated[str, Field(pattern=r"^[a-z0-9_-]{1,32}$")]
     """Chave em /etc/fwadmin/secrets.yaml (modo 0600, fora do git)."""
 
+    password_file: bool = True
+    """O motor escreve a senha em /etc/ppp/azimuth-<peer>.secret (0600) e o
+    peer a inclui com 'file'. False = a senha fica no chap-secrets ou
+    pap-secrets do administrador, que o motor nao toca."""
+
     mtu: Annotated[int, Field(ge=576, le=1500)] | None = 1492
     """None = nao escreve; o rp-pppoe negocia (1492 no PPPoE comum)."""
 

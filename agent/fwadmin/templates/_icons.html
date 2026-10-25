@@ -32,3 +32,22 @@
 {% macro action(label, readonly, kind='') -%}
 <button class="btn {{ kind }}" type="submit" {% if readonly %}disabled title="Somente leitura: ações entram na próxima etapa"{% endif %}>{{ label }}</button>
 {%- endmacro %}
+
+{#- A barra do rodape de cada pagina de configuracao: Restaurar a esquerda,
+    Salvar no centro, Aplicar a direita. 'form' e' o id do formulario da
+    pagina; sem ele, o Salvar fica desligado com o motivo. -#}
+{% macro actionbar(form, readonly, pending, why_no_form='') -%}
+<div class="actionbar" role="region" aria-label="Ações da página">
+  <div class="ab-left"><a class="btn" href="/system#versoes">{{ icon('restart', 16) }}Restaurar…</a></div>
+  <div class="ab-center">
+    {% if readonly %}<button class="btn primary" type="button" disabled title="Somente leitura">Salvar</button>
+    {% elif form %}<button class="btn primary" type="submit" form="{{ form }}">Salvar</button>
+    {% else %}<button class="btn primary" type="button" disabled title="{{ why_no_form }}">Salvar</button>{% endif %}
+  </div>
+  <div class="ab-right">
+    <form method="post" action="/system/apply" style="margin:0"><input type="hidden" name="yes" value="1">
+      <button class="btn" type="submit" {% if readonly %}disabled title="Somente leitura"{% elif not pending %}disabled title="Nada salvo para aplicar"{% endif %}>Aplicar</button>
+    </form>
+  </div>
+</div>
+{%- endmacro %}

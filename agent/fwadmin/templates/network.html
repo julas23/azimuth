@@ -1,37 +1,63 @@
 {% extends "base.html" %}
-{% from "_icons.html" import action %}
+{% from "_icons.html" import actionbar %}
 {% block title %}{{ t.network }}{% endblock %}
 {% block body %}
+{% set ro = 'disabled' if readonly else '' %}
 
 <div class="page-h">
   <div><h1>{{ t.network }}</h1><p class="lede">As placas, o papel de cada uma e por qual internet a casa sai.</p></div>
   {% if route[0] %}<span class="chip ok lg"><span class="dot ok"></span>rota padrão por {{ route[0] }}{% if route[1] %} via {{ route[1] }}{% endif %}</span>{% endif %}
 </div>
 
+<form id="page-form" method="post" action="/network" autocomplete="off">
+
 <div class="grid two">
   {% for iface in cfg.interfaces if iface.role.value != 'unused' %}
     {% set link = links.get(iface.ppp_device) or links.get(iface.device) %}
-    <section class="card" aria-labelledby="h-{{ iface.name }}">
+    {% set k = iface.name %}
+    <section class="card{% if iface.role.value == 'wan' %} wan-card{% endif %}" aria-labelledby="h-{{ k }}">
       <div class="card-h">
-        <h2 class="h2" id="h-{{ iface.name }}">{{ iface.description or iface.name }}</h2>
+        <h2 class="h2" id="h-{{ k }}">{{ iface.description or k }}</h2>
         <span class="chip {{ 'info' if iface.role.value == 'lan' else 'mute' }}">{{ iface.role.value|upper }}</span>
         <div class="fill"></div>
         {% if link and link.up %}<span class="chip ok">link ativo</span>{% elif link %}<span class="chip bad">sem link</span>{% else %}<span class="chip mute">não encontrada</span>{% endif %}
       </div>
-      <div class="kvs">
-        <div class="kv"><span>Nome no modelo</span><span class="mono">{{ iface.name }}</span></div>
-        <div class="kv"><span>Placa</span><span class="mono">{{ iface.device }}{% if iface.ppp_device != iface.device %} → {{ iface.ppp_device }}{% endif %}</span></div>
-        <div class="kv"><span>Modo</span><span>{{ {'static': 'IP fixo', 'dhcp': 'DHCP do provedor', 'pppoe': 'PPPoE', 'manual': 'manual'}[iface.ipv4.mode.value] }}</span></div>
-        <div class="kv"><span>Endereço</span><span class="mono">{{ iface.ipv4.address or (link.address if link else '') or '—' }}</span></div>
-        {% if iface.ipv4.gateway %}<div class="kv"><span>Gateway</span><span class="mono">{{ iface.ipv4.gateway }}</span></div>{% endif %}
-        {% if iface.pppoe %}
-          <div class="kv"><span>Usuário PPPoE</span><span class="mono">{{ iface.pppoe.username }}</span></div>
-          <div class="kv"><span>MTU</span><span class="mono">{{ iface.pppoe.mtu }}</span></div>
+      <div class="form-grid">
+        <div class="field"><label for="{{ k }}-desc">Descrição</label><input id="{{ k }}-desc" class="input" name="{{ k }}.description" value="{{ iface.description }}" {{ ro }}></div>
+        <div class="field"><label>Placa</label><input class="input mono" value="{{ iface.device }}{% if iface.ppp_device != iface.device %} → {{ iface.ppp_device }}{% endif %}" disabled></div>
+        {% if iface.role.value == 'wan' %}
+          <div class="field"><label for="{{ k }}-mode">Como conecta</label>
+            <select id="{{ k }}-mode" class="input" name="{{ k }}.mode" {{ ro }}>
+              {% for v, label in [('dhcp', 'DHCP do provedor'), ('pppoe', 'PPPoE (usuário e senha)'), ('static', 'IP fixo')] %}
+                <option value="{{ v }}" {% if iface.ipv4.mode.value == v %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select></div>
+        {% else %}
+          <div class="field"><label>Endereço</label><input class="input mono" value="{{ iface.ipv4.address }}" disabled></div>
         {% endif %}
-        {% if link %}
-          <div class="kv"><span>Recebido · enviado</span><span class="mono">{{ link.rx_bytes|size }} · {{ link.tx_bytes|size }}</span></div>
-        {% endif %}
+        <div class="field"><label>Endereço agora</label><input class="input mono" value="{{ (link.address if link else '') or '—' }}" disabled></div>
+        {% if link %}<div class="field"><label>Recebido · enviado</label><input class="input mono" value="{{ link.rx_bytes|size }} · {{ link.tx_bytes|size }}" disabled></div>{% endif %}
       </div>
+
+      {% if iface.role.value == 'wan' %}
+        <div class="form-grid only-static" style="border-top:1px solid var(--line-2)">
+          <div class="field"><label for="{{ k }}-addr">IP fixo (CIDR)</label><input id="{{ k }}-addr" class="input mono" name="{{ k }}.address" value="{{ iface.ipv4.address or '' }}" placeholder="203.0.113.10/29" {{ ro }}></div>
+          <div class="field"><label for="{{ k }}-gw">Gateway</label><input id="{{ k }}-gw" class="input mono" name="{{ k }}.gateway" value="{{ iface.ipv4.gateway or '' }}" {{ ro }}></div>
+        </div>
+        {% set ppp = iface.pppoe %}
+        <div class="card-h only-pppoe" style="border-top:1px solid var(--line-2)"><h3 class="h2" style="font-size:14px">PPPoE</h3><span class="muted">usuário e senha do provedor</span></div>
+        <div class="form-grid only-pppoe">
+          <div class="field"><label for="{{ k }}-user">Usuário</label><input id="{{ k }}-user" class="input mono" name="{{ k }}.username" value="{{ ppp.username if ppp else '' }}" autocomplete="off" {{ ro }}></div>
+          <div class="field"><label for="{{ k }}-pass">Senha</label><input id="{{ k }}-pass" class="input" type="password" name="{{ k }}.password" placeholder="{{ 'guardada · vazio mantém' if ppp and ppp.password_file else 'no chap-secrets do administrador' if ppp else '' }}" autocomplete="new-password" {{ ro }}></div>
+          <div class="field"><label for="{{ k }}-mtu">MTU</label><input id="{{ k }}-mtu" class="input mono" name="{{ k }}.mtu" value="{{ ppp.mtu if ppp and ppp.mtu else '' }}" placeholder="negociado" {{ ro }}></div>
+          <div class="field"><label for="{{ k }}-mru">MRU</label><input id="{{ k }}-mru" class="input mono" name="{{ k }}.mru" value="{{ ppp.mru if ppp and ppp.mru else '' }}" placeholder="negociado" {{ ro }}></div>
+          <div class="field"><label for="{{ k }}-lcp">Eco LCP a cada (s)</label><input id="{{ k }}-lcp" class="input mono" name="{{ k }}.lcp_interval" value="{{ ppp.lcp_echo_interval if ppp else 20 }}" {{ ro }}></div>
+          <div class="field"><label for="{{ k }}-lcpf">Cair após ecos perdidos</label><input id="{{ k }}-lcpf" class="input mono" name="{{ k }}.lcp_failure" value="{{ ppp.lcp_echo_failure if ppp else 3 }}" {{ ro }}></div>
+          <div class="field"><label for="{{ k }}-hold">Esperar antes de rediscar (s)</label><input id="{{ k }}-hold" class="input mono" name="{{ k }}.holdoff" value="{{ ppp.holdoff if ppp else 5 }}" {{ ro }}></div>
+          <label class="check"><input type="checkbox" name="{{ k }}.default_route" value="1" {% if ppp and ppp.default_route %}checked{% endif %} {{ ro }}> O pppd põe a rota padrão (sem failover)</label>
+        </div>
+        {% if ppp and ppp.unit %}<div class="row muted only-pppoe">O link é mantido por <span class="mono">{{ ppp.unit }}</span>; o motor reinicia por ele.</div>{% endif %}
+      {% endif %}
     </section>
   {% endfor %}
 </div>
@@ -43,31 +69,29 @@
     {% if cfg.routing.failover.enabled %}<span class="chip ok">failover ligado</span>{% else %}<span class="chip mute">failover desligado</span>{% endif %}
     {% if failover %}<span class="chip info">agora: {{ 'principal' if failover == 'primary' else 'reserva' }}</span>{% endif %}
   </div>
-  <form method="post" action="/routing">
-    <div class="form-grid">
-      <div class="field"><label for="r-p">Principal</label>
-        <select id="r-p" name="primary" class="input" {% if readonly %}disabled{% endif %}>
-          {% for w in cfg.wans %}<option value="{{ w.name }}" {% if w.name == cfg.routing.primary %}selected{% endif %}>{{ w.description or w.name }}</option>{% endfor %}
-        </select></div>
-      <div class="field"><label for="r-b">Reserva</label>
-        <select id="r-b" name="backup" class="input" {% if readonly %}disabled{% endif %}>
-          <option value="">nenhuma</option>
-          {% for w in cfg.wans %}<option value="{{ w.name }}" {% if w.name == cfg.routing.backup %}selected{% endif %}>{{ w.description or w.name }}</option>{% endfor %}
-        </select></div>
-      <div class="field"><label for="r-i">Testar a cada (s)</label><input id="r-i" class="input mono" name="interval_seconds" value="{{ cfg.routing.failover.interval_seconds }}" {% if readonly %}disabled{% endif %}></div>
-      <div class="field"><label for="r-t">Trocar após falhas</label><input id="r-t" class="input mono" name="threshold" value="{{ cfg.routing.failover.threshold }}" {% if readonly %}disabled{% endif %}></div>
-      <div class="field"><label for="r-g">Alvos de ping</label><input id="r-g" class="input mono" name="ping_targets" value="{{ cfg.routing.failover.ping_targets|join(', ') }}" {% if readonly %}disabled{% endif %}></div>
-    </div>
-    <div class="row">
-      <label style="display:flex;gap:8px;align-items:center" class="grow"><input type="checkbox" name="enabled" value="1" {% if cfg.routing.failover.enabled %}checked{% endif %} {% if readonly %}disabled{% endif %}> Trocar sozinho para a reserva quando a principal cair</label>
-      {{ action('Salvar', readonly, 'primary') }}
-    </div>
-  </form>
+  <div class="form-grid">
+    <div class="field"><label for="r-p">Principal</label>
+      <select id="r-p" name="primary" class="input" {{ ro }}>
+        {% for w in cfg.wans %}<option value="{{ w.name }}" {% if w.name == cfg.routing.primary %}selected{% endif %}>{{ w.description or w.name }}</option>{% endfor %}
+      </select></div>
+    <div class="field"><label for="r-b">Reserva</label>
+      <select id="r-b" name="backup" class="input" {{ ro }}>
+        <option value="">nenhuma</option>
+        {% for w in cfg.wans %}<option value="{{ w.name }}" {% if w.name == cfg.routing.backup %}selected{% endif %}>{{ w.description or w.name }}</option>{% endfor %}
+      </select></div>
+    <div class="field"><label for="r-i">Testar a cada (s)</label><input id="r-i" class="input mono" name="interval_seconds" value="{{ cfg.routing.failover.interval_seconds }}" {{ ro }}></div>
+    <div class="field"><label for="r-t">Trocar após falhas</label><input id="r-t" class="input mono" name="threshold" value="{{ cfg.routing.failover.threshold }}" {{ ro }}></div>
+    <div class="field"><label for="r-g">Alvos de ping</label><input id="r-g" class="input mono" name="ping_targets" value="{{ cfg.routing.failover.ping_targets|join(', ') }}" {{ ro }}></div>
+    <label class="check"><input type="checkbox" name="failover" value="1" {% if cfg.routing.failover.enabled %}checked{% endif %} {{ ro }}> Trocar sozinho para a reserva</label>
+  </div>
 </section>
+
+</form>
 
 <section class="card" aria-labelledby="h-routes">
   <div class="card-h"><h2 class="h2" id="h-routes">Tabela de rotas</h2><span class="muted mono">ip route</span></div>
   <pre class="out">{{ routes or 'sem rotas visíveis' }}</pre>
 </section>
 
+{{ actionbar('page-form', readonly, pending) }}
 {% endblock %}

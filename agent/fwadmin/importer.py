@@ -473,6 +473,9 @@ def build_interfaces(
                 and "nodefaultroute" not in ppp_raw["flags"],
                 "carrier": carrier,
                 "unit": ppp_unit,
+                # senha dentro do peer: o motor passa a cuidar dela num arquivo
+                # proprio; senha no chap-secrets: continua la, com o administrador
+                "password_file": "password" in ppp_raw,
             },
         }
     )
@@ -482,15 +485,15 @@ def build_interfaces(
 def check_ppp(ppp_raw: dict[str, Any], peer: str, pppoe_dev: str) -> None:
     """A senha. O resto do peer e' conferido contra o gerado, em compare_ppp."""
     if "password" in ppp_raw:
-        change(
-            f"a senha do PPPoE esta no proprio peers/{peer}, e o arquivo gerado nao a traz "
-            "(segredo nao entra em arquivo gerado): sem ela em /etc/ppp/chap-secrets ou "
-            "pap-secrets antes do apply, o link para de autenticar"
+        note(
+            f"a senha do PPPoE sai de dentro do peers/{peer} e vai para "
+            f"/etc/ppp/azimuth-{peer}.secret (0600), que o peer gerado inclui com 'file'; "
+            "o fwctl a copia para o /etc/fwadmin/secrets.yaml no primeiro apply"
         )
     else:
         note(
-            f"senha do PPPoE ({ppp_raw.get('user')}) NAO foi importada: ela mora em "
-            "/etc/ppp/chap-secrets e vai para /etc/fwadmin/secrets.yaml (0600, fora do git)"
+            f"senha do PPPoE ({ppp_raw.get('user')}) continua onde esta, no chap-secrets "
+            "ou pap-secrets do administrador; o motor nao toca nesses arquivos"
         )
 
 
@@ -500,10 +503,16 @@ provedor de qualquer jeito, a senha so some do log, e accomp e asyncmap sao do
 PPP serial — o PPPoE e' sincrono e ignora os dois."""
 
 
+SECRET_INCLUDE = re.compile(r"^file /etc/ppp/azimuth-[a-z0-9_-]+\.secret$")
+"""A senha que estava no peer, agora num arquivo a parte: mesma coisa."""
+
+
 def _ppp_lines(text: str) -> set[str]:
     out = set()
     for raw in text.splitlines():
         line = raw.split("#", 1)[0].strip()
+        if SECRET_INCLUDE.match(line):
+            continue
         if line and not line.lower().startswith("password") and line not in PPP_HARMLESS:
             out.add(" ".join(line.split()))
     return out

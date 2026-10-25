@@ -32,6 +32,7 @@ from fwadmin import paths, services
 from fwadmin.command import ApplyError, Result, run
 from fwadmin.models import Config
 from fwadmin.render import render_all
+from fwadmin.services import pppoe
 from fwadmin.services.base import Prova, Reload
 
 __all__ = [
@@ -61,6 +62,7 @@ def install(
     names: list[str],
     targets: dict[str, str],
     executable: set[str] | None = None,
+    secret: set[str] | None = None,
 ) -> list[str]:
     """Copia o staging para /etc, guardando antes o que estava la.
 
@@ -103,8 +105,13 @@ def install(
         write_manifest()
 
         tmp = target.with_name(f".{target.name}.fwadmin-new")
-        tmp.write_text((staging / name).read_text())
-        os.chmod(tmp, 0o755 if name in (executable or set()) else 0o644)
+        mode = 0o600 if name in (secret or set()) else 0o755 if name in (executable or set()) else 0o644
+        # o modo vai na criacao: um chmod depois deixaria a senha legivel por
+        # um instante
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(fd, "w") as fh:
+            fh.write((staging / name).read_text())
+        os.chmod(tmp, mode)
         os.replace(tmp, target)
 
         installed.append(name)
@@ -222,6 +229,10 @@ class Plan:
     reloads: list[Reload]
     targets: dict[str, str] = field(default_factory=dict)
     executable: set[str] = field(default_factory=set)
+    secret: set[str] = field(default_factory=set)
+    """Arquivos com senha: modo 0600 no staging e no /etc, conteudo nunca
+    mostrado (fwctl diff so diz que mudou)."""
+
     checks: list[Result] = field(default_factory=list)
 
     @property
@@ -249,13 +260,22 @@ def build_plan(cfg: Config, previous: Config | None, staging: Path) -> Plan:
     targets = services.targets(cfg)
     executable = services.executables(cfg)
 
+    # As senhas entram so aqui, no fwctl: render_all e' o que painel e
+    # importador usam para mostrar, e senha nao pode estar no que se mostra.
+    secrets, missing = pppoe.render_secrets(cfg)
+    rendered |= secrets
+    targets |= pppoe.secret_targets(cfg)
+    secret = set(secrets)
+
     if staging.exists():
         shutil.rmtree(staging)
-    staging.mkdir(parents=True)
+    staging.mkdir(parents=True, mode=0o700)
     for name, content in rendered.items():
         path = staging / name
-        path.write_text(content)
-        path.chmod(0o755 if name in executable else 0o644)
+        mode = 0o600 if name in secret else 0o755 if name in executable else 0o644
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(content)
 
     changed = diff_against_live(rendered, targets)
     plan = Plan(
@@ -265,6 +285,16 @@ def build_plan(cfg: Config, previous: Config | None, staging: Path) -> Plan:
         reloads=services.reloads(cfg, previous, changed),
         targets=targets,
         executable=executable,
+        secret=secret,
     )
     plan.checks = services.validate_syntax(staging, changed or list(rendered), cfg)
+    for peer in missing:
+        plan.checks.append(
+            Result(
+                False,
+                f"senha do PPPoE '{peer}'",
+                "nenhuma senha em secrets.yaml, nem dentro do /etc/ppp/peers vivo: "
+                "informe a senha em Rede antes de aplicar",
+            )
+        )
     return plan

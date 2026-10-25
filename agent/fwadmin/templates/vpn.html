@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import action, icon %}
+{% from "_icons.html" import action, actionbar, icon %}
 {% block title %}{{ t.vpn }}{% endblock %}
 {% block body %}
 {% set wg = cfg.wireguard %}
@@ -17,10 +17,15 @@
     <h2 class="h2" id="h-tun">Túnel <span class="mono">{{ wg.device }}</span></h2>
     {% if runtime %}<span class="chip ok">ativo</span>{% elif observed %}<span class="chip bad">parado</span>{% else %}<span class="chip mute">estado não observado</span>{% endif %}
   </div>
+  {% set ro = 'disabled' if readonly else '' %}
+  <form id="page-form" method="post" action="/vpn">
+    <div class="form-grid">
+      <div class="field"><label for="v-net">Rede do túnel</label><input id="v-net" class="input mono" name="address" value="{{ wg.address }}" {{ ro }}></div>
+      <div class="field"><label for="v-port">Porta (udp)</label><input id="v-port" class="input mono" name="listen_port" value="{{ wg.listen_port }}" {{ ro }}></div>
+      <div class="field"><label for="v-mtu">MTU</label><input id="v-mtu" class="input mono" name="mtu" value="{{ wg.mtu or '' }}" placeholder="automático" {{ ro }}></div>
+    </div>
+  </form>
   <div class="kvs">
-    <div class="kv"><span>Rede do túnel</span><span class="mono">{{ wg.address }}</span></div>
-    <div class="kv"><span>Porta</span><span class="mono">{{ wg.listen_port }}/udp</span></div>
-    <div class="kv"><span>MTU</span><span class="mono">{{ wg.mtu or 'automático' }}</span></div>
     <div class="kv"><span>Chave pública do servidor</span><span class="mono" style="font-size:12px">{{ runtime.public_key if runtime else '—' }}</span></div>
     <div class="kv"><span>Chave privada</span><span class="mono">{{ wg.private_key_file }}</span></div>
   </div>
@@ -61,4 +66,5 @@
 </section>
 {% endfor %}
 
+{% if cfg.wireguard.enabled %}{{ actionbar('page-form', readonly, pending) }}{% else %}{{ actionbar('', readonly, pending, 'não há túnel no modelo') }}{% endif %}
 {% endblock %}

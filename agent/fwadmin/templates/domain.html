@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import action %}
+{% from "_icons.html" import action, actionbar %}
 {% block title %}{{ t.domain }}{% endblock %}
 {% block body %}
 {% set records = cfg.hosts|selectattr('dns')|list %}
@@ -14,15 +14,18 @@
 
 <section class="card" aria-labelledby="h-zone">
   <div class="card-h"><h2 class="h2" id="h-zone">Zona</h2></div>
-  <div class="kvs">
-    <div class="kv"><span>Domínio</span><span class="mono">{{ cfg.dns.domain }}</span></div>
-    <div class="kv"><span>Só responde localmente</span><span>{{ 'sim' if cfg.dns.local_only else 'não' }}</span></div>
-    <div class="kv"><span>Nome do DHCP vira registro</span><span>{{ 'sim' if cfg.dns.expand_hosts else 'não' }}</span></div>
-    <div class="kv"><span>Escuta só na interface da LAN</span><span>{{ 'sim' if cfg.dns.bind_interfaces else 'não' }}</span></div>
-    <div class="kv"><span>Encaminha para</span><span class="mono">{{ cfg.dns.upstream|join(', ') or 'o que estiver no /etc/resolv.conf' }}</span></div>
-    <div class="kv"><span>Ignora o /etc/resolv.conf</span><span>{{ 'sim' if cfg.dns.no_resolv else 'não' }}</span></div>
-    <div class="kv"><span>Repassa o selo DNSSEC</span><span>{{ 'sim' if cfg.dns.proxy_dnssec else 'não' }}</span></div>
-  </div>
+  {% set ro = 'disabled' if readonly else '' %}
+  <form id="page-form" method="post" action="/domain">
+    <div class="form-grid">
+      <div class="field"><label for="d-dom">Domínio</label><input id="d-dom" class="input mono" name="domain" value="{{ cfg.dns.domain }}" {{ ro }}></div>
+      <div class="field" style="grid-column: span 2"><label for="d-up">Encaminha para</label><input id="d-up" class="input mono" name="upstream" value="{{ cfg.dns.upstream|join(', ') }}" placeholder="vazio = o que estiver no /etc/resolv.conf" {{ ro }}></div>
+      <label class="check"><input type="checkbox" name="local_only" value="1" {% if cfg.dns.local_only %}checked{% endif %} {{ ro }}> Só responde localmente o domínio</label>
+      <label class="check"><input type="checkbox" name="expand_hosts" value="1" {% if cfg.dns.expand_hosts %}checked{% endif %} {{ ro }}> Nome do DHCP vira registro</label>
+      <label class="check"><input type="checkbox" name="bind_interfaces" value="1" {% if cfg.dns.bind_interfaces %}checked{% endif %} {{ ro }}> Escuta só na LAN</label>
+      <label class="check"><input type="checkbox" name="no_resolv" value="1" {% if cfg.dns.no_resolv %}checked{% endif %} {{ ro }}> Ignora o /etc/resolv.conf</label>
+      <label class="check"><input type="checkbox" name="proxy_dnssec" value="1" {% if cfg.dns.proxy_dnssec %}checked{% endif %} {{ ro }}> Repassa o selo DNSSEC</label>
+    </div>
+  </form>
 </section>
 
 <section class="card" aria-labelledby="h-rec">
@@ -51,4 +54,5 @@
 </section>
 {% endif %}
 
+{{ actionbar('page-form', readonly, pending) }}
 {% endblock %}

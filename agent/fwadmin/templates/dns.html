@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import actionbar %}
 {% block title %}{{ t.dns }}{% endblock %}
 {% block body %}
 {% set srv = unbound.server %}
@@ -59,4 +60,5 @@
 
 <div class="note"><b>Ainda só leitura, mesmo quando as ações chegarem às outras telas</b>O modelo do motor ainda não tem o unbound. Esta página lê o arquivo de config e os contadores direto do sistema.</div>
 
+{{ actionbar('', readonly, pending, 'o unbound ainda não está no modelo') }}
 {% endblock %}

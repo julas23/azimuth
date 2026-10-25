@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from fwadmin import status
+from fwadmin import secretstore, status
 from fwadmin.models import Config
 from fwadmin.services.base import Prova, Reload, ServiceModule, until
 
 PREFIX = "ppp-peers-"
+SECRET_PREFIX = "ppp-secret-"
 
 
 def targets(cfg: Config) -> dict[str, str]:
@@ -15,6 +16,39 @@ def targets(cfg: Config) -> dict[str, str]:
         for w in cfg.wans
         if w.pppoe
     }
+
+
+def secret_targets(cfg: Config) -> dict[str, str]:
+    """O arquivo de senha de cada peer que o motor cuida (password_file)."""
+    return {
+        f"{SECRET_PREFIX}{w.pppoe.peer}": f"/etc/ppp/azimuth-{w.pppoe.peer}.secret"
+        for w in cfg.wans
+        if w.pppoe and w.pppoe.password_file
+    }
+
+
+def render_secrets(cfg: Config) -> tuple[dict[str, str], list[str]]:
+    """(conteudo de cada arquivo de senha, peers sem senha conhecida).
+
+    So o fwctl chama, como root. Na adocao, a senha que esta dentro do peer
+    vivo vai antes para o secrets.yaml (secretstore.adopt_from_peer).
+    """
+    out, missing = {}, []
+    for w in cfg.wans:
+        if not (w.pppoe and w.pppoe.password_file):
+            continue
+        ppp = w.pppoe
+        secretstore.adopt_from_peer(ppp.password_ref, ppp.peer)
+        value = secretstore.current().get(ppp.password_ref)
+        if value is None:
+            missing.append(ppp.peer)
+            continue
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        out[f"{SECRET_PREFIX}{ppp.peer}"] = (
+            "# gerado pelo fwadmin a partir de /etc/fwadmin/secrets.yaml\n"
+            f'password "{escaped}"\n'
+        )
+    return out, missing
 
 
 def units(cfg: Config) -> frozenset[str]:
@@ -26,7 +60,13 @@ def units(cfg: Config) -> frozenset[str]:
 
 
 def _peers(files: list[str]) -> list[str]:
-    return [n.removeprefix(PREFIX) for n in files if n.startswith(PREFIX)]
+    """Peers tocados, pelo arquivo do peer ou pelo da senha — cada um uma vez."""
+    out: list[str] = []
+    for n in files:
+        for prefix in (PREFIX, SECRET_PREFIX):
+            if n.startswith(prefix) and n.removeprefix(prefix) not in out:
+                out.append(n.removeprefix(prefix))
+    return out
 
 
 def _interface(cfg: Config | None, peer: str):

@@ -45,6 +45,10 @@ restrito. Assim todas as regras ficam com comando exato.
 """
 
 BACKUPS = VAR / "backups"
+"""Arquivos de /etc antes de cada apply, com manifesto: o rollback."""
+
+VERSIONS = VAR / "versoes"
+"""A proposta antes de cada Salvar no painel: o 'Restaurar'."""
 STAGING = VAR / "staging"
 STATE = VAR / "state.json"
 DB = VAR / "fwadmin.db"
