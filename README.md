@@ -139,7 +139,7 @@ O que se vende é conveniência — e só aquilo que tem custo recorrente de ver
 
 **O v1 é a instalação local inteira, sem nuvem nenhuma:** motor, painel, ISO e os domínios novos. O control plane hospedado e o laço de reconciliação ficam para a v2 — com um requisito que vale desde já, o de que um appliance instalado no v1 possa ser inscrito depois **sem reinstalação**.
 
-Veja [PLAN.md](PLAN.md) para o mapa de integração serviço a serviço, [STACK.md](STACK.md) para o que o produto empacota e sob que licença, e [SALVAGE.md](SALVAGE.md) para o veredito de aproveitamento das duas bases.
+Veja [STACK.md](STACK.md) para o que o produto empacota e sob que licença, e [SALVAGE.md](SALVAGE.md) para o veredito de aproveitamento das duas bases.
 
 ## Estrutura
 

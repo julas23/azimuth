@@ -1,6 +1,6 @@
 """A forma de um servico integrado.
 
-O contrato de cinco passos do PLAN.md — modelo, gerador, validador, recarga e
+O contrato de cinco passos — modelo, gerador, validador, recarga e
 prova de funcao — deixa de ser combinado de prosa e vira estrutura: cada
 servico e' um modulo que declara os campos abaixo, e o motor nao sabe mais
 nada sobre servico nenhum em particular.
