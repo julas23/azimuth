@@ -38,20 +38,23 @@ def _recreate(device: str) -> Reload:
     )
 
 
-def _sync(device: str) -> Reload:
+def _sync(device: str, key_file: str) -> Reload:
     """Aplica mudanca de peers sem derrubar quem esta conectado.
 
     'wg syncconf' compara e muda so o que difere, entao trocar a lista de
     peers nao derruba as sessoes dos que continuam. O strip tira o PostUp e,
-    com ele, a linha da chave privada — o que e' exatamente o desejado: sem
-    PrivateKey no arquivo, o syncconf preserva a chave que ja esta no
-    dispositivo em vez de troca-la.
+    com ele, a linha da chave privada. E o syncconf trata a ausencia de
+    PrivateKey como "sem chave": APAGA a do dispositivo. O tunel fica de pe,
+    na porta certa, com os peers certos, e recusando todo handshake. Por isso
+    a chave volta logo em seguida, do mesmo arquivo que o PostUp usa, e a
+    prova confere que ela esta la.
 
     Se a interface ainda nao existe, nao ha o que sincronizar: sobe.
     """
     sync = (
         "umask 077; t=$(mktemp) || exit 1; "
-        f"wg-quick strip {device} > \"$t\" && wg syncconf {device} \"$t\"; "
+        f"wg-quick strip {device} > \"$t\" && wg syncconf {device} \"$t\" "
+        f"&& wg set {device} private-key {key_file}; "
         "rc=$?; rm -f \"$t\"; exit $rc"
     )
     return Reload(
@@ -90,7 +93,7 @@ def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Re
         return []
     if _interface_mudou(wg, _wg(previous)):
         return [_recreate(wg.device)]
-    return [_sync(wg.device)]
+    return [_sync(wg.device, wg.private_key_file)]
 
 
 def rollback(cfg: Config | None, files: list[str]) -> list[Reload]:
@@ -121,6 +124,8 @@ def probe(cfg: Config, previous: Config | None, changed: list[str]) -> Prova | N
         if estado is None:
             return Prova.falhou("wireguard", esperado, f"{wg.device} nao respondeu ao 'wg show'")
         problemas = []
+        if not estado.has_key:
+            problemas.append("dispositivo sem chave privada: recusa todo handshake")
         if estado.listen_port != wg.listen_port:
             problemas.append(f"porta {estado.listen_port}, declarada {wg.listen_port}")
         if estado.peers != esperados:

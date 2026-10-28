@@ -363,6 +363,9 @@ class WGState:
     last_handshake: int = -1
     """Segundos desde o handshake mais recente. -1 = nenhum peer conectou."""
 
+    has_key: bool = False
+    """O dispositivo tem chave privada. So o fato; a chave nunca sai daqui."""
+
 
 def wireguard(device: str) -> WGState | None:
     """Le 'wg show <dev> dump'. None = nao deu para observar.
@@ -380,6 +383,7 @@ def wireguard(device: str) -> WGState | None:
     linhas = [linha.split("\t") for linha in raw.strip().splitlines()]
     cabeca = linhas[0]
     estado = WGState(up=True)
+    estado.has_key = bool(cabeca[0]) and cabeca[0] != "(none)"
     if len(cabeca) >= 3 and cabeca[2].isdigit():
         estado.listen_port = int(cabeca[2])
 
