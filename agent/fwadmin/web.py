@@ -1027,9 +1027,11 @@ async def add_rule(request: Request, user: User, chain: str, fields: Fields) -> 
         _chain_of(cfg, chain).append(
             Rule(
                 action=fields.text("action"),
-                source=fields.text("source", "any"),
-                destination=fields.text("destination", "any"),
-                proto=fields.text("proto", "any"),
+                # Campo em branco chega como "", e nao ausente: o default do
+                # text() nao cobriria.
+                source=fields.text("source") or "any",
+                destination=fields.text("destination") or "any",
+                proto=fields.text("proto") or "any",
                 dest_ports=fields.text("dest_ports"),
                 description=fields.text("description"),
                 log=fields.flag("log"),
@@ -1073,7 +1075,7 @@ async def add_forward(request: Request, user: User, fields: Fields) -> Response:
                 wan_port=fields.number("wan_port"),
                 to_ip=fields.text("to_ip"),
                 to_port=fields.number("to_port"),
-                proto=fields.text("proto", "tcp"),
+                proto=fields.text("proto") or "tcp",
                 description=fields.text("description"),
                 source_filter=fields.text("source_filter"),
             )

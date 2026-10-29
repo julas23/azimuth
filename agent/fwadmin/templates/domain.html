@@ -44,6 +44,18 @@
       </tbody>
     </table>
   </div>
+  <form class="addbox" method="post" action="/dns/host" aria-label="Novo registro">
+    <div class="addbox-h">Novo registro</div>
+    <div class="form-grid">
+      <div class="field"><label for="h-name">Nome</label><input id="h-name" class="input mono" name="name" placeholder="nas" required {{ ro }}></div>
+      <div class="field"><label for="h-ip">Aponta para</label><input id="h-ip" class="input mono" name="ip" placeholder="{{ cfg.lan.ipv4.ip }}" required {{ ro }}></div>
+      <div class="field"><label for="h-grp">Grupo</label>
+        <select id="h-grp" class="input" name="group" {{ ro }}><option value="">—</option>{% for g in cfg.portal.groups|sort(attribute='order') %}<option value="{{ g.id }}">{{ g.title }}</option>{% endfor %}</select></div>
+      <div class="field" style="grid-column: span 2"><label for="h-ds">Descrição</label><input id="h-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
+      <div class="addbox-go">{{ action('Adicionar', readonly) }}</div>
+    </div>
+    <div class="row muted">Nome curto vira <span class="mono">nome.{{ cfg.dns.domain }}</span>; um nome com ponto é usado como está.</div>
+  </form>
 </section>
 
 {% set outside = cfg.hosts|rejectattr('dns')|list %}

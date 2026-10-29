@@ -240,3 +240,10 @@ a.tile:hover { border-color: #93B4F5; color: var(--ink); }
 .wan-card:has(option[value="pppoe"]:checked) .only-pppoe.row,
 .wan-card:has(option[value="pppoe"]:checked) .only-pppoe.card-h { display: flex; }
 .wan-card:has(option[value="static"]:checked) .only-static { display: grid; }
+
+/* Caixa de inclusao no pe de cada lista: firewall, reservas, registros. */
+.addbox { border-top: 1px solid var(--line-2); background: var(--surface-2); border-radius: 0 0 10px 10px; }
+.addbox-h { padding: 14px 20px 0; font-weight: 600; }
+.addbox-h .muted { font-weight: 400; }
+.addbox .form-grid { padding-top: 12px; }
+.addbox-go { display: flex; align-items: flex-end; }
