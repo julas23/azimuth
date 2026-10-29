@@ -27,6 +27,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 sys.path.insert(0, os.environ.get("FWADMIN_CODE", "/opt/fwadmin"))
 
 from fwadmin import acks, importer, observe, ownership, paths, secretstore, services  # noqa: E402
@@ -41,6 +43,7 @@ from fwadmin.apply import (  # noqa: E402
     restore,
     run,
 )
+from fwadmin.models import Config  # noqa: E402
 from fwadmin.render import dump, load  # noqa: E402
 
 BOLD, RED, GREEN, YELLOW, DIM, OFF = (
@@ -104,13 +107,34 @@ def seal_now(motivo: str, verbose: bool = False) -> None:
         say(f"  {YELLOW}nao selado{OFF} {name}: {porque}")
 
 
-def show_drift(posses: list, bloqueiam: list) -> None:
+def show_drift(posses: list, bloqueiam: list, absorvidas: list = ()) -> None:
     """Diz quem mexeu em que, e o que isso impede."""
     say()
     say(f"{RED}{BOLD}arquivos editados fora do motor:{OFF}")
     for p in posses:
-        marca = f"{RED}bloqueia{OFF}" if p in bloqueiam else f"{YELLOW}aviso{OFF}"
+        if p in absorvidas:
+            marca = f"{GREEN}ja no modelo{OFF}"
+        elif p in bloqueiam:
+            marca = f"{RED}bloqueia{OFF}"
+        else:
+            marca = f"{YELLOW}aviso{OFF}"
         say(f"  [{marca}] {p.target}  {DIM}({p.service}, {p.state}){OFF}")
+
+
+def drift_gate(proposed, current, changed: list[str]) -> tuple[list, list, list]:
+    """(divergentes, bloqueiam, absorvidas).
+
+    Bloqueia so o divergente que o apply sobrescreveria e cuja edicao o
+    modelo proposto ainda nao contem. A base do que foi selado e' a config
+    viva ou, se ela foi mexida sem apply, o ultimo commit do git.
+    """
+    divergiram = ownership.divergentes(proposed)
+    tocados = [p for p in divergiram if p.name in changed]
+    if not tocados:
+        return divergiram, [], []
+    bases = [c for c in (current, committed_config()) if c is not None]
+    absorvidas = [p for p in tocados if ownership.absorvida(p, proposed, bases)]
+    return divergiram, [p for p in tocados if p not in absorvidas], absorvidas
 
 
 # ---------------------------------------------------------------------------
@@ -183,9 +207,9 @@ def cmd_check(args: argparse.Namespace) -> int:
     plan = build_plan(proposed, current, paths.STAGING)
     show_plan(plan)
 
-    divergiram = ownership.divergentes(proposed)
+    divergiram, bloqueiam, absorvidas = drift_gate(proposed, current, plan.changed)
     if divergiram:
-        show_drift(divergiram, [p for p in divergiram if p.name in plan.changed])
+        show_drift(divergiram, bloqueiam, absorvidas)
 
     if not plan.valid:
         return fail("a config nao passou na validacao de sintaxe — apply bloqueado")
@@ -235,10 +259,9 @@ def cmd_apply(args: argparse.Namespace) -> int:
     # por causa de uma edicao a mao no nftables castigaria a pessoa errada e,
     # pior, deixaria o firewall impedido de mudar qualquer coisa justo na hora
     # em que alguem mexeu nele as pressas.
-    divergiram = ownership.divergentes(proposed)
-    bloqueiam = [p for p in divergiram if p.name in plan.changed]
+    divergiram, bloqueiam, absorvidas = drift_gate(proposed, current, plan.changed)
     if divergiram:
-        show_drift(divergiram, bloqueiam)
+        show_drift(divergiram, bloqueiam, absorvidas)
     if bloqueiam and not args.discard_drift:
         say()
         return fail(
@@ -256,9 +279,12 @@ def cmd_apply(args: argparse.Namespace) -> int:
         )
 
     # ---- a partir daqui /etc e' tocado -----------------------------------
-    if bloqueiam:
-        guardado = ownership.stash(bloqueiam)
-        if guardado is not None:
+    if absorvidas:
+        say()
+        say(f"{GREEN}edicao a mao ja contida no modelo{OFF} — o arquivo novo a mantem")
+    if bloqueiam or absorvidas:
+        guardado = ownership.stash(bloqueiam + absorvidas)
+        if guardado is not None and bloqueiam:
             say()
             say(f"{YELLOW}edicao a mao descartada{OFF} — copia guardada em {guardado}")
 
@@ -630,6 +656,27 @@ def read_note() -> str:
         return ""
     paths.NOTE.unlink(missing_ok=True)
     return note[:200].replace("\n", " ")
+
+
+def committed_config():
+    """A config do ultimo commit de /etc/fwadmin, ou None.
+
+    Quem edita o config.yaml direto, sem apply, tira dele o papel de
+    "o que foi selado"; o commit continua sendo o ultimo estado confirmado.
+    """
+    repo = paths.ETC
+    if not (repo / ".git").exists():
+        return None
+    result = run(
+        "git", "-c", f"safe.directory={repo}", "-C", str(repo), "show", "HEAD:config.yaml",
+        mutating=False,
+    )
+    if not result.ok:
+        return None
+    try:
+        return Config.model_validate(yaml.safe_load(result.output))
+    except (ValueError, yaml.YAMLError):
+        return None
 
 
 def git_commit(message: str) -> None:

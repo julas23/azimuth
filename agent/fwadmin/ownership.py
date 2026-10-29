@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,7 @@ __all__ = [
     "SEM_SELO",
     "Posse",
     "Unidade",
+    "absorvida",
     "digest",
     "divergentes",
     "read_seal",
@@ -176,6 +178,54 @@ def survey(cfg: Config) -> list[Posse]:
 
 def divergentes(cfg: Config) -> list[Posse]:
     return [p for p in survey(cfg) if p.divergiu]
+
+
+def absorvida(posse: Posse, proposed: Config, bases: list[Config]) -> bool:
+    """A edicao a mao ja esta no modelo proposto?
+
+    O caminho que a recusa do apply ensina e' "traga a edicao para o
+    config.yaml". Feito isso, o arquivo novo continua diferente do vivo — o
+    modelo quase sempre traz mais alguma coisa junto — e so o sha nao separa
+    "vai apagar a edicao" de "vai escrever a edicao e mais isto". Sem esta
+    conta, quem seguiu a instrucao a risca continuava barrado.
+
+    A edicao e' a diferenca entre o vivo e o que foi selado. O selo guarda so
+    o sha, entao o conteudo selado vem de renderizar uma das `bases` (a config
+    viva, o ultimo commit) — e so vale a base cujo render bate com o sha do
+    selo. Sem base que bata, nao se sabe o que foi editado, e a resposta e'
+    nao.
+
+    Absorvida quer dizer: toda linha que a edicao acrescentou aparece no novo
+    pelo menos tantas vezes quanto no vivo, e toda linha que ela tirou aparece
+    no novo no maximo tantas vezes quanto no vivo. A conta e' por linha, sem
+    ordem; por isso edicao que so reordena (num nftables isso muda tudo) ou so
+    mexe em espaco nao tem como ser provada, e continua barrando.
+    """
+    if posse.state != DIVERGENTE:
+        return False
+    try:
+        vivo_txt = paths.sys_path(posse.target).read_text()
+    except OSError:
+        return False
+
+    selado = None
+    for base in bases:
+        texto = render_all(base).get(posse.name)
+        if texto is not None and hashlib.sha256(texto.encode()).hexdigest() == posse.sealed:
+            selado = texto
+            break
+    novo = render_all(proposed).get(posse.name)
+    if selado is None or novo is None:
+        return False
+
+    vivo, antes, depois = (Counter(t.splitlines()) for t in (vivo_txt, selado, novo))
+    acrescentadas = vivo - antes
+    tiradas = antes - vivo
+    if not acrescentadas and not tiradas:
+        return False
+    return all(depois[linha] >= vivo[linha] for linha in acrescentadas) and all(
+        depois[linha] <= vivo[linha] for linha in tiradas
+    )
 
 
 def seal(cfg: Config) -> tuple[list[str], list[tuple[str, str]]]:

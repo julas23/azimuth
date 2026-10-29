@@ -38,6 +38,11 @@ cp "$REPO/legacy/live/dnsmasq.conf"    "$SANDBOX/etc/dnsmasq.conf"
 cp "$REPO/legacy/live/nftables.conf"   "$SANDBOX/etc/nftables.conf"
 cp "$REPO/legacy/live/ppp-peers-vivo"  "$SANDBOX/etc/ppp/peers/vivo"
 cp "$REPO/config/config.yaml"          "$SANDBOX/etc/fwadmin/config.yaml"
+# O apply recusa PPPoE sem senha, e a do legacy/live nao vem no peer.
+python3 -c 'import sys, yaml; cfg = yaml.safe_load(open(sys.argv[1]))
+refs = [i["pppoe"]["password_ref"] for i in cfg["interfaces"] if (i.get("pppoe") or {}).get("password_ref")]
+print(yaml.safe_dump({r: "senha-de-teste" for r in refs}), end="")' \
+    "$SANDBOX/etc/fwadmin/config.yaml" > "$SANDBOX/etc/fwadmin/secrets.yaml"
 
 echo "== 1. check com a config ja aplicada =="
 "$FWCTL" check > "$SANDBOX/out" 2>&1 || true
@@ -214,6 +219,59 @@ check "apply passa com --discard-drift" "$(grep -c 'copia guardada em' "$SANDBOX
 check "a edicao a mao foi sobrescrita"  "$(grep -c 'editado a mao as 23h' "$SANDBOX/etc/dnsmasq.conf" || true)" "0"
 check "a mudanca do modelo entrou"      "$(grep -c 'outrohost' "$SANDBOX/etc/dnsmasq.conf")" "1"
 check "copia do descartado existe"      "$(cat "$SANDBOX"/var/lib/fwadmin/drift/*/dnsmasq.conf 2>/dev/null | grep -c 'editado a mao as 23h')" "1"
+echo
+
+echo "== 8b. edicao a mao que ja foi levada ao modelo nao barra =="
+"$FWCTL" confirm > /dev/null 2>&1 || true
+
+# O caso de 29/10: alguem poe um registro direto no dnsmasq.conf, depois
+# leva o mesmo registro para o config.yaml junto com mais um. O arquivo novo
+# contem a edicao, entao nao ha o que proteger.
+python3 - "$SANDBOX" <<'ABSORB'
+import sys, os
+sandbox = sys.argv[1]
+os.environ["FWADMIN_SYSROOT"] = sandbox
+sys.path.insert(0, os.environ["FWADMIN_CODE"])
+from pathlib import Path
+from fwadmin.render import load, dump, render_all
+cfg = load(Path(sandbox) / "etc/fwadmin/config.yaml")
+base = render_all(cfg)["dnsmasq.conf"].splitlines()
+novo = lambda n, ip: cfg.hosts[0].model_copy(update={"name": n, "ip": ip, "services": []})
+cfg.hosts.append(novo("feitoamao", "10.0.0.81"))
+linha = [l for l in render_all(cfg)["dnsmasq.conf"].splitlines() if l not in base]
+assert len(linha) == 1, linha
+with open(Path(sandbox) / "etc/dnsmasq.conf", "a") as fh:
+    fh.write(linha[0] + "\n")
+cfg.hosts.append(novo("maisum", "10.0.0.82"))
+Path(sandbox, "etc/fwadmin/config.pending.yaml").write_text(dump(cfg))
+print(f"     a mao: {linha[0]}; pendente: feitoamao + maisum")
+ABSORB
+
+"$FWCTL" apply --yes > "$SANDBOX/out" 2>&1 && rc=0 || rc=$?
+sed 's/^/     /' "$SANDBOX/out"
+check "apply passa sem --discard-drift"  "$rc" "0"
+check "e diz que a edicao esta no modelo" "$(grep -c 'ja contida no modelo' "$SANDBOX/out")" "1"
+check "o registro feito a mao continua"  "$(grep -c 'feitoamao' "$SANDBOX/etc/dnsmasq.conf")" "1"
+check "e o novo entrou"                  "$(grep -c 'maisum' "$SANDBOX/etc/dnsmasq.conf")" "1"
+check "o historico nao fala em descarte" "$(grep -c 'descartou' "$SANDBOX/out" || true)" "0"
+"$FWCTL" confirm > /dev/null 2>&1 || true
+
+# Mas se o modelo nao trouxer a edicao, continua barrando.
+echo "address=/so-na-mao.home.lan/10.0.0.83" >> "$SANDBOX/etc/dnsmasq.conf"
+python3 - "$SANDBOX" <<'NOTABSORB'
+import sys, os
+sandbox = sys.argv[1]
+os.environ["FWADMIN_SYSROOT"] = sandbox
+sys.path.insert(0, os.environ["FWADMIN_CODE"])
+from pathlib import Path
+from fwadmin.render import load, dump
+cfg = load(Path(sandbox) / "etc/fwadmin/config.yaml")
+cfg.hosts.append(cfg.hosts[0].model_copy(update={"name": "outromais", "ip": "10.0.0.84", "services": []}))
+Path(sandbox, "etc/fwadmin/config.pending.yaml").write_text(dump(cfg))
+NOTABSORB
+"$FWCTL" apply --yes > "$SANDBOX/out" 2>&1 && rc=0 || rc=$?
+check "edicao fora do modelo segue barrando" "$rc" "1"
+"$FWCTL" apply --yes --discard-drift > /dev/null 2>&1 || true
 echo
 
 echo "== 9. o selo nunca afirma o que nao viu =="
