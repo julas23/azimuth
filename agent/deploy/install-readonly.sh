@@ -55,6 +55,25 @@ install_f2b() {
     fi
 }
 
+# Os agentes no navegador (AGENTES.md): o script que abre a sessao, a unidade
+# do systemd e a limpeza de 30 dias do registro. Instala so o que mudou.
+install_agentes() {
+    local mudou=0
+    if ! cmp -s "$SRC/sbin/azimuth-agente-sessao" /usr/local/sbin/azimuth-agente-sessao; then
+        install -m 0755 "$SRC/sbin/azimuth-agente-sessao" /usr/local/sbin/azimuth-agente-sessao; mudou=1
+    fi
+    if ! cmp -s "$SRC/deploy/azimuth-agente@.service" /etc/systemd/system/azimuth-agente@.service; then
+        install -m 0644 "$SRC/deploy/azimuth-agente@.service" /etc/systemd/system/azimuth-agente@.service
+        systemctl daemon-reload; mudou=1
+    fi
+    if ! cmp -s "$SRC/deploy/azimuth-agente.tmpfiles" /etc/tmpfiles.d/azimuth-agente.conf; then
+        install -m 0644 "$SRC/deploy/azimuth-agente.tmpfiles" /etc/tmpfiles.d/azimuth-agente.conf
+        systemd-tmpfiles --create /etc/tmpfiles.d/azimuth-agente.conf; mudou=1
+    fi
+    [ "$mudou" = 1 ] && echo "   agentes no navegador: sessao, unidade e registro atualizados"
+    return 0
+}
+
 # Maquina adotada (adopt.sh): so o codigo e' atualizado. Sudoers, drop-in e
 # config sao do motor; reescreve-los aqui voltaria o painel ao somente leitura.
 if [ -e /etc/fwadmin/config.yaml ] && grep -q '^Environment=FWADMIN_READONLY=0' "$DROPIN" 2>/dev/null; then
@@ -79,6 +98,7 @@ if [ -e /etc/fwadmin/config.yaml ] && grep -q '^Environment=FWADMIN_READONLY=0' 
         fi
     fi
     install_f2b
+    install_agentes
     VERSION="$(git -C "$SRC" describe --always --dirty 2>/dev/null || cat "$SRC/VERSION" 2>/dev/null || echo dev)"
     echo "$VERSION" > /opt/fwadmin/VERSION
     echo "   versao $VERSION"

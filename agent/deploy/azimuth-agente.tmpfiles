@@ -1,0 +1,3 @@
+# /etc/tmpfiles.d/azimuth-agente.conf — o registro das sessoes dos agentes
+# no navegador fica 30 dias (AGENTES.md).
+d /var/log/azimuth-agente 0755 root root 30d

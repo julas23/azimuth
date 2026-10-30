@@ -17,10 +17,16 @@ aqui, prontas para quando o modo for desligado.
 
 from __future__ import annotations
 
+import asyncio
 import difflib
+import fcntl
 import ipaddress
 import json
 import os
+import pty
+import signal
+import struct
+import termios
 import re
 import shutil
 import subprocess
@@ -31,13 +37,13 @@ from pathlib import Path
 from typing import Annotated, Any, Callable
 from urllib.parse import parse_qs, urlencode
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from fwadmin import acks, db, dismissed, i18n, ia, importer, live, observe, ownership, paths, secretstore, status
+from fwadmin import acks, agentes, db, dismissed, i18n, ia, importer, live, observe, ownership, paths, secretstore, status
 from fwadmin.models import (
     BlockedDomain,
     Config,
@@ -108,7 +114,7 @@ async def form(request: Request) -> FormData:
 Fields = Annotated[FormData, Depends(form)]
 
 FWCTL = "/usr/local/sbin/fwctl"
-ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff", "observe", "f2b"}
+ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff", "observe", "f2b", "agente"}
 
 READONLY = os.environ.get("FWADMIN_READONLY", "1") != "0"
 """Ligado por padrao: desligar e' decisao explicita de quem instala."""
@@ -419,6 +425,7 @@ NAV = [
     None,
     ("storage", "/storage", "LVM · SMB · NFS", False),
     ("ai", "/ia", "BYOK · local", False),
+    ("agents", "/agentes", "terminal", False),
 ]
 """O menu da esquerda, de cima para baixo. None e' o separador; Sistema fica
 preso no fundo e por isso esta fora da lista."""
@@ -1307,6 +1314,178 @@ async def del_block(request: Request, user: User, domain: str) -> Response:
         cfg.resolver.blocked.pop(_find(cfg.resolver.blocked, "domain", domain, "dominio bloqueado"))
 
     return back("/dns", edit(request, mutate, f"bloqueio-:{domain}"))
+
+
+# ---------------------------------------------------------------------------
+# agentes no navegador (AGENTES.md)
+# ---------------------------------------------------------------------------
+
+
+def _agente(request: Request, user: str, action: str, **fields: str) -> Response:
+    """Grava o pedido e chama o 'fwctl agente'. A validacao de verdade e' a do
+    fwctl, como root."""
+    pedido = {"action": action, **fields}
+    tmp = agentes.REQUEST.with_name(f".{agentes.REQUEST.name}.{os.getpid()}")
+    tmp.write_text(json.dumps(pedido))
+    tmp.replace(agentes.REQUEST)
+    # criar instala pacotes do Debian na primeira vez: pode levar minutos
+    ok, out = fwctl("agente", timeout=900)
+    if not ok:
+        agentes.REQUEST.unlink(missing_ok=True)
+        return back("/agentes", out.removeprefix("erro: ").strip() or "o fwctl recusou o pedido")
+    db.log(f"agente-{action}:{fields.get('name', '')}:{fields.get('level', '')}", username=user, address=client_ip(request))
+    return done("/agentes", out.strip().splitlines()[-1] if out.strip() else "feito")
+
+
+def _agent_rows() -> list[dict[str, Any]]:
+    rows = []
+    for nome, info in sorted(agentes.load_state().items()):
+        kind = agentes.CATALOG.get(info.get("kind", ""))
+        rows.append(
+            {
+                "name": nome,
+                "kind": kind.title if kind else info.get("kind", "?"),
+                "level": info.get("level", "?"),
+                "info": status.unit_info(agentes.UNIT.format(nome), "tmux"),
+                "created": info.get("created", ""),
+            }
+        )
+    return rows
+
+
+@app.get("/agentes", response_class=HTMLResponse)
+async def agents_page(request: Request, user: User) -> Response:
+    return page(
+        request,
+        "agentes.html",
+        nav="agents",
+        cfg=current(),
+        rows=_agent_rows(),
+        catalog=agentes.CATALOG,
+        levels=agentes.LEVELS,
+        unavailable=agentes.UNAVAILABLE,
+        default_level=agentes.DEFAULT_LEVEL,
+    )
+
+
+@app.get("/agentes/{nome}", response_class=HTMLResponse)
+async def agent_terminal(request: Request, user: User, nome: str) -> Response:
+    row = next((r for r in _agent_rows() if r["name"] == nome), None)
+    if row is None:
+        return back("/agentes", f"agente inexistente: {nome}")
+    return page(request, "agente.html", nav="agents", cfg=current(), row=row, levels=agentes.LEVELS)
+
+
+@app.post("/agentes/criar")
+async def agent_create(request: Request, user: User, fields: Fields) -> Response:
+    return _agente(
+        request, user, "criar",
+        name=fields.text("name"), kind=fields.text("kind"), level=fields.text("level") or agentes.DEFAULT_LEVEL,
+    )
+
+
+@app.post("/agentes/{nome}/nivel")
+async def agent_level(request: Request, user: User, nome: str, fields: Fields) -> Response:
+    return _agente(request, user, "nivel", name=nome, level=fields.text("level"))
+
+
+@app.post("/agentes/{nome}/{acao}")
+async def agent_action(request: Request, user: User, nome: str, acao: str) -> Response:
+    if acao not in ("iniciar", "parar", "remover"):
+        return back("/agentes", f"acao desconhecida: {acao}")
+    return _agente(request, user, acao, name=nome)
+
+
+def _ws_allowed(ws: WebSocket) -> str:
+    """Os portoes das paginas, para o WebSocket, que nao passa pelos
+    middlewares HTTP. Devolve o usuario, ou vazio se algum portao fechou."""
+    if READONLY:
+        return ""
+    host = ws.client.host if ws.client else ""
+    if ALLOW:
+        try:
+            origin_ip = ipaddress.ip_address(host)
+        except ValueError:
+            return ""
+        if not any(origin_ip in net for net in ALLOW):
+            return ""
+    # um site de fora nao abre o terminal com o cookie de quem visita
+    origin = ws.headers.get("origin", "")
+    if not origin or origin.split("://", 1)[-1] != ws.headers.get("host", ""):
+        return ""
+    session = db.get_session(ws.cookies.get(SESSION_COOKIE, ""))
+    return session.username if session else ""
+
+
+@app.websocket("/agentes/{nome}/tty")
+async def agent_tty(ws: WebSocket, nome: str) -> None:
+    """Liga o xterm.js do navegador a sessao tmux do agente.
+
+    O painel (netadm) entra no servidor tmux do usuario do agente pelo
+    server-access, num pseudoterminal; fechar a aba so solta este cliente, e o
+    agente continua. Entrada e redimensionamento chegam como JSON pequeno; a
+    saida vai crua, em bytes, que o xterm.js decodifica.
+    """
+    user = _ws_allowed(ws)
+    sock = agentes.socket_of(nome)
+    if not user or nome not in agentes.load_state():
+        await ws.close(code=4403)
+        return
+    await ws.accept()
+    if not os.path.exists(sock):
+        await ws.send_bytes("\r\n O agente está parado. Inicie-o na página Agentes.\r\n".encode())
+        await ws.close()
+        return
+    db.log(f"agente-terminal:{nome}", username=user, address=ws.client.host if ws.client else "")
+
+    pid, fd = pty.fork()
+    if pid == 0:  # filho: vira o cliente tmux, e so isso
+        os.environ["TERM"] = "xterm-256color"
+        try:
+            os.execvp("tmux", ["tmux", "-S", sock, "attach-session", "-t", "main"])
+        finally:
+            os._exit(127)
+
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+    def readable() -> None:
+        try:
+            data = os.read(fd, 65536)
+        except OSError:
+            data = b""
+        queue.put_nowait(data)
+        if not data:
+            loop.remove_reader(fd)
+
+    loop.add_reader(fd, readable)
+
+    async def to_browser() -> None:
+        while data := await queue.get():
+            await ws.send_bytes(data)
+        await ws.close()
+
+    sender = asyncio.create_task(to_browser())
+    try:
+        while True:
+            message = json.loads(await ws.receive_text())
+            if message.get("t") == "i":
+                os.write(fd, str(message.get("d", "")).encode())
+            elif message.get("t") == "r":
+                cols = max(20, min(int(message.get("c", 80)), 500))
+                rows = max(5, min(int(message.get("r", 24)), 200))
+                fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+    except (WebSocketDisconnect, ValueError, TypeError, OSError):
+        pass
+    finally:
+        sender.cancel()
+        loop.remove_reader(fd)
+        os.close(fd)
+        try:
+            os.kill(pid, signal.SIGHUP)
+            os.waitpid(pid, 0)
+        except (ProcessLookupError, ChildProcessError):
+            pass
 
 
 # ---------------------------------------------------------------------------

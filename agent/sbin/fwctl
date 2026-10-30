@@ -23,6 +23,7 @@ import argparse
 import ipaddress
 import json
 import os
+import pwd
 import shutil
 import sys
 import time
@@ -33,7 +34,7 @@ import yaml
 
 sys.path.insert(0, os.environ.get("FWADMIN_CODE", "/opt/fwadmin"))
 
-from fwadmin import acks, importer, observe, ownership, paths, secretstore, services  # noqa: E402
+from fwadmin import acks, agentes, importer, observe, ownership, paths, secretstore, services  # noqa: E402
 from fwadmin.apply import (  # noqa: E402
     ApplyError,
     Plan,
@@ -633,6 +634,134 @@ def cmd_f2b(args: argparse.Namespace) -> int:
     return 0
 
 
+def _agente_files(nome: str, kind: str, level: str) -> None:
+    """Escreve o que o nivel escolhido pede: env, drop-in da unidade e sudoers."""
+    etc = Path(agentes.ETC)
+    etc.mkdir(mode=0o755, exist_ok=True)
+    (etc / f"{nome}.env").write_text(agentes.env_file(nome, kind))
+
+    dropin = Path(agentes.DROPIN.format(nome))
+    dropin.parent.mkdir(parents=True, exist_ok=True)
+    dropin.write_text(agentes.dropin(nome, level))
+
+    sudoers = Path(agentes.SUDOERS.format(nome))
+    if level == "root":
+        tmp = sudoers.with_name(f".{sudoers.name}.novo")
+        tmp.write_text(agentes.sudoers(nome))
+        tmp.chmod(0o440)
+        if not run("visudo", "-cf", str(tmp), mutating=False).ok:
+            tmp.unlink(missing_ok=True)
+            raise ApplyError("a regra do sudoers do nivel root nao passou no visudo")
+        tmp.replace(sudoers)
+    else:
+        sudoers.unlink(missing_ok=True)
+    run("systemctl", "daemon-reload")
+
+
+def _agente_state(update) -> None:
+    state = agentes.load_state()
+    update(state)
+    agentes.STATE.write_text(json.dumps(state, indent=1, ensure_ascii=False))
+    agentes.STATE.chmod(0o644)
+
+
+def cmd_agente(args: argparse.Namespace) -> int:
+    """Cria, muda o nivel, inicia, para e remove agentes no navegador.
+
+    O pedido vem do painel por arquivo (o sudoers nao tem curinga), e' apagado
+    antes de qualquer coisa e revalidado aqui. O nivel e' escolha do usuario:
+    este comando so o traduz em arquivos (AGENTES.md).
+    """
+    require_root()
+    try:
+        raw = agentes.REQUEST.read_text()[:2048]
+        agentes.REQUEST.unlink()
+        pedido = json.loads(raw)
+    except (OSError, ValueError):
+        return fail("nenhum pedido de agente legivel")
+    if not isinstance(pedido, dict):
+        return fail("pedido de agente malformado")
+
+    acao, nome = str(pedido.get("action", "")), str(pedido.get("name", ""))
+    if not agentes.NAME_RE.match(nome):
+        return fail(f"nome de agente invalido: {nome!r} (minusculas, numeros e '-', 2 a 16)")
+    state = agentes.load_state()
+    unit = agentes.UNIT.format(nome)
+    user = agentes.user_of(nome)
+
+    try:
+        if acao == "criar":
+            kind, level = str(pedido.get("kind", "")), str(pedido.get("level", ""))
+            if kind not in agentes.CATALOG:
+                return fail(f"agente desconhecido: {kind!r}")
+            if level not in agentes.LEVELS or level in agentes.UNAVAILABLE:
+                return fail(f"nivel indisponivel: {level!r}")
+            if nome in state:
+                return fail(f"ja existe um agente chamado {nome}")
+            faltam = [p for p in agentes.CATALOG[kind].packages if not run("dpkg", "-s", p, mutating=False).ok]
+            if faltam:
+                say(f"instalando do Debian: {' '.join(faltam)}")
+                result = run("apt-get", "install", "-y", "--no-install-recommends", *faltam, timeout=900)
+                if not result.ok:
+                    return fail(f"apt-get falhou: {result.output[-400:]}")
+            Path(agentes.HOME).mkdir(mode=0o755, exist_ok=True)
+            try:
+                pwd.getpwnam(user)
+            except KeyError:
+                result = run(
+                    "useradd", "--system", "--user-group", "--create-home",
+                    "--home-dir", agentes.home_of(nome), "--shell", "/bin/bash", user,
+                )
+                if not result.ok:
+                    return fail(f"useradd falhou: {result.output}")
+            logs = Path(agentes.LOGS) / nome
+            logs.mkdir(parents=True, exist_ok=True)
+            shutil.chown(logs, user, user)
+            _agente_files(nome, kind, level)
+            _agente_state(lambda st: st.__setitem__(
+                nome, {"kind": kind, "level": level, "created": datetime.now().isoformat(timespec="seconds")}))
+            run("systemctl", "start", unit)
+            say(f"agente {nome} criado ({agentes.CATALOG[kind].title}, nivel {level})")
+
+        elif acao == "nivel":
+            level = str(pedido.get("level", ""))
+            if nome not in state:
+                return fail(f"agente inexistente: {nome}")
+            if level not in agentes.LEVELS or level in agentes.UNAVAILABLE:
+                return fail(f"nivel indisponivel: {level!r}")
+            _agente_files(nome, state[nome]["kind"], level)
+            _agente_state(lambda st: st[nome].__setitem__("level", level))
+            # o nivel vale na sessao nova: a que esta aberta reinicia
+            if run("systemctl", "is-active", "--quiet", unit, mutating=False).ok:
+                run("systemctl", "restart", unit)
+            say(f"agente {nome} agora no nivel {level}")
+
+        elif acao in ("iniciar", "parar"):
+            if nome not in state:
+                return fail(f"agente inexistente: {nome}")
+            result = run("systemctl", "start" if acao == "iniciar" else "stop", unit)
+            if not result.ok:
+                return fail(result.output)
+            say(f"agente {nome}: {'iniciado' if acao == 'iniciar' else 'parado'}")
+
+        elif acao == "remover":
+            if nome not in state:
+                return fail(f"agente inexistente: {nome}")
+            run("systemctl", "stop", unit)
+            Path(agentes.SUDOERS.format(nome)).unlink(missing_ok=True)
+            Path(agentes.ETC, f"{nome}.env").unlink(missing_ok=True)
+            shutil.rmtree(Path(agentes.DROPIN.format(nome)).parent, ignore_errors=True)
+            run("systemctl", "daemon-reload")
+            run("userdel", "--remove", user)
+            _agente_state(lambda st: st.pop(nome, None))
+            say(f"agente {nome} removido (o registro das sessoes fica ate completar 30 dias)")
+        else:
+            return fail(f"acao desconhecida: {acao!r}")
+    except ApplyError as exc:
+        return fail(str(exc))
+    return 0
+
+
 def cmd_inventory(args: argparse.Namespace) -> int:
     """O que o motor possui, e o que roda nesta caixa sem dono.
 
@@ -835,6 +964,9 @@ def main() -> int:
     sub.add_parser(
         "f2b", help="bane ou desbane um IP, conforme o pedido gravado pelo painel"
     ).set_defaults(fn=cmd_f2b)
+    sub.add_parser(
+        "agente", help="cria, muda o nivel, inicia, para ou remove um agente no navegador"
+    ).set_defaults(fn=cmd_agente)
 
     p_rb = sub.add_parser("rollback", help="desfaz o ultimo apply")
     p_rb.add_argument("--auto", action="store_true", help="chamado pelo watchdog")

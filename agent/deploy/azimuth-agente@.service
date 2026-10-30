@@ -1,0 +1,18 @@
+# Um agente no navegador (AGENTES.md). O nivel de acesso, escolhido pelo
+# usuario, vem num drop-in escrito pelo 'fwctl agente':
+# /etc/systemd/system/azimuth-agente@<nome>.service.d/nivel.conf
+[Unit]
+Description=Azimuth: agente %i no navegador
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=az-%i
+Group=az-%i
+WorkingDirectory=~
+Environment=TERM=xterm-256color LANG=C.UTF-8
+RuntimeDirectory=azimuth-agente/%i
+RuntimeDirectoryMode=0711
+ExecStart=/usr/local/sbin/azimuth-agente-sessao %i
+Restart=no

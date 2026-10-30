@@ -69,6 +69,11 @@ echo "== 4. sudoers =="
 install -m 0440 "$SRC/deploy/sudoers-fwadmin" /etc/sudoers.d/fwadmin
 visudo -c -q || { rm -f /etc/sudoers.d/fwadmin; echo "sudoers invalido — removido"; exit 1; }
 echo "   validado com visudo"
+install -m 0755 "$SRC/sbin/azimuth-agente-sessao" /usr/local/sbin/azimuth-agente-sessao
+install -m 0644 "$SRC/deploy/azimuth-agente@.service" /etc/systemd/system/azimuth-agente@.service
+install -m 0644 "$SRC/deploy/azimuth-agente.tmpfiles" /etc/tmpfiles.d/azimuth-agente.conf
+systemd-tmpfiles --create /etc/tmpfiles.d/azimuth-agente.conf
+echo "   agentes no navegador (AGENTES.md): sessao, unidade e registro de 30 dias"
 if command -v fail2ban-client >/dev/null; then
     install -m 0644 "$SRC/deploy/fail2ban/azimuth-panel-filter.conf" /etc/fail2ban/filter.d/azimuth-panel.conf
     install -m 0644 "$SRC/deploy/fail2ban/azimuth-panel-jail.conf" /etc/fail2ban/jail.d/azimuth-panel.conf

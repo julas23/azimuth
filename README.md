@@ -36,7 +36,7 @@ Todos os painéis desse mercado escrevem o arquivo, recarregam o serviço e torc
 
 **Verificação prova função, não código de retorno.** Serviço recarregado precisa demonstrar que voltou. `systemctl` dizer "ok" não é evidência.
 
-**A IA propõe, o humano assina.** Nenhum agente automático aplica mudança. Diagnóstico é leitura; alteração é proposta que vira diff para revisão.
+**A IA trabalha no nível que você der.** Um agente pode só ler, mudar a rede pelo motor ou ter a máquina inteira — a escolha é sua, por agente, e muda quando você quiser. Em qualquer nível, o que passa pelo motor é validado, provado e reversível, e o que passa por fora é detectado.
 
 ---
 
@@ -59,7 +59,7 @@ Todos os painéis desse mercado escrevem o arquivo, recarregam o serviço e torc
 | **ADO** — Azimuth Data Orchestrator | Nó de storage | Volumes, snapshots e integridade dos dados |
 
 ### 3 — IA (chaves do usuário, sempre)
-BYOK para provedores externos, BYOA para agentes autônomos em modo leitura e proposta, motor local via Ollama ou vLLM, e OpenWebUI com Whisper (voz para texto) e Piper (texto para voz) — tudo na LAN, sem dado saindo de casa.
+BYOK para provedores externos, BYOA para o agente que você escolher, usado no navegador com a tela do terminal e no nível de acesso que você der, motor local via Ollama ou vLLM, e OpenWebUI com Whisper (voz para texto) e Piper (texto para voz) — tudo na LAN, sem dado saindo de casa.
 
 ### 4 — Storage e mídia
 Nextcloud, Immich, Jellyfin e Navidrome sobre volumes gerenciados. **Nada disso é publicado na internet:** respondem na LAN e pela VPN.

@@ -1,0 +1,50 @@
+#!/bin/bash
+# Abre a sessao de um agente no navegador: um servidor tmux do usuario do agente
+# (az-<nome>), que o painel (netadm) acessa pelo server-access do tmux 3.5, sem sudo.
+# Chamado pela azimuth-agente@<nome>.service, como o usuario do agente.
+#
+# Fechar a aba so solta o cliente do painel; o agente continua. A sessao inteira
+# vai para /var/log/azimuth-agente/<nome>/AAAA-MM-DD.log, que o tmpfiles apaga
+# depois de 30 dias.
+set -euo pipefail
+
+nome="${1:-}"
+[[ "$nome" =~ ^[a-z][a-z0-9-]{1,15}$ ]] || { echo "nome de agente invalido: $nome" >&2; exit 1; }
+# shellcheck source=/dev/null
+. "/etc/azimuth-agente/$nome.env"
+
+sock="/run/azimuth-agente/$nome/tmux.sock"
+log="/var/log/azimuth-agente/$nome"
+tmux_() { tmux -S "$sock" "$@"; }
+
+# O que roda dentro: instala o CLI se faltar (o usuario ve o progresso), abre o
+# agente e, quando ele sai, fica um shell no mesmo lugar — para login, update,
+# ou para rodar o agente de novo.
+inner='export PATH="$HOME/.local/bin:$PATH" NPM_CONFIG_PREFIX="$HOME/.local"
+if [ -n "$AGENTE_CMD" ]; then
+  if ! command -v "$AGENTE_CMD" >/dev/null 2>&1; then
+    echo "Instalando o agente: $AGENTE_INSTALA"; echo
+    $AGENTE_INSTALA || echo "A instalacao falhou; o shell abaixo fica para tentar de novo."
+    echo
+  fi
+  command -v "$AGENTE_CMD" >/dev/null 2>&1 && "$AGENTE_CMD"
+  echo; echo "O agente saiu. Para abrir de novo: $AGENTE_CMD"
+fi
+exec bash -l'
+
+tmux_ new-session -d -s main -x 200 -y 50 \
+    -e "AGENTE_CMD=$AGENTE_CMD" -e "AGENTE_INSTALA=$AGENTE_INSTALA" \
+    bash -lc "$inner"
+tmux_ set-option -g status off
+tmux_ set-option -g mouse on
+tmux_ set-option -g history-limit 20000
+tmux_ set-option -g window-size latest
+
+# so o painel entra, alem do dono e do root; a permissao do socket abre para
+# o tmux poder conferir quem e' (a lista de acesso e' o portao)
+tmux_ server-access -a "$AGENTE_PAINEL"
+tmux_ server-access -w "$AGENTE_PAINEL"
+chmod 0666 "$sock"
+
+mkdir -p "$log"
+tmux_ pipe-pane -o -t main "cat >> '$log/'\$(date +%F).log"

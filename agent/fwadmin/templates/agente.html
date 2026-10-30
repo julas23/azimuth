@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ t.agents }} · {{ row.name }}{% endblock %}
+{% block body %}
+<link rel="stylesheet" href="/static/vendor/xterm/xterm.css">
+
+<div class="page-h">
+  <div><h1><span class="mono">{{ row.name }}</span> <span class="muted" style="font-size:16px;font-weight:500">{{ row.kind }}</span></h1>
+    <p class="lede">Nível <b>{{ row.level }}</b>: {{ levels.get(row.level, '') }}. Fechar a aba não para o agente.</p></div>
+  <div class="ra"><span class="chip {{ 'ok' if row.info.running else 'mute' }} lg" id="term-state">{{ 'rodando' if row.info.running else 'parado' }}</span><a class="btn" href="/agentes">Voltar</a></div>
+</div>
+
+<section class="card term-card">
+  <div id="term" class="term" aria-label="Terminal do agente {{ row.name }}"></div>
+  <div class="row term-foot"><span class="grow muted" id="term-msg">Conectando…</span><button class="btn sm" type="button" id="term-reconnect" hidden>Reconectar</button></div>
+</section>
+
+<script src="/static/vendor/xterm/xterm.js"></script>
+<script src="/static/vendor/xterm/addon-fit.js"></script>
+<script>
+(() => {
+  const el = document.getElementById("term"), msg = document.getElementById("term-msg");
+  const again = document.getElementById("term-reconnect");
+  const term = new Terminal({cursorBlink: true, fontFamily: getComputedStyle(document.body).getPropertyValue("--mono"), fontSize: 14, scrollback: 5000,
+    theme: {background: "#0F172A", foreground: "#E2E8F0", cursor: "#93C5FD", selectionBackground: "#334155"}});
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(el);
+  fit.fit();
+  let ws;
+  const send = (o) => ws && ws.readyState === 1 && ws.send(JSON.stringify(o));
+  const resize = () => { fit.fit(); send({t: "r", c: term.cols, r: term.rows}); };
+  function connect() {
+    again.hidden = true;
+    msg.textContent = "Conectando…";
+    ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/agentes/{{ row.name }}/tty");
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => { msg.textContent = "Conectado. A sessão continua se você fechar a aba."; resize(); term.focus(); };
+    ws.onmessage = (e) => term.write(typeof e.data === "string" ? e.data : new Uint8Array(e.data));
+    ws.onclose = () => { msg.textContent = "Desconectado do terminal. O agente continua rodando, se estava."; again.hidden = false; };
+  }
+  term.onData((d) => send({t: "i", d}));
+  window.addEventListener("resize", resize);
+  again.addEventListener("click", connect);
+  connect();
+})();
+</script>
+{% endblock %}

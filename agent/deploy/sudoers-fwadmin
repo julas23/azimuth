@@ -18,7 +18,8 @@
 #
 # O 'fwctl f2b' bane ou desbane um IP sem receber o IP: pelo mesmo motivo da
 # nota do commit, o pedido vai por arquivo (/var/lib/fwadmin/f2b-pedido.json)
-# e o fwctl o revalida como root.
+# e o fwctl o revalida como root. O 'fwctl agente' segue o mesmo trato
+# (/var/lib/fwadmin/agente-pedido.json).
 
 Cmnd_Alias FWADMIN_RO = /usr/local/sbin/fwctl check, \
                         /usr/local/sbin/fwctl status, \
@@ -33,7 +34,8 @@ Cmnd_Alias FWADMIN_RW = /usr/local/sbin/fwctl apply, \
                         /usr/local/sbin/fwctl seal, \
                         /usr/local/sbin/fwctl confirm, \
                         /usr/local/sbin/fwctl rollback, \
-                        /usr/local/sbin/fwctl f2b
+                        /usr/local/sbin/fwctl f2b, \
+                        /usr/local/sbin/fwctl agente
 
 netadm ALL=(root) NOPASSWD: FWADMIN_RO, FWADMIN_RW
 

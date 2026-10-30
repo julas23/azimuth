@@ -42,6 +42,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); }
 a { color: var(--accent); }
@@ -259,6 +260,12 @@ textarea.input { height: auto; min-height: 92px; padding: 10px 12px; line-height
 .out.diff .add { color: #86EFAC; }
 .out.diff .del { color: #FCA5A5; }
 .out.diff .hunk { color: #7DD3FC; }
+
+/* Agentes: o terminal ocupa a altura que sobra, sempre escuro. */
+.term-card { overflow: hidden; background: #0F172A; border-color: #1E293B; }
+.term { height: calc(100vh - 330px); min-height: 360px; padding: 10px 12px; }
+.term-foot { background: var(--surface); border-top: 1px solid var(--line); }
+@media (max-width: 860px) { .term { height: 60vh; } }
 
 /* Passos que nao sao sequencia (as pastas do Storage): sem seta. */
 .steps.plain .node::after { content: none; }

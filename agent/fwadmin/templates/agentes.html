@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "_icons.html" import actionbar, icon %}
+{% block title %}{{ t.agents }}{% endblock %}
+{% block body %}
+{% set ro = 'disabled' if readonly else '' %}
+{% macro levelchip(level) %}<span class="chip {{ {'isolado': 'mute', 'leitura': 'info', 'motor': 'warn', 'root': 'bad'}.get(level, 'mute') }}">{{ level }}</span>{% endmacro %}
+
+<div class="page-h">
+  <div><h1>{{ t.agents }}</h1><p class="lede">O agente que você escolher, rodando nesta caixa e usado aqui no navegador, com a mesma tela do terminal. Um assistente de troubleshooting e de configuração.</p></div>
+</div>
+
+<div class="note"><b>Quanto poder o agente tem é escolha sua</b>Cada agente roda com um usuário próprio, no nível que você der, e o nível muda quando quiser. Em qualquer nível, o que passa pelo motor é validado, provado e reversível, e uma edição feita por fora dele é detectada.</div>
+
+<section class="card" aria-labelledby="h-list">
+  <div class="card-h"><h2 class="h2" id="h-list">Agentes</h2><span class="chip mute">{{ rows|length }}</span></div>
+  <form class="addbox" method="post" action="/agentes/criar" aria-label="Novo agente">
+    <div class="addbox-h"><span class="addbox-ico">{{ icon('plus', 14) }}</span>Novo agente <span class="muted">· na primeira vez, o painel instala o que o agente precisa; pode levar alguns minutos</span></div>
+    <div class="form-grid">
+      <div class="field"><label for="a-n">Nome</label><input id="a-n" class="input mono" name="name" placeholder="claude" pattern="[a-z][a-z0-9-]{1,15}" required {{ ro }}></div>
+      <div class="field"><label for="a-k">Agente</label>
+        <select id="a-k" class="input" name="kind" {{ ro }}>{% for k, c in catalog.items() %}<option value="{{ k }}">{{ c.title }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="a-l">Nível de acesso</label>
+        <select id="a-l" class="input" name="level" {{ ro }}>{% for l in levels %}<option value="{{ l }}" {% if l == default_level %}selected{% endif %} {% if l in unavailable %}disabled{% endif %}>{{ l }}{% if l in unavailable %} — {{ unavailable[l] }}{% endif %}</option>{% endfor %}</select></div>
+      <div class="addbox-go"><button class="btn primary" type="submit" {% if readonly %}disabled title="Somente leitura"{% endif %}>{{ icon('plus', 16) }}Criar</button></div>
+    </div>
+  </form>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Nome</th><th>Agente</th><th>Nível</th><th>Situação</th><th>Mudar nível</th><th><span class="vh">Ações</span></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr><td class="mono">{{ r.name }}</td><td>{{ r.kind }}</td><td>{{ levelchip(r.level) }}</td>
+          <td>{% if r.info.running %}<span class="chip ok">rodando</span>{% else %}<span class="chip mute">parado</span>{% endif %}</td>
+          <td><form method="post" action="/agentes/{{ r.name }}/nivel" class="ra" style="justify-content:flex-start">
+            <select class="input" name="level" style="height:30px;width:auto;font-size:12.5px" {{ ro }}>{% for l in levels %}<option value="{{ l }}" {% if l == r.level %}selected{% endif %} {% if l in unavailable %}disabled{% endif %}>{{ l }}</option>{% endfor %}</select>
+            <button class="btn sm" type="submit" {{ ro }} title="O nível vale numa sessão nova: a aberta reinicia">Aplicar</button></form></td>
+          <td><div class="ra">
+            <a class="btn sm" href="/agentes/{{ r.name }}">{{ icon('agents', 14) }}Abrir</a>
+            {% if r.info.running %}<form method="post" action="/agentes/{{ r.name }}/parar"><button class="btn sm" type="submit" {{ ro }}>{{ icon('stop', 14) }}Parar</button></form>
+            {% else %}<form method="post" action="/agentes/{{ r.name }}/iniciar"><button class="btn sm" type="submit" {{ ro }}>{{ icon('play', 14) }}Iniciar</button></form>{% endif %}
+            <form method="post" action="/agentes/{{ r.name }}/remover"><button class="btn sm danger" type="submit" {{ ro }}>{{ icon('trash', 14) }}Remover</button></form>
+          </div></td></tr>
+      {% else %}
+        <tr><td colspan="6" class="muted">Nenhum agente ainda.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="grid two">
+  <section class="card" aria-labelledby="h-levels">
+    <div class="card-h"><h2 class="h2" id="h-levels">Níveis de acesso</h2></div>
+    {% for l, what in levels.items() %}
+      <div class="row"><span style="flex:0 0 76px">{{ levelchip(l) }}</span><span class="grow">{{ what }}{% if l in unavailable %} <span class="muted">· {{ unavailable[l] }}</span>{% endif %}</span></div>
+    {% endfor %}
+  </section>
+  <section class="card" aria-labelledby="h-cat">
+    <div class="card-h"><h2 class="h2" id="h-cat">Agentes disponíveis</h2></div>
+    {% for k, c in catalog.items() %}
+      <div class="row"><span class="grow"><b>{{ c.title }}</b><div class="muted">{{ c.note }}</div></span></div>
+    {% endfor %}
+    <div class="row muted"><span>A sessão fica gravada por 30 dias em <span class="mono">/var/log/azimuth-agente</span>. Fechar a aba não para o agente.</span></div>
+  </section>
+</div>
+
+{{ actionbar('', readonly, applicable, 'os agentes são geridos pelos botões da lista') }}
+{% endblock %}

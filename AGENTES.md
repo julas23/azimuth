@@ -1,6 +1,6 @@
 # Agentes no navegador — desenho
 
-Status: **em discussão** (30/10/2026). Nada disto tem código ainda.
+Status: **primeira entrega em código** (30/10/2026): terminal no navegador, Claude Code e shell livre, níveis isolado, leitura e root. O nível motor espera o comando `azimuth`. As três decisões abertas foram fechadas pela recomendação (ver o fim).
 
 O cliente escolhe um agente (Claude Code, OpenClaw, Hermes…) e o usa **dentro do painel, no
 navegador**, com a mesma tela que teria no terminal do computador dele. O agente é um assistente
@@ -107,10 +107,22 @@ descrever o produto. Redação proposta:
 
 ---
 
-## Decisões abertas
+## Decisões (fechadas em 30/10/2026, pela recomendação)
 
-1. **Nível padrão de um agente recém-instalado.** Recomendo **Leitura**: o cliente sobe quando
-   quiser, e o primeiro contato não arrisca nada. Alternativa: perguntar sem pré-seleção.
-2. **A página de IA atual** (pergunta e resposta por API, com proposta em diff): fica como
-   "agente embutido" para quem não tem agente próprio, ou sai do menu?
-3. **Gravar as sessões** (o que passou no terminal, para auditoria), e por quanto tempo.
+1. **Nível padrão: Leitura.** O cliente sobe quando quiser.
+2. **A página de IA** (pergunta e resposta por API) fica, como agente embutido para quem não
+   tem agente próprio.
+3. **As sessões ficam gravadas por 30 dias** (`tmux pipe-pane`, limpas pelo tmpfiles).
+
+## Feito na primeira entrega
+
+- Um usuário Linux por agente (`az-<nome>`): com um usuário só, um agente de leitura poderia
+  escrever o `.bashrc` que um agente com root executaria.
+- Abaixo de root, a unidade roda com `NoNewPrivileges` (o sudo não eleva), `ProtectSystem=strict`
+  e sem enxergar `/etc/fwadmin`, `/var/lib/fwadmin`, `/etc/wireguard` e `/etc/ppp`. Root tira
+  tudo isso e põe uma regra própria no sudoers, validada com `visudo`.
+- O WebSocket não passa pelos middlewares HTTP: ele repete os portões (rede permitida, sessão,
+  `Origin` igual ao host, painel fora do somente leitura). Testado: outro `Origin` ou nenhum
+  dá 403.
+- Testado de ponta a ponta fora do fw: o xterm.js no Chrome mostra a sessão tmux, o teclado
+  chega, o redimensionamento vale, e fechar solta o cliente sem matar a sessão.
