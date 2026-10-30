@@ -17,6 +17,7 @@ aqui, prontas para quando o modo for desligado.
 
 from __future__ import annotations
 
+import difflib
 import ipaddress
 import json
 import os
@@ -36,7 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from fwadmin import acks, db, dismissed, i18n, importer, live, observe, ownership, paths, secretstore, status
+from fwadmin import acks, db, dismissed, i18n, ia, importer, live, observe, ownership, paths, secretstore, status
 from fwadmin.models import (
     BlockedDomain,
     Config,
@@ -120,10 +121,13 @@ READONLY_ALLOWED = {
     "/system/unack",
     "/alerts/clear",
     "/alerts/restore",
+    "/ia/settings",
+    "/ia/ask",
 }
 """POSTs que nao mudam nada no firewall e por isso valem no somente leitura.
-Marcar uma mudanca como intencional, ou dispensar notificacoes, so grava em
-/var/lib/fwadmin."""
+Marcar uma mudanca como intencional, dispensar notificacoes ou configurar e
+perguntar a IA so grava em /var/lib/fwadmin. Salvar a proposta da IA nao esta
+aqui: aquilo e' edicao."""
 
 ALLOW = [
     ipaddress.ip_network(cidr.strip(), strict=False)
@@ -908,17 +912,124 @@ async def storage(request: Request, user: User) -> Response:
     )
 
 
-@app.get("/ia", response_class=HTMLResponse)
-async def ai(request: Request, user: User) -> Response:
+def ai_view(request: Request, **extra: Any) -> HTMLResponse:
+    settings = ia.load()
     return page(
         request,
         "ia.html",
         nav="ai",
         cfg=current(),
-        local=[
-            ("Ollama", status.unit_info("ollama.service", "ollama")),
-        ],
+        settings=settings,
+        has_key=bool(settings.key),
+        providers=ia.PROVIDERS,
+        default_model=ia.ANTHROPIC_DEFAULT_MODEL,
+        local=[("Ollama", status.unit_info("ollama.service", "ollama"))],
+        **extra,
     )
+
+
+@app.get("/ia", response_class=HTMLResponse)
+async def ai(request: Request, user: User) -> Response:
+    return ai_view(request)
+
+
+@app.post("/ia/settings")
+async def ai_settings(request: Request, user: User, fields: Fields) -> Response:
+    old = ia.load()
+    provider = fields.text("provider")
+    if provider not in ia.PROVIDERS:
+        return back("/ia", "provedor desconhecido")
+    base_url = fields.text("base_url")
+    if provider == "openai" and not re.fullmatch(r"https?://[^\s/]+(/\S*)?", base_url):
+        return back("/ia", "o endereço precisa começar com http:// ou https://")
+    key = fields.text("key") or (old.key if provider == old.provider else "")
+    model = fields.text("model") or (ia.ANTHROPIC_DEFAULT_MODEL if provider == "anthropic" else "")
+    ia.save(ia.Settings(provider=provider, base_url=base_url if provider == "openai" else "", model=model, key=key))
+    db.log("ia:configuracao", username=user, address=client_ip(request))
+    return done("/ia", "configuração da IA salva")
+
+
+def ai_context(cfg: Config) -> dict[str, Any]:
+    """O que a IA ve. A config nao tem segredo (senha e chave moram em
+    arquivos a parte); o estado e' o que o painel ja mostra."""
+    snapshot = snap()
+    return {
+        "config": cfg.model_dump(mode="json"),
+        "state": {
+            "alertas": [f"{a['title']} — {a['detail']}".strip(" —") for a in alerts(cfg, snapshot)],
+            "wans": [
+                {"nome": w.name, "link": w.up, "em_uso": w.active, "endereco": w.address}
+                for w in status.wans(cfg)
+            ],
+            "leases_dhcp": [
+                {"nome": l.hostname, "ip": l.ip, "mac": l.mac, "reservado": l.reserved} for l in status.leases(cfg)
+            ],
+            "apply_aguardando_confirmacao": paths.STATE.exists(),
+        },
+    }
+
+
+def _patched(cfg: Config, ops: list[dict[str, Any]]) -> Config:
+    """A config com a proposta aplicada, ja validada pelo modelo."""
+    try:
+        doc = ia.apply_patch(cfg.model_dump(mode="json"), ops)
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError(f"caminho que nao existe na config: {exc}") from exc
+    return Config.model_validate(doc)
+
+
+@app.post("/ia/ask", response_class=HTMLResponse)
+async def ai_ask(request: Request, user: User, fields: Fields) -> Response:
+    question = fields.text("question")[:2000]
+    settings = ia.load()
+    if not question:
+        return back("/ia", "escreva a pergunta")
+    if not settings.ready:
+        return back("/ia", "configure o provedor primeiro")
+    cfg = current()
+    reply = ia.ask(settings, question, ai_context(cfg))
+    db.log("ia:pergunta", username=user, address=client_ip(request), ok=reply.ok)
+    diff, invalid = "", ""
+    if reply.ok and reply.ops:
+        try:
+            proposed = _patched(cfg, reply.ops)
+            diff = "".join(
+                difflib.unified_diff(
+                    dump(cfg).splitlines(keepends=True),
+                    dump(proposed).splitlines(keepends=True),
+                    "config atual", "com a proposta", n=2,
+                )
+            ) or "(a proposta nao muda nada)"
+        except ValidationError as exc:
+            invalid = format_validation_error(exc)
+        except ValueError as exc:
+            invalid = str(exc)
+    return ai_view(
+        request, question=question, reply=reply, diff=diff, invalid=invalid,
+        ops_json=json.dumps(reply.ops, ensure_ascii=False) if reply.ops else "",
+    )
+
+
+@app.post("/ia/propose")
+async def ai_propose(request: Request, user: User, fields: Fields) -> Response:
+    """Transforma a proposta da IA em proposta pendente, como uma edicao a mao.
+
+    As operacoes sao reaplicadas sobre a config de agora, e nao sobre a do
+    momento da pergunta, e passam de novo pelo modelo.
+    """
+    try:
+        ops = json.loads(fields.text("ops") or "[]")
+    except ValueError:
+        return back("/ia", "proposta ilegivel")
+    summary = fields.text("summary")[:80] or "proposta da IA"
+
+    def mutate(cfg: Config) -> None:
+        proposed = _patched(cfg, ops)
+        for name in Config.model_fields:
+            setattr(cfg, name, getattr(proposed, name))
+
+    error = edit(request, mutate, f"ia:{summary}")
+    return back("/system", error) if not error else back("/ia", error)
 
 
 @app.get("/vpn", response_class=HTMLResponse)

@@ -252,6 +252,14 @@ input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
 .steps .n { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 12px; }
 .steps .node:not(:last-child)::after { content: "→"; position: absolute; right: -11px; top: 50%; transform: translateY(-50%); color: var(--faint); font-size: 14px; background: var(--surface-2); line-height: 1; }
 .steps .node.end { border-color: var(--accent-line); background: var(--accent-soft); }
+/* IA: caixa de pergunta, resposta com quebras de linha, diff colorido. */
+textarea.input { height: auto; min-height: 92px; padding: 10px 12px; line-height: 1.45; resize: vertical; }
+.answer { white-space: pre-wrap; line-height: 1.6; }
+.out.diff { border-radius: 0; }
+.out.diff .add { color: #86EFAC; }
+.out.diff .del { color: #FCA5A5; }
+.out.diff .hunk { color: #7DD3FC; }
+
 /* Passos que nao sao sequencia (as pastas do Storage): sem seta. */
 .steps.plain .node::after { content: none; }
 .steps .node.end .n { background: var(--accent); color: #fff; }

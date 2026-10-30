@@ -1,43 +1,90 @@
 {% extends "base.html" %}
-{% from "_icons.html" import actionbar %}
+{% from "_icons.html" import actionbar, icon %}
 {% block title %}{{ t.ai }}{% endblock %}
 {% block body %}
+{% set ro = 'disabled' if readonly else '' %}
 
 <div class="page-h">
   <div><h1>{{ t.ai }}</h1><p class="lede">Pergunte à IA sobre a rede de casa: ela lê a configuração e o estado, explica, e pode propor uma mudança. Quem aplica é você.</p></div>
-  <span class="chip mute lg">em desenho</span>
+  {% if settings.ready %}<span class="chip {{ 'ok' if settings.local else 'info' }} lg">{{ 'local' if settings.local else providers[settings.provider].split(' (')[0] }} · <span class="mono">{{ settings.model }}</span></span>
+  {% else %}<span class="chip mute lg">não configurada</span>{% endif %}
 </div>
 
-<div class="note"><b>A IA propõe, o humano assina</b>Nenhuma resposta muda o firewall. Uma proposta da IA vira um diff na fila de alterações, exatamente como uma edição feita à mão: você revisa em Sistema, aplica, e a prova de função e o rollback valem do mesmo jeito.</div>
+<div class="note"><b>A IA propõe, o humano assina</b>Nenhuma resposta muda o firewall. Uma proposta da IA vira um diff, e só entra na fila de alterações se você clicar; dali em diante é o caminho de sempre, com Aplicar, prova de função e rollback.</div>
 
-<div class="grid tiles">
-  <div class="card tile"><div class="top"><span class="lbl">Sua chave</span><span class="chip mute">BYOK</span></div><span class="big" style="font-size:18px">Claude, Gemini, DeepSeek, Kimi</span><span class="muted">a conta é sua; o painel só guarda a chave, nesta máquina</span></div>
-  <div class="card tile"><div class="top"><span class="lbl">Motor local</span>{% for name, i in local %}{% if i.running %}<span class="chip ok">{{ name }} rodando</span>{% endif %}{% endfor %}</div><span class="big" style="font-size:18px">Ollama · vLLM</span><span class="muted">{% for name, i in local %}{{ name }} {{ 'rodando' if i.running else ('parado' if i.installed else 'não instalado') }}{% endfor %}; nada sai de casa</span></div>
-  <div class="card tile"><div class="top"><span class="lbl">Agentes</span><span class="chip mute">BYOA</span></div><span class="big" style="font-size:18px">leitura e proposta</span><span class="muted">um agente externo verifica a rede, sem aplicar</span></div>
-</div>
+{% if settings.ready %}
+<section class="card" aria-labelledby="h-ask">
+  <div class="card-h"><h2 class="h2" id="h-ask">Pergunte</h2><span class="muted">vai junto: a configuração (sem senhas nem chaves), as WANs, os leases e os alertas</span></div>
+  <form class="addbox" method="post" action="/ia/ask" aria-label="Perguntar">
+    <div class="form-grid" style="grid-template-columns: minmax(0, 1fr)">
+      <div class="field"><label for="q">Pergunta</label>
+        <textarea id="q" class="input" name="question" rows="3" maxlength="2000" required placeholder="Por que a TV não pega IP? · Reserve o 10.0.0.60 para o MAC aa:bb:cc:dd:ee:ff com o nome impressora · O que está exposto para a internet?">{{ question or '' }}</textarea></div>
+      <div class="addbox-go"><button class="btn primary" type="submit">{{ icon('ai', 16) }}Perguntar</button></div>
+    </div>
+  </form>
+</section>
+{% endif %}
 
-<section class="card" aria-labelledby="h-flow">
-  <div class="card-h"><h2 class="h2" id="h-flow">Como uma pergunta anda</h2></div>
-  <ol class="flow steps">
-    <li class="node"><span class="n">1</span><span><b>Você pergunta</b><span class="muted">"por que a TV não pega IP?"</span></span></li>
-    <li class="node"><span class="n">2</span><span><b>O painel junta o contexto</b><span class="muted">config sem segredos, leases, alertas, logs</span></span></li>
-    <li class="node"><span class="n">3</span><span><b>A IA responde</b><span class="muted">explicação e, se for o caso, uma mudança</span></span></li>
-    <li class="node end"><span class="n">4</span><span><b>Você decide</b><span class="muted">a mudança vira proposta; o Aplicar prova</span></span></li>
-  </ol>
+{% if reply %}
+<section class="card" aria-labelledby="h-ans">
+  <div class="card-h"><h2 class="h2" id="h-ans">Resposta</h2>{% if reply.ok %}<span class="muted mono">{{ reply.model }}{% if reply.usage %} · {{ reply.usage }}{% endif %}</span>{% endif %}</div>
+  {% if reply.ok %}
+    <div class="card-b answer">{{ reply.answer }}</div>
+  {% else %}
+    <div class="card-b"><div class="note bad"><b>Não deu</b>{{ reply.error }}</div></div>
+  {% endif %}
+</section>
+
+{% if reply.ok and reply.ops %}
+<section class="card{{ ' warn' if invalid }}" aria-labelledby="h-prop">
+  <div class="card-h"><h2 class="h2" id="h-prop">Proposta</h2><span class="grow">{{ reply.summary }}</span>
+    <span class="chip mute">{{ reply.ops|length }} operaç{{ 'ão' if reply.ops|length == 1 else 'ões' }}</span></div>
+  {% if invalid %}
+    <div class="card-b"><div class="note bad"><b>A proposta não passou no modelo do firewall</b>{{ invalid }}. Ela não pode virar proposta; refaça a pergunta com mais detalhe.</div></div>
+  {% else %}
+    <pre class="out diff">{% for line in diff.splitlines() %}<span class="{{ 'add' if line.startswith('+') and not line.startswith('+++') else ('del' if line.startswith('-') and not line.startswith('---') else ('hunk' if line.startswith('@@') else '')) }}">{{ line }}</span>
+{% endfor %}</pre>
+    <form method="post" action="/ia/propose" class="row" style="margin:0">
+      <input type="hidden" name="ops" value="{{ ops_json }}"><input type="hidden" name="summary" value="{{ reply.summary }}">
+      <span class="grow muted">Salvar põe a mudança na fila, como uma edição feita à mão. Nada vale até o Aplicar em Sistema.</span>
+      <button class="btn primary" type="submit" {% if readonly %}disabled title="Somente leitura"{% endif %}>Salvar como proposta</button>
+    </form>
+  {% endif %}
+</section>
+{% endif %}
+{% endif %}
+
+<section class="card" aria-labelledby="h-cfg">
+  <div class="card-h"><h2 class="h2" id="h-cfg">Provedor</h2><span class="muted">sua chave, ou um motor na sua rede; fica só nesta máquina, em <span class="mono">/var/lib/fwadmin/ia.json</span></span></div>
+  <form class="addbox" method="post" action="/ia/settings" aria-label="Configurar provedor" autocomplete="off">
+    <div class="form-grid">
+      <div class="field"><label for="ia-p">Provedor</label>
+        <select id="ia-p" class="input" name="provider">{% for k, label in providers.items() %}<option value="{{ k }}" {% if settings.provider == k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="ia-m">Modelo</label><input id="ia-m" class="input mono" name="model" value="{{ settings.model }}" placeholder="{{ default_model }} · llama3.1 · deepseek-chat"></div>
+      <div class="field" style="grid-column: span 2"><label for="ia-u">Endereço (só no compatível com OpenAI)</label><input id="ia-u" class="input mono" name="base_url" value="{{ settings.base_url }}" placeholder="http://10.0.0.50:11434/v1 · https://api.deepseek.com/v1"></div>
+      <div class="field" style="grid-column: span 2"><label for="ia-k">Chave</label><input id="ia-k" class="input mono" type="password" name="key" autocomplete="new-password" placeholder="{{ 'guardada · vazio mantém' if has_key else 'sk-… (um Ollama local não pede)' }}"></div>
+      <div class="addbox-go"><button class="btn primary" type="submit">Salvar</button></div>
+    </div>
+  </form>
 </section>
 
 <div class="grid two">
   <section class="card" aria-labelledby="h-out">
     <div class="card-h"><h2 class="h2" id="h-out">O que sai de casa</h2></div>
-    <div class="row"><span class="dot ok"></span><span class="grow">Com motor local, nada: a pergunta e o contexto ficam na LAN.</span></div>
+    <div class="row"><span class="dot ok"></span><span class="grow">Com motor na LAN (Ollama, vLLM), nada: a pergunta e o contexto ficam em casa.{% for name, i in local %} {{ name }} nesta máquina: {{ 'rodando' if i.running else ('parado' if i.installed else 'não instalado') }}.{% endfor %}</span></div>
     <div class="row"><span class="dot warn"></span><span class="grow">Com chave de provedor, a configuração vai junto: IPs, nomes e MACs da rede de casa.</span></div>
     <div class="row"><span class="dot bad"></span><span class="grow">Nunca vão: senha do PPPoE, chaves do WireGuard, a própria chave do provedor.</span></div>
   </section>
-  <section class="card" aria-labelledby="h-todo">
-    <div class="card-h"><h2 class="h2" id="h-todo">Antes do código</h2></div>
-    <div class="card-b"><p>Falta decidir como o painel conversa com os provedores: o SDK oficial de cada um é uma dependência a mais na ISO, e a caixa evita pacote que não vem do Debian. A decisão está aberta com o dono do projeto.</p></div>
+  <section class="card" aria-labelledby="h-flow">
+    <div class="card-h"><h2 class="h2" id="h-flow">Como uma pergunta anda</h2></div>
+    <ol class="list">
+      <li><span class="n">1</span><span>Você pergunta; o painel junta a configuração e o estado.</span></li>
+      <li><span class="n">2</span><span>A IA responde e, se for o caso, propõe operações sobre a configuração.</span></li>
+      <li><span class="n">3</span><span>O painel aplica a proposta numa cópia, valida pelo modelo do firewall e mostra o diff.</span></li>
+      <li><span class="n">4</span><span>Você salva como proposta, revisa em Sistema e aplica. A prova e o rollback valem como sempre.</span></li>
+    </ol>
   </section>
 </div>
 
-{{ actionbar('', readonly, applicable, 'a IA ainda não tem configuração') }}
+{{ actionbar('', readonly, applicable, 'a IA não salva pela barra: use Salvar como proposta') }}
 {% endblock %}
