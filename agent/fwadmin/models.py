@@ -604,6 +604,47 @@ class Masquerade(Base):
         return str(ipaddress.IPv4Network(v, strict=False)) if v else v
 
 
+NFT_TABLE_RE = re.compile(r"^(ip|ip6|inet|arp|bridge|netdev) [A-Za-z_][A-Za-z0-9_-]{0,63}$")
+NFT_DECL_RE = re.compile(r"^type \w+ hook (\w+) priority [^;{}]+; policy (accept|drop);$")
+
+
+class AdminChain(Base):
+    """Uma chain do /etc/nftables.conf que o modelo nao traduz, guardada como
+    estava (NETMAP, snat por mapa, chain de terceiros). Volta ao arquivo tal e
+    qual, linha a linha: o motor nao entende, so carrega."""
+
+    table: Annotated[str, Field(pattern=NFT_TABLE_RE.pattern)]
+    name: Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_-]{0,63}$")]
+    decl: str = ""
+    """'type nat hook prerouting priority dstnat; policy accept;' — vazio em
+    chain comum, que so recebe jump."""
+
+    rules: list[str] = []
+
+    @field_validator("decl")
+    @classmethod
+    def _check_decl(cls, v: str) -> str:
+        if v and not NFT_DECL_RE.match(v):
+            raise ValueError(f"cabecalho de chain invalido: {v!r}")
+        return v
+
+    @field_validator("rules")
+    @classmethod
+    def _check_rules(cls, v: list[str]) -> list[str]:
+        for line in v:
+            # Uma linha por regra, sem fechar o bloco: o arquivo e' montado em
+            # volta delas, e uma chave a mais tiraria a regra da chain.
+            if not line or "\n" in line or line.count("{") != line.count("}") or line.startswith("#"):
+                raise ValueError(f"regra invalida para o arquivo do administrador: {line!r}")
+        return v
+
+    @property
+    def gate(self) -> bool:
+        """Base chain de filtro que derrubaria por padrao o que o motor aceita."""
+        m = NFT_DECL_RE.match(self.decl)
+        return bool(m) and m.group(1) in ("input", "forward") and m.group(2) == "drop"
+
+
 class Firewall(Base):
     """Bloqueia tudo e abre so as excecoes, nas duas cadeias.
 
@@ -632,6 +673,41 @@ class Firewall(Base):
 
     other_interfaces: list[OtherInterface] = []
 
+    absorbed_tables: list[str] = []
+    """Tabelas do /etc/nftables.conf que o motor absorveu. Vazia, o arquivo e'
+    do administrador e o motor nao toca nele. Com algo aqui, o motor passa a
+    escrever o arquivo: apaga cada uma destas tabelas e recria so o que ficou
+    em 'admin_chains'. O original fica no backup do apply que o absorveu.
+
+    Por que absorver: um drop em qualquer tabela e' final, entao um forward com
+    policy drop no arquivo do administrador derruba cada regra e cada
+    port-forward que o painel cadastra, e o painel mostraria ativo o que nao
+    funciona."""
+
+    admin_chains: list[AdminChain] = []
+    """O que sobrou do arquivo do administrador, sem traducao no modelo."""
+
+    @field_validator("absorbed_tables")
+    @classmethod
+    def _check_tables(cls, v: list[str]) -> list[str]:
+        for t in v:
+            if not NFT_TABLE_RE.match(t) or t == "inet azimuth":
+                raise ValueError(f"tabela absorvida invalida: {t!r}")
+        _reject_dups(v, "tabela absorvida repetida")
+        return v
+
+    @model_validator(mode="after")
+    def _admin_coerente(self) -> Firewall:
+        for c in self.admin_chains:
+            if c.table not in self.absorbed_tables:
+                raise ValueError(f"chain {c.table} {c.name} fora das tabelas absorvidas")
+            if c.gate:
+                raise ValueError(
+                    f"chain {c.table} {c.name} com policy drop: derrubaria o que o motor aceita "
+                    "(a politica e' do motor; aqui so policy accept)"
+                )
+        _reject_dups([f"{c.table} {c.name}" for c in self.admin_chains], "chain repetida")
+        return self
 
     @field_validator("input_policy", "forward_policy")
     @classmethod

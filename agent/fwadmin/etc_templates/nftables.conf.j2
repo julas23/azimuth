@@ -1,0 +1,34 @@
+#!/usr/sbin/nft -f
+# ATENCAO: arquivo absorvido pelo Azimuth, gerado a partir de /etc/fwadmin/config.yaml.
+# Edicoes manuais sao perdidas no proximo apply.
+#
+# As regras que estavam aqui e tem traducao no modelo vivem agora na tabela
+# 'inet azimuth' (/etc/nftables.d/azimuth.nft). Fica so o que o modelo nao
+# representa, linha a linha como estava, e nenhuma chain de filtro com policy
+# drop: um drop em qualquer tabela e' final, e derrubaria o que o motor libera.
+#
+# O original esta no backup do apply que o absorveu (/var/lib/fwadmin/backups);
+# o rollback daquele apply o devolve.
+
+{% for table in firewall.absorbed_tables %}
+table {{ table }}
+delete table {{ table }}
+{% endfor %}
+{% for table in firewall.absorbed_tables %}
+{% set chains = firewall.admin_chains | selectattr('table', 'equalto', table) | list %}
+{% if chains %}
+
+table {{ table }} {
+{% for c in chains %}
+    chain {{ c.name }} {
+{% if c.decl %}
+        {{ c.decl }}
+{% endif %}
+{% for rule in c.rules %}
+        {{ rule }}
+{% endfor %}
+    }
+{% endfor %}
+}
+{% endif %}
+{% endfor %}

@@ -313,8 +313,8 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
 
 print("\n== o HP so muda a entrada, que fecha ==")
 cfg, findings, changes = run(ROOT / "legacy" / "live", ROOT / "legacy" / "portal-index.html")
-check("so muda a entrada, de lista negra para lista branca",
-      [c.split(":")[0] for c in changes], ["nftables/input"])
+check("so muda a entrada, de lista negra para lista branca, e absorve o nftables.conf",
+      [c.split(":")[0] for c in changes], ["nftables", "nftables/input"])
 check("failover continua ligado (o pppd abria mao da rota)", cfg.routing.failover.enabled, True)
 check("as duas regras por WAN viram uma so",
       [(r.source.value, r.destination.value) for r in cfg.firewall.forward_rules],
@@ -404,6 +404,96 @@ check("domain-insecure do encaminhado nao e' sobra", r["enabled"], True)
 
 r, _, _ = build_resolver(unbound_live({}))
 check("so arquivos do pacote: nada a trazer", r, None)
+
+# --- port-forward contra o forward do administrador -----------------------
+from fwadmin import importer, live as livemod  # noqa: E402
+from fwadmin.models import PortForward  # noqa: E402
+
+wan = cfg.wans[0]
+gate = livemod.Snapshot(forward_gates={"inet filter": [importer.expand_defines(r, {"WAN": [wan.ppp_device]}) for r in (
+    "ct state established,related accept",
+    f'iifname "{cfg.lan.ppp_device}" oifname $WAN counter accept comment "LAN sai"',
+    f'iifname "{wan.ppp_device}" oifname "{cfg.lan.ppp_device}" ip daddr 10.0.0.102 tcp dport 8096 ct status dnat counter accept',
+)]})
+pf_ok = PortForward(interface=wan.name, wan_port=23578, to_ip="10.0.0.102", to_port=8096)
+pf_novo = PortForward(interface=wan.name, wan_port=60000, to_ip="10.0.0.105", to_port=3000, description="QLogic")
+check("port-forward com accept no arquivo do administrador passa", livemod.blocked_by(cfg, gate, pf_ok), [])
+check("port-forward novo morre no forward do administrador", livemod.blocked_by(cfg, gate, pf_novo), ["inet filter"])
+gate.forward_gates["inet filter"] += livemod.gate_rules(cfg, pf_novo)
+check("e a linha sugerida resolve", livemod.blocked_by(cfg, gate, pf_novo), [])
+pf_udp = PortForward(interface=wan.name, proto="tcp/udp", wan_port=5000, to_ip="10.0.0.0", to_port=5000)
+gate.forward_gates["inet filter"].append(
+    importer.expand_defines("iifname $WAN ip daddr 10.0.0.0/24 tcp dport { 4000-6000 } accept", {"WAN": [wan.ppp_device]})
+)
+check("faixa de portas e rede inteira valem", livemod.blocked_by(cfg, gate, pf_udp.model_copy(update={"proto": "tcp"})), [])
+check("tcp/udp com so o tcp liberado continua barrado", livemod.blocked_by(cfg, gate, pf_udp), ["inet filter"])
+
+# --- absorcao do /etc/nftables.conf ---------------------------------------
+print("\n== nftables.conf absorvido: so a sobra, sem policy drop ==")
+from fwadmin.importer import build_firewall, parse_nft  # noqa: E402
+from fwadmin.models import AdminChain  # noqa: E402
+
+ADMIN_NFT = """#!/usr/sbin/nft -f
+table inet filter
+delete table inet filter
+table ip nat
+delete table ip nat
+define WAN = { "ppp0" }
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy accept;
+        iifname $WAN tcp dport 22 counter drop comment "SSH so LAN"
+    }
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+        ct state established,related accept
+        iifname "ens18" oifname $WAN counter accept comment "LAN sai"
+        iifname "ppp0" ip saddr 1.2.3.4 drop
+    }
+}
+table ip nat {
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+        iifname "wgvps" ip daddr 10.91.0.0/24 dnat ip prefix to ip daddr map { 10.91.0.0/24 : 10.0.0.0/24 } comment "NETMAP"
+        iifname "ppp0" tcp dport 23578 counter dnat to 10.0.0.102:8096 comment "Jellyfin"
+    }
+    chain postrouting {
+        type nat hook postrouting priority 100; policy accept;
+        oifname "ppp0" masquerade comment "NAT"
+    }
+}
+"""
+fw = build_firewall(parse_nft(ADMIN_NFT), "ens18", {"ppp0": "wan_vivo"}, None, ["wgvps"])
+check("as duas tabelas do arquivo sao absorvidas", fw["absorbed_tables"], ["inet filter", "ip nat"])
+check("sobra so o que nao tem traducao",
+      [(c["table"], c["name"], c["rules"]) for c in fw["admin_chains"]],
+      [("inet filter", "forward", ['iifname "ppp0" ip saddr 1.2.3.4 drop']),
+       ("ip nat", "prerouting", ['iifname "wgvps" ip daddr 10.91.0.0/24 dnat ip prefix to ip daddr map { 10.91.0.0/24 : 10.0.0.0/24 } comment "NETMAP"'])])
+check("o forward que sobra perde o policy drop", fw["admin_chains"][0]["decl"].endswith("policy accept;"), True)
+
+absorvido = cfg.model_copy(deep=True)
+absorvido.firewall.absorbed_tables = fw["absorbed_tables"]
+absorvido.firewall.admin_chains = [AdminChain(**c) for c in fw["admin_chains"]]
+absorvido = Config.model_validate(absorvido.model_dump(mode="json"))
+texto = render_all(absorvido)["nftables.conf"]
+check("o arquivo gerado apaga as duas tabelas", ("delete table inet filter" in texto, "delete table ip nat" in texto), (True, True))
+check("e nao tem policy drop nenhum", "policy drop" in texto, False)
+volta = build_firewall(parse_nft(texto), "ens18", {"ppp0": "wan_vivo"}, None, ["wgvps"])
+check("reimportar o gerado da a mesma sobra", (volta["absorbed_tables"], volta["admin_chains"]), (fw["absorbed_tables"], fw["admin_chains"]))
+check("sem absorcao o motor nao escreve o arquivo", "nftables.conf" in render_all(cfg.model_copy(update={"firewall": cfg.firewall.model_copy(update={"absorbed_tables": [], "admin_chains": []})})), False)
+try:
+    AdminChain(table="inet filter", name="forward", decl="type filter hook forward priority 0; policy accept;", rules=["accept }"])
+    recusou = False
+except ValidationError:
+    recusou = True
+check("regra que fecharia o bloco e' recusada", recusou, True)
+try:
+    Config.model_validate(absorvido.model_dump(mode="json") | {"firewall": absorvido.firewall.model_dump(mode="json") | {"admin_chains": [
+        {"table": "inet filter", "name": "forward", "decl": "type filter hook forward priority 0; policy drop;", "rules": []}]}})
+    recusou = False
+except ValidationError:
+    recusou = True
+check("chain de forward com policy drop e' recusada", recusou, True)
 
 print(f"\n\033[1m{pass_n} passaram, {fail_n} falharam\033[0m")
 sys.exit(1 if fail_n else 0)

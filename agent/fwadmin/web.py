@@ -46,9 +46,11 @@ from pydantic import ValidationError
 
 from fwadmin import acks, agentes, db, dismissed, i18n, ia, importer, live, observe, ownership, paths, secretstore, status
 from fwadmin.models import (
+    AdminChain,
     BlockedDomain,
     Config,
     Failover,
+    Firewall,
     Forwarder,
     ForwardZone,
     Host,
@@ -550,6 +552,19 @@ def alerts(cfg: Config, snapshot: live.Snapshot) -> list[dict[str, str]]:
                 "href": "/domain",
             }
         )
+    for block in blocked_forwards(cfg, snapshot).values():
+        pf = block["pf"]
+        out.append(
+            {
+                "level": "bad",
+                "title": f"Redirecionamento da porta {pf.wan_port} não passa",
+                "detail": (
+                    f"o forward de {', '.join(block['tables'])} no /etc/nftables.conf derruba "
+                    f"o tráfego para {pf.to_ip}:{pf.to_port}; absorva o arquivo no Firewall"
+                ),
+                "href": "/firewall#h-nft",
+            }
+        )
     if snapshot.missing:
         out.append(
             {
@@ -634,6 +649,63 @@ def domain_conflicts(cfg: Config) -> list[dict[str, str]]:
                 }
             )
     return out
+
+
+def blocked_forwards(cfg: Config, snapshot: live.Snapshot) -> dict[int, dict[str, Any]]:
+    """Port-forward ativo que o forward de outra tabela derruba, por indice."""
+    out = {}
+    for ix, pf in enumerate(cfg.firewall.port_forwards):
+        if not pf.enabled:
+            continue
+        try:
+            tables = live.blocked_by(cfg, snapshot, pf)
+        except KeyError:
+            continue  # WAN ou LAN que o modelo nao tem: o validador do apply ja reclama
+        if tables:
+            out[ix] = {"pf": pf, "tables": tables, "lines": live.gate_rules(cfg, pf)}
+    return out
+
+
+def nft_absorption(cfg: Config) -> dict[str, Any] | None:
+    """O que absorver o /etc/nftables.conf vivo faria, para a tela mostrar
+    antes do clique e a rota aplicar. None: nada a absorver.
+
+    O mesmo tradutor da adocao, com os devices do modelo atual. A sobra vira
+    'admin_chains'; o que tem traducao sai do arquivo, entao precisa estar no
+    modelo: regra posta a mao no arquivo depois da adocao, e que o modelo nao
+    tem, sumiria em silencio. Essa vai em 'missing' e trava a absorcao.
+    """
+    try:
+        nft = importer.parse_nft((observe.LIVE / "nftables.conf").read_text())
+    except OSError:
+        return None
+    fw = cfg.firewall
+    imported = importer.build_firewall(
+        nft,
+        cfg.lan.device,
+        {w.ppp_device: w.name for w in cfg.wans},
+        cfg.wireguard.device if cfg.wireguard.enabled else None,
+        [o.device for o in fw.other_interfaces],
+    )
+    if not imported["absorbed_tables"] or (
+        imported["absorbed_tables"] == fw.absorbed_tables
+        and imported["admin_chains"] == [c.model_dump() for c in fw.admin_chains]
+    ):
+        return None
+    model = Firewall.model_validate(imported)
+    missing = [
+        f"{kind}: {item.description or item}"
+        for kind, field in (
+            ("entrada", "input_rules"),
+            ("encaminhamento", "forward_rules"),
+            ("redirecionamento", "port_forwards"),
+            ("NAT", "masquerade_rules"),
+        )
+        for item in getattr(model, field)
+        if item not in getattr(fw, field)
+    ]
+    missing += [f"NAT: mascaramento em {m}" for m in model.masquerade if m not in fw.masquerade]
+    return {"tables": model.absorbed_tables, "chains": model.admin_chains, "missing": missing}
 
 
 STALE_PEER = 3 * 86400
@@ -831,6 +903,8 @@ async def firewall(request: Request, user: User) -> Response:
         cfg=cfg,
         base=base_input(cfg),
         live_policy=snap().policies if READONLY else {},
+        blocked=blocked_forwards(cfg, snap()),
+        absorption=None if READONLY else nft_absorption(cfg),
     )
 
 
@@ -1936,6 +2010,31 @@ async def toggle_peer(request: Request, user: User, name: str) -> Response:
 # ---------------------------------------------------------------------------
 # firewall
 # ---------------------------------------------------------------------------
+
+
+@app.post("/firewall/nftables/adopt")
+async def adopt_nftables(request: Request, user: User) -> Response:
+    """Absorve o /etc/nftables.conf: o motor passa a escreve-lo, so com a sobra.
+
+    Vira proposta como qualquer edicao: o diff do Sistema mostra o arquivo
+    encolhendo, o Aplicar prova que a tabela antiga saiu do ruleset, e o
+    rollback devolve o original do backup.
+    """
+
+    def mutate(cfg: Config) -> None:
+        plan = nft_absorption(cfg)
+        if plan is None:
+            raise ValueError("nada a absorver: o /etc/nftables.conf nao foi lido ou ja e' do motor")
+        if plan["missing"]:
+            raise ValueError(
+                "o arquivo tem regras que o modelo nao tem, e elas sumiriam: "
+                + "; ".join(plan["missing"])
+                + ". Cadastre-as no painel antes"
+            )
+        cfg.firewall.absorbed_tables = plan["tables"]
+        cfg.firewall.admin_chains = [AdminChain.model_validate(c.model_dump()) for c in plan["chains"]]
+
+    return back("/firewall", edit(request, mutate, "nftables:absorcao"))
 
 
 @app.post("/firewall/policy")

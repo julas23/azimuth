@@ -8,6 +8,7 @@ se assumisse a maquina: o dry-run antes de existir qualquer acao.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import time
@@ -18,7 +19,7 @@ from typing import Any, Callable
 from pydantic import ValidationError
 
 from fwadmin import importer, observe, paths
-from fwadmin.models import Config
+from fwadmin.models import Config, PortForward
 
 TTL = 20
 """Segundos que uma fotografia vale antes de pedir outra ao fwctl."""
@@ -45,6 +46,12 @@ class Snapshot:
     """Politica viva de input e forward do 'inet filter'. O modelo so tem
     'drop'; isto e' o que a maquina faz de fato, para o painel nao mostrar
     fechado o que esta aberto."""
+
+    forward_gates: dict[str, list[str]] = field(default_factory=dict)
+    """Cadeias de forward com policy drop fora da tabela do motor, por tabela,
+    com as regras ja com os defines trocados. Um drop numa delas e' final:
+    o port-forward que o motor aceita morre ali se nenhuma regra o deixar
+    passar."""
 
     @property
     def age(self) -> int:
@@ -108,6 +115,11 @@ def _load(taken_at: float) -> Snapshot:
             for (table, chain), body in nft["chains"].items()
             if table == "inet filter" and chain in ("input", "forward")
         }
+        snap.forward_gates = {
+            table: [importer.expand_defines(rule, nft["defines"]) for rule in body["rules"]]
+            for (table, chain), body in nft["chains"].items()
+            if body["hook"] == "forward" and body["policy"] == "drop" and table != "inet azimuth"
+        }
     except OSError:
         pass
     try:
@@ -119,6 +131,77 @@ def _load(taken_at: float) -> Snapshot:
     except (OSError, KeyError, IndexError, ValueError) as exc:
         snap.error = f"o importador nao conseguiu ler a config viva: {type(exc).__name__}: {exc}"
     return snap
+
+
+GATE_RULE = re.compile(
+    r'^(?:iifname (?P<iif>\{[^}]*\}|"[^"]+") )?'
+    r'(?:oifname (?P<oif>\{[^}]*\}|"[^"]+") )?'
+    r"(?:ip daddr (?P<daddr>[\d./]+) )?"
+    r"(?:(?P<proto>tcp|udp) dport (?P<ports>\{[^}]*\}|\d+(?:-\d+)?) )?"
+    r"(?:ct status dnat )?"
+    rf"{importer.COUNTER}?accept" + importer.COMMENT + "$"
+)
+"""Regra de accept que o port-forward pode atravessar. Origem, ct state e o
+que mais fugir daqui nao contam: na duvida, a regra nao deixa passar."""
+
+
+def _in_spec(value: str, spec: str | None) -> bool:
+    return spec is None or value in re.findall(r'"([^"]+)"', spec)
+
+
+def _port_in(port: int, spec: str | None) -> bool:
+    if spec is None:
+        return True
+    for part in importer.nft_ports(spec).split(","):
+        lo, _, hi = part.partition("-")
+        if int(lo) <= port <= int(hi or lo):
+            return True
+    return False
+
+
+def _passes(rules: list[str], iif: str, oif: str, ip: str, proto: str, port: int) -> bool:
+    for rule in rules:
+        m = GATE_RULE.match(rule)
+        if (
+            m
+            and _in_spec(iif, m["iif"])
+            and _in_spec(oif, m["oif"])
+            and (m["daddr"] is None or ipaddress.ip_address(ip) in ipaddress.ip_network(m["daddr"], strict=False))
+            and (m["proto"] is None or (m["proto"] == proto and _port_in(port, m["ports"])))
+        ):
+            return True
+    return False
+
+
+def _protos(pf: PortForward) -> list[str]:
+    return ["tcp", "udp"] if pf.proto == "tcp/udp" else [pf.proto]
+
+
+def blocked_by(cfg: Config, snap: Snapshot, pf: PortForward) -> list[str]:
+    """As tabelas de fora cujo forward derruba este port-forward.
+
+    O motor publica o DNAT e o accept na tabela dele, mas o pacote passa por
+    todas as cadeias-base do gancho: se o /etc/nftables.conf do administrador
+    tem forward com policy drop e nenhuma regra que deixe passar, o
+    redirecionamento aparece ativo no painel e nao funciona.
+    """
+    iif = cfg.iface(pf.interface).ppp_device
+    oif = cfg.lan.ppp_device
+    return [
+        table
+        for table, rules in snap.forward_gates.items()
+        if not all(_passes(rules, iif, oif, pf.to_ip, p, pf.to_port) for p in _protos(pf))
+    ]
+
+
+def gate_rules(cfg: Config, pf: PortForward) -> list[str]:
+    """As linhas que faltam no forward do administrador para este port-forward."""
+    return [
+        f'iifname "{cfg.iface(pf.interface).ppp_device}" oifname "{cfg.lan.ppp_device}" '
+        f"ip daddr {pf.to_ip} {proto} dport {pf.to_port} ct status dnat counter accept "
+        f'comment "{pf.description or pf.wan_port}"'
+        for proto in _protos(pf)
+    ]
 
 
 # ---------------------------------------------------------------------------

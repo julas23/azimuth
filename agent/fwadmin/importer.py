@@ -165,23 +165,29 @@ def parse_nft(text: str) -> dict[str, Any]:
     chain por bloco. O que fugir disso cai como regra nao reconhecida e vira
     mudanca no relatorio — nunca some.
     """
-    out: dict[str, Any] = {"defines": {}, "chains": {}}
+    out: dict[str, Any] = {"defines": {}, "chains": {}, "tables": []}
     table = chain = None
+
+    def seen(name: str) -> None:
+        if name not in out["tables"]:
+            out["tables"].append(name)
+
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         if m := re.match(r"define (\w+) = (.+)$", line):
             out["defines"][m.group(1)] = re.findall(r'"([^"]+)"', m.group(2))
-        elif re.match(r"(delete )?table \S+ \S+$", line):
-            continue  # o recria-e-apaga do topo, que o template tambem escreve
+        elif m := re.match(r"(?:delete )?table (\S+ \S+)$", line):
+            seen(m.group(1))  # o recria-e-apaga do topo, que o template tambem escreve
         elif m := re.match(r"table (\S+) (\S+) \{$", line):
             table = f"{m.group(1)} {m.group(2)}"
+            seen(table)
         elif m := re.match(r"chain (\S+) \{$", line):
             chain = m.group(1)
-            out["chains"][(table, chain)] = {"hook": None, "policy": None, "rules": []}
+            out["chains"][(table, chain)] = {"hook": None, "policy": None, "decl": "", "rules": []}
         elif m := re.match(r"type \w+ hook (\w+) priority [^;]+; policy (\w+);$", line):
-            out["chains"][(table, chain)].update(hook=m.group(1), policy=m.group(2))
+            out["chains"][(table, chain)].update(hook=m.group(1), policy=m.group(2), decl=line)
         elif line == "}":
             if chain:
                 chain = None
@@ -224,6 +230,15 @@ FORWARD_FIXED = {
     "tcp flags syn tcp option maxseg size set rt mtu",
 }
 """O template escreve estas duas no topo da forward; nao viram regra do modelo."""
+
+
+def expand_defines(rule: str, defines: dict[str, list[str]]) -> str:
+    """'$WAN' -> '{ "ppp0", "ens17" }', como o nft faria."""
+    return re.sub(
+        r"\$(\w+)",
+        lambda m: "{ " + ", ".join(f'"{d}"' for d in defines.get(m.group(1), [])) + " }",
+        rule,
+    )
 
 
 def nft_ports(spec: str) -> str:
@@ -809,20 +824,30 @@ def build_firewall(
         return [line for line in out if line]
 
     chains = nft["chains"]
+    order = list(chains)
+    decls = {key: body.get("decl", "") for key, body in chains.items()}
+    leftover: dict[tuple[str, str], list[str]] = {}
+
+    def keep(key: tuple[str, str], line: str) -> None:
+        """Sem traducao: a linha volta ao arquivo do administrador como estava."""
+        leftover.setdefault(key, []).append(expand_defines(line, nft["defines"]))
+
     filter_input = chains.pop(("inet filter", "input"), {"policy": "accept", "rules": []})
     filter_forward = chains.pop(("inet filter", "forward"), {"policy": "drop", "rules": []})
     prerouting = chains.pop(("ip nat", "prerouting"), {"rules": []})
     postrouting = chains.pop(("ip nat", "postrouting"), {"rules": []})
     for (table, chain), body in chains.items():
+        leftover[(table, chain)] = [expand_defines(r, nft["defines"]) for r in body["rules"]]
         note(
             f"nftables: chain '{chain}' da tabela '{table}' fica no arquivo do administrador "
-            f"({len(body['rules'])} regras); o motor so escreve a propria tabela"
+            f"({len(body['rules'])} regras), como esta"
         )
 
     port_forwards = []
     for line in prerouting["rules"]:
         m = NFT_DNAT.match(line)
         if not m or m.group("dev") not in wan_by_dev:
+            keep(("ip nat", "prerouting"), line)
             note(f"nftables/prerouting: regra sem traducao fica no arquivo do administrador e continua valendo: {line}")
             continue
         port_forwards.append(
@@ -847,6 +872,7 @@ def build_firewall(
             continue
         rule = to_rule(line, "input")
         if rule is None:
+            keep(("inet filter", "input"), line)
             change(
                 f"nftables/input: regra sem traducao fica no arquivo do administrador, mas o que ela "
                 f"libera passa a ser barrado pela entrada fechada do motor: {line}"
@@ -872,6 +898,7 @@ def build_firewall(
                 continue
         rule = to_rule(line, "forward")
         if rule is None:
+            keep(("inet filter", "forward"), line)
             if re.search(r"\b(drop|reject)\b", line):
                 note(f"nftables/forward: bloqueio sem traducao fica no arquivo do administrador e continua valendo: {line}")
             else:
@@ -892,6 +919,7 @@ def build_firewall(
         dev = m.group("dev") if m else None
         target = wan_by_dev.get(dev) or other_by_dev.get(dev) if dev else None
         if not target:
+            keep(("ip nat", "postrouting"), line)
             note(f"nftables/postrouting: regra sem traducao fica no arquivo do administrador e continua valendo: {line}")
             continue
         masquerade_rules.append(
@@ -921,11 +949,25 @@ def build_firewall(
                 "aberta; virou uma excecao explicita e larga — vale restringir a porta"
             )
 
-    note(
-        "nftables: o motor escreve so a tabela 'inet azimuth'; o /etc/nftables.conf fica como "
-        "esta e vale junto. Liberacao dele nao fura a lista branca do motor (drop em qualquer "
-        "tabela e' final); bloqueio e NAT dele continuam valendo"
-    )
+    admin_chains = []
+    for table, chain in order:
+        rules = leftover.get((table, chain))
+        if rules is None:
+            continue  # uma das quatro chains traduzidas, sem sobra: sai inteira
+        decl = decls[(table, chain)]
+        if re.search(r"hook (input|forward) ", decl) and decl.endswith("policy drop;"):
+            # A politica e' da chain do motor. Aqui ela so derrubaria o que o
+            # motor aceita; os drops explicitos que sobraram continuam valendo.
+            decl = decl[: -len("drop;")] + "accept;"
+            note(f"nftables: a chain '{chain}' da tabela '{table}' fica com policy accept; quem bloqueia por padrao e' o motor")
+        admin_chains.append({"table": table, "name": chain, "decl": decl, "rules": rules})
+    absorbed_tables = [t for t in nft.get("tables", []) if t != "inet azimuth"]
+    if absorbed_tables:
+        change(
+            "nftables: o /etc/nftables.conf e' absorvido — o motor passa a escrever o arquivo, com "
+            f"so as {len(admin_chains)} chains sem traducao (o original vai para o backup do apply). "
+            "Sem isso, o forward com policy drop do arquivo derrubaria tudo o que o painel libera"
+        )
     for chain, body in (("input", filter_input), ("forward", filter_forward)):
         if (body.get("policy") or "accept") != "drop":
             change(
@@ -952,6 +994,8 @@ def build_firewall(
             {"name": name, "device": dev, "description": "tunel WireGuard fora do modelo"}
             for dev, name in other_by_dev.items()
         ],
+        "absorbed_tables": absorbed_tables,
+        "admin_chains": admin_chains,
     }
 
 

@@ -117,9 +117,12 @@
           <td class="mono">{{ pf.proto }}</td>
           <td class="mono">{{ pf.source_filter or 'qualquer' }}</td>
           <td>{{ pf.description }}</td>
-          <td>{% if pf.enabled %}<span class="chip ok">ativo</span>{% else %}<span class="chip mute">desativado</span>{% endif %}</td>
+          <td>{% if loop.index0 in blocked %}<span class="chip bad" title="derrubado pelo forward de {{ blocked[loop.index0].tables|join(', ') }}">bloqueado</span>{% elif pf.enabled %}<span class="chip ok">ativo</span>{% else %}<span class="chip mute">desativado</span>{% endif %}</td>
           <td>{{ rowactions('/firewall/forward/' ~ loop.index0, pf.enabled, '?editar=pf:' ~ loop.index0 ~ '#f-pf', readonly) }}</td>
         </tr>
+        {% if loop.index0 in blocked %}
+        <tr class="sub"><td colspan="8" class="muted">O DNAT e o accept estão na tabela do motor, mas o pacote também passa pelo forward de <b>{{ blocked[loop.index0].tables|join(', ') }}</b> no <span class="mono">/etc/nftables.conf</span>, que tem policy drop e não deixa passar. Acrescente lá, na cadeia forward, e recarregue o nftables:<pre class="mono">{{ blocked[loop.index0].lines|join('\n') }}</pre></td></tr>
+        {% endif %}
       {% else %}
         <tr><td colspan="8" class="muted">Nenhuma porta aberta para dentro.</td></tr>
       {% endfor %}
@@ -134,7 +137,33 @@
   {% for m in fw.masquerade_rules %}
     <div class="row"><span class="grow">Sai por <span class="mono">{{ m.interface }}</span>{% if m.source %} vindo de <span class="mono">{{ m.source }}</span>{% endif %} com o IP de <span class="mono">{{ m.interface }}</span></span><span class="muted">{{ m.description }}</span></div>
   {% endfor %}
-  <div class="row muted">O motor escreve só a tabela <span class="mono">inet azimuth</span>, em <span class="mono">/etc/nftables.d/azimuth.nft</span>. O <span class="mono">/etc/nftables.conf</span> e a tabela do fail2ban são de quem os escreveu e continuam valendo junto.</div>
+</section>
+
+<section class="card" aria-labelledby="h-nft">
+  <div class="card-h"><h2 class="h2" id="h-nft">Arquivo do administrador</h2><span class="muted mono">/etc/nftables.conf</span>{% if fw.absorbed_tables %}<span class="chip ok">{{ "seria absorvido" if readonly else "absorvido" }}</span>{% endif %}</div>
+  {% if fw.absorbed_tables %}
+    <div class="row"><span class="grow">O motor escreve o arquivo. Apaga {{ fw.absorbed_tables|join(', ') }} e recria só o que o modelo não traduz:</span></div>
+    {% for c in fw.admin_chains %}
+      <div class="row"><span class="grow mono">{{ c.table }} · {{ c.name }}</span><span class="muted">{{ c.rules|length }} regra{{ 's' if c.rules|length != 1 }}, como estava{{ 'm' if c.rules|length != 1 }}</span></div>
+    {% endfor %}
+  {% else %}
+    <div class="row"><span class="grow">O motor escreve a tabela <span class="mono">inet azimuth</span>, em <span class="mono">/etc/nftables.d/azimuth.nft</span>. O <span class="mono">/etc/nftables.conf</span> é de quem o escreveu e vale junto, e um drop dele é final: o que o painel libera e ele derruba não passa.</span></div>
+  {% endif %}
+  {% if absorption %}
+    <div class="row"><span class="grow">Absorver o arquivo tira dele tudo o que já está no modelo e deixa só o resto, sem policy drop. Fica:</span></div>
+    {% for c in absorption.chains %}
+      <div class="row"><span class="grow mono">{{ c.table }} · {{ c.name }}</span><span class="muted">{{ c.rules|length }} regra{{ 's' if c.rules|length != 1 }}</span></div>
+    {% else %}
+      <div class="row muted">nada: o arquivo inteiro tem tradução</div>
+    {% endfor %}
+    {% if absorption.missing %}
+      <div class="note warn"><b>Não dá para absorver agora</b>O arquivo tem regras que o modelo não tem, e elas sumiriam: {{ absorption.missing|join('; ') }}. Cadastre-as acima antes.</div>
+    {% else %}
+      <div class="row"><span class="grow">Vira proposta como qualquer edição: o diff aparece em <a href="/system">Sistema</a>, e o rollback devolve o original.</span>
+      <form method="post" action="/firewall/nftables/adopt" style="margin:0"><button class="btn primary" type="submit" {% if readonly %}disabled title="Somente leitura"{% endif %}>{{ icon('plus', 16) }}Absorver o arquivo</button></form></div>
+    {% endif %}
+  {% endif %}
+  <div class="row muted">A tabela do fail2ban não mora em arquivo e continua de quem a escreve.</div>
 </section>
 
 <section class="card" aria-labelledby="h-zones">

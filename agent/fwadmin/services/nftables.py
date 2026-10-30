@@ -1,9 +1,10 @@
 """Firewall, NAT e isolamento entre zonas.
 
-O motor e' dono so da tabela 'inet azimuth', num arquivo proprio carregado
-pela unidade azimuth-nftables.service. O /etc/nftables.conf e' do
-administrador e nunca e' escrito: o que o modelo nao representa (NETMAP,
-tabela do fail2ban) continua la, funcionando.
+O motor e' dono da tabela 'inet azimuth', num arquivo proprio carregado pela
+unidade azimuth-nftables.service. O /etc/nftables.conf e' do administrador
+ate ser absorvido (firewall.absorbed_tables): dai o motor tambem o escreve,
+so com o que o modelo nao representa (NETMAP, snat por mapa). A tabela do
+fail2ban nao mora em arquivo nenhum e nunca e' tocada.
 """
 
 from __future__ import annotations
@@ -17,6 +18,9 @@ from fwadmin.services.base import Prova, Reload, ServiceModule
 FILE = "azimuth.nft"
 PATH = "/etc/nftables.d/azimuth.nft"
 UNIT = "azimuth-nftables.service"
+
+ADMIN = "nftables.conf"
+ADMIN_PATH = "/etc/nftables.conf"
 
 TABELAS = ("table inet azimuth",)
 
@@ -36,7 +40,10 @@ def _own_table(ruleset: str) -> str:
 
 
 def targets(cfg: Config) -> dict[str, str]:
-    return {FILE: PATH}
+    out = {FILE: PATH}
+    if cfg.firewall.absorbed_tables:
+        out[ADMIN] = ADMIN_PATH
+    return out
 
 
 def units(cfg: Config) -> frozenset[str]:
@@ -51,12 +58,24 @@ def _reload() -> Reload:
     return Reload("firewall (tabela inet azimuth)", ["systemctl", "restart", UNIT])
 
 
+def _reload_admin() -> Reload:
+    """'nft -f' do arquivo, que e' o ExecReload do nftables.service. Nunca o
+    restart: o ExecStop dele e' 'flush ruleset', que levaria junto a tabela do
+    motor e a do fail2ban."""
+    return Reload("firewall (/etc/nftables.conf)", ["nft", "-f", str(paths.sys_path(ADMIN_PATH))])
+
+
+def _ours(files: list[str]) -> list[Reload]:
+    out = [_reload_admin()] if ADMIN in files else []
+    return out + ([_reload()] if FILE in files else [])
+
+
 def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Reload]:
-    return [_reload()] if FILE in changed else []
+    return _ours(changed)
 
 
 def rollback(cfg: Config | None, files: list[str]) -> list[Reload]:
-    return [_reload()] if FILE in files else []
+    return _ours(files)
 
 
 def probe(cfg: Config, previous: Config | None, changed: list[str]) -> Prova | None:
@@ -66,7 +85,7 @@ def probe(cfg: Config, previous: Config | None, changed: list[str]) -> Prova | N
     arquivo carrega e a tabela que importa foi apagada por outro processo
     entre o carregamento e agora.
     """
-    if FILE not in changed:
+    if FILE not in changed and ADMIN not in changed:
         return None
 
     esperado = "tabelas proprias no ruleset e politica de input declarada"
@@ -84,6 +103,13 @@ def probe(cfg: Config, previous: Config | None, changed: list[str]) -> Prova | N
         return Prova.falhou(
             "nftables", esperado, f"politica de input e' '{achada.group(1)}', declarada '{declarada}'"
         )
+
+    # Absorvido, tabela sem nada que sobrou tem de ter saido do ruleset: se
+    # ficou, o arquivo antigo ainda vale e o forward dele ainda derruba.
+    vazias = {t for t in cfg.firewall.absorbed_tables} - {c.table for c in cfg.firewall.admin_chains}
+    ficaram = [t for t in sorted(vazias) if f"table {t} {{" in ruleset]
+    if ficaram:
+        return Prova.falhou("nftables", esperado, f"absorvida e ainda no ruleset: {', '.join(ficaram)}")
 
     observado = f"{', '.join(TABELAS)} presentes"
     if achada:
