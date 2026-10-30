@@ -222,6 +222,17 @@ input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
 .flow .node { padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
 .flow .arrow { color: var(--faint); }
 
+/* DNS: o caminho da consulta em passos numerados, ligados por uma linha. */
+.steps { list-style: none; margin: 0; display: grid; align-items: stretch; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.steps .node { position: relative; display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; background: var(--surface); box-shadow: var(--shadow); }
+.steps .node > span:last-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.steps .node .muted { font-size: 12.5px; }
+.steps .n { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-weight: 700; font-size: 12px; }
+.steps .node:not(:last-child)::after { content: "→"; position: absolute; right: -11px; top: 50%; transform: translateY(-50%); color: var(--faint); font-size: 14px; background: var(--surface-2); line-height: 1; }
+.steps .node.end { border-color: var(--accent-line); background: var(--accent-soft); }
+.steps .node.end .n { background: var(--accent); color: #fff; }
+.empty .dot { margin-right: 6px; vertical-align: middle; }
+
 /* --- entrar ---------------------------------------------------------- */
 
 .center { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px 16px; }

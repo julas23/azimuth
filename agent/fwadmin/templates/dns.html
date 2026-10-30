@@ -18,12 +18,12 @@
 
 <section class="card" aria-labelledby="h-flow">
   <div class="card-h"><h2 class="h2" id="h-flow">Caminho de uma consulta</h2></div>
-  <div class="flow">
-    <span class="node">aparelho da LAN</span><span class="arrow">→</span>
-    <span class="node">dnsmasq <span class="mono muted">{{ cfg.lan.ipv4.ip }}:53</span></span><span class="arrow">→</span>
-    <span class="node">unbound <span class="mono muted">{{ opt('interface') }}</span></span><span class="arrow">→</span>
-    <span class="node">{% if fwd %}{{ fwd|map(attribute='forward-addr')|map('join', ', ')|join('; ') }}{% else %}servidores raiz{% endif %}</span>
-  </div>
+  <ol class="flow steps">
+    <li class="node"><span class="n">1</span><span><b>Aparelho da LAN</b><span class="muted">pergunta um nome</span></span></li>
+    <li class="node"><span class="n">2</span><span><b>dnsmasq</b><span class="mono muted">{{ cfg.lan.ipv4.ip }}:53 · nomes de casa</span></span></li>
+    <li class="node"><span class="n">3</span><span><b>unbound</b><span class="mono muted">{{ opt('interface') }} · cache</span></span></li>
+    <li class="node end"><span class="n">4</span><span><b>{% if fwd %}Encaminhado{% else %}Servidores raiz{% endif %}</b><span class="{{ 'mono ' if fwd }}muted">{% if fwd %}{{ fwd|map(attribute='forward-addr')|map('join', ', ')|join('; ') }}{% else %}resolve sozinho, sem intermediário{% endif %}</span></span></li>
+  </ol>
 </section>
 
 {% if stats %}
@@ -43,7 +43,8 @@
     <div class="row"><span class="grow">Recusa respostas sem a assinatura DNSSEC esperada</span>{{ yes('harden-dnssec-stripped') }}</div>
     <div class="row"><span class="grow">Pergunta só o necessário a cada servidor (QNAME minimisation)</span>{{ yes('qname-minimisation') }}</div>
     <div class="row"><span class="grow">Usa NSEC para responder sem perguntar de novo</span>{{ yes('aggressive-nsec') }}</div>
-    <div class="row"><span class="grow">Esconde nome e versão</span>{{ yes('hide-identity') }}{{ yes('hide-version') }}</div>
+    <div class="row"><span class="grow">Esconde o nome da máquina</span>{{ yes('hide-identity') }}</div>
+    <div class="row"><span class="grow">Esconde a versão do unbound</span>{{ yes('hide-version') }}</div>
   </section>
   <section class="card" aria-labelledby="h-cache">
     <div class="card-h"><h2 class="h2" id="h-cache">Cache e acesso</h2></div>
