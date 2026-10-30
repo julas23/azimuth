@@ -28,14 +28,6 @@
 </section>
 {% endif %}
 
-<section class="card" id="decisoes" aria-labelledby="h-fnd">
-  <div class="card-h"><h2 class="h2" id="h-fnd">Ajustes do importador</h2><span class="chip mute">{{ findings|length }}</span>
-    <span class="muted">o que ele adaptou ao ler, sem mudar o comportamento</span></div>
-  <ol class="list">
-    {% for f in findings %}<li><span class="n">{{ loop.index }}</span><span>{{ f }}</span></li>
-    {% else %}<li><span>Nenhum.</span></li>{% endfor %}
-  </ol>
-</section>
 
 {% if not readonly %}
 {% if awaiting %}
@@ -134,5 +126,16 @@
   {% for e in history %}<div class="row"><span class="mono muted">{{ e.hash }}</span><span class="grow">{{ e.subject }}</span><span class="muted">{{ e.when }}</span></div>{% endfor %}
 </section>
 {% endif %}
+
+{# Historico da adocao: depois do selo nao pede nada, entao fica no fim e
+   recolhido. Antes do selo ele e' parte da revisao, e abre sozinho. #}
+<details class="card fold" id="decisoes"{% if readonly or not sealed %} open{% endif %}>
+  <summary class="card-h"><h2 class="h2">Ajustes do importador</h2><span class="chip mute">{{ findings|length }}</span>
+    <span class="muted">o que ele adaptou ao ler a máquina, sem mudar o comportamento</span><span class="fill"></span><span class="fold-hint muted"></span></summary>
+  <ol class="list">
+    {% for f in findings %}<li><span class="n">{{ loop.index }}</span><span>{{ f }}</span></li>
+    {% else %}<li><span>Nenhum.</span></li>{% endfor %}
+  </ol>
+</details>
 
 {% endblock %}

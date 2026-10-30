@@ -342,6 +342,15 @@ input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
 /* Tema: claro, escuro, ou o do sistema (data-theme=auto). */
 .theme-btn { text-decoration: none; }
 
+/* Cartao recolhivel (details): o cabecalho e' o proprio summary. */
+.card.fold > summary { list-style: none; cursor: pointer; border-bottom: 0; }
+.card.fold > summary::-webkit-details-marker { display: none; }
+.card.fold[open] > summary { border-bottom: 1px solid var(--line-2); }
+.card.fold > summary:hover { background: var(--hover); border-radius: 12px; }
+.card.fold[open] > summary:hover { border-radius: 12px 12px 0 0; }
+.card.fold .fold-hint::after { content: "mostrar ▾"; font-size: 12.5px; }
+.card.fold[open] .fold-hint::after { content: "recolher ▴"; }
+
 /* Notificacao dispensada no Status: continua listada, apagada. */
 .row.dismissed { opacity: .55; }
 .pop-h .btn.sm { margin-left: auto; }
