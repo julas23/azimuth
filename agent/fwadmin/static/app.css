@@ -342,6 +342,11 @@ input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
 /* Tema: claro, escuro, ou o do sistema (data-theme=auto). */
 .theme-btn { text-decoration: none; }
 
+/* Notificacao dispensada no Status: continua listada, apagada. */
+.row.dismissed { opacity: .55; }
+.pop-h .btn.sm { margin-left: auto; }
+.pop-h b { flex: 1; }
+
 /* --- tema escuro: escolhido no cabecalho, ou seguindo o sistema ----- */
 :root[data-theme="dark"] {
   --bg: #0E131B;

@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 {% block title %}{{ t.status }}{% endblock %}
 {% block body %}
-{% set bad = alerts|selectattr('level', 'equalto', 'bad')|list %}
+{% set every = alerts_all or [] %}
+{% set bad = every|selectattr('level', 'equalto', 'bad')|list %}
+{% set hidden = every|selectattr('dismissed')|list %}
 
 <div class="page-h">
   <div>
-    <h1>{% if bad %}{{ bad|length }} problema{{ 's' if bad|length > 1 }} agora{% elif alerts %}Tudo funcionando, com {{ alerts|length }} ponto{{ 's' if alerts|length > 1 }} de atenção{% else %}Tudo funcionando{% endif %}</h1>
+    <h1>{% if bad %}{{ bad|length }} problema{{ 's' if bad|length > 1 }} agora{% elif every %}Tudo funcionando, com {{ every|length }} ponto{{ 's' if every|length > 1 }} de atenção{% else %}Tudo funcionando{% endif %}</h1>
     <p class="lede">
       {% set active = wans|selectattr('active')|first %}
       {% if active %}Internet saindo por {{ active.description or active.name }}{% else %}Nenhuma WAN com a rota padrão agora{% endif %}{% if cfg.routing.backup %}, com {{ cfg.iface(cfg.routing.backup).description or cfg.routing.backup }} de reserva{% endif %}.
@@ -19,9 +21,13 @@
 {% endif %}
 
 <section class="card{% if alerts %} warn{% endif %}" aria-labelledby="h-att">
-  <div class="card-h"><h2 class="h2" id="h-att">Pede atenção</h2>{% if alerts %}<span class="chip warn">{{ alerts|length }}</span>{% endif %}</div>
-  {% for a in alerts %}
-    <div class="row"><span class="dot {{ a.level }}"></span><div class="grow"><b>{{ a.title }}</b><div class="muted">{{ a.detail }}</div></div><a class="btn" href="{{ a.href }}">Ver</a></div>
+  <div class="card-h"><h2 class="h2" id="h-att">Pede atenção</h2>{% if alerts %}<span class="chip warn">{{ alerts|length }}</span>{% endif %}
+    {% if hidden %}<span class="chip mute">{{ hidden|length }} dispensada{{ 's' if hidden|length > 1 }}</span>{% endif %}
+    <div class="fill"></div>
+    {% if alerts %}<form method="post" action="/alerts/clear" style="margin:0"><input type="hidden" name="back_to" value="/"><button class="btn sm" type="submit">Limpar tudo</button></form>{% endif %}
+    {% if hidden %}<form method="post" action="/alerts/restore" style="margin:0"><input type="hidden" name="back_to" value="/"><button class="btn sm" type="submit">Mostrar de novo</button></form>{% endif %}</div>
+  {% for a in every %}
+    <div class="row{{ ' dismissed' if a.dismissed }}"><span class="dot {{ a.level }}"></span><div class="grow"><b>{{ a.title }}</b>{% if a.dismissed %} <span class="chip mute">dispensada</span>{% endif %}<div class="muted">{{ a.detail }}</div></div><a class="btn sm" href="{{ a.href }}">Ver</a></div>
   {% else %}
     <div class="empty">{{ t.nonotif }}.</div>
   {% endfor %}

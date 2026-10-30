@@ -36,7 +36,8 @@
   <details class="notif">
     <summary class="hbtn" aria-label="{{ t.notifications }}">{{ icon('bell', 20) }}{% if alerts %}<span class="badge">{{ alerts|length }}</span>{% endif %}</summary>
     <div class="pop" role="dialog" aria-label="{{ t.notifications }}">
-      <div class="pop-h"><b>{{ t.notifications }}</b>{% if alerts %}<span class="chip warn">{{ alerts|length }}</span>{% endif %}</div>
+      <div class="pop-h"><b>{{ t.notifications }}</b>{% if alerts %}<span class="chip warn">{{ alerts|length }}</span>
+        <form method="post" action="/alerts/clear" style="margin:0"><input type="hidden" name="back_to" value="{{ path }}"><button class="btn sm" type="submit" title="Dispensa as notificações atuais; uma que mudar ou voltar reaparece">Limpar tudo</button></form>{% endif %}</div>
       {% for a in alerts[:6] %}
         <a class="it" href="{{ a.href }}"><span class="dot {{ a.level }}"></span><span><b>{{ a.title }}</b><div class="muted">{{ a.detail }}</div></span></a>
       {% else %}

@@ -33,7 +33,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from fwadmin import acks, db, i18n, live, ownership, paths, secretstore, status
+from fwadmin import acks, db, dismissed, i18n, live, ownership, paths, secretstore, status
 from fwadmin.models import (
     Config,
     Failover,
@@ -105,9 +105,18 @@ ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff", "obs
 READONLY = os.environ.get("FWADMIN_READONLY", "1") != "0"
 """Ligado por padrao: desligar e' decisao explicita de quem instala."""
 
-READONLY_ALLOWED = {"/login", "/logout", "/system/diag", "/system/ack", "/system/unack"}
+READONLY_ALLOWED = {
+    "/login",
+    "/logout",
+    "/system/diag",
+    "/system/ack",
+    "/system/unack",
+    "/alerts/clear",
+    "/alerts/restore",
+}
 """POSTs que nao mudam nada no firewall e por isso valem no somente leitura.
-Marcar uma mudanca como intencional so grava em /var/lib/fwadmin."""
+Marcar uma mudanca como intencional, ou dispensar notificacoes, so grava em
+/var/lib/fwadmin."""
 
 ALLOW = [
     ipaddress.ip_network(cidr.strip(), strict=False)
@@ -442,9 +451,17 @@ def page(
     if session:
         base["snapshot_age"] = snap().age
         try:
-            base["alerts"] = alerts(current(), snap())
+            every = alerts(current(), snap())
         except Unavailable:
-            base["alerts"] = []
+            every = []
+        for a in every:
+            a["id"] = dismissed.alert_id(a)
+        hidden = dismissed.prune([a["id"] for a in every])
+        for a in every:
+            a["dismissed"] = a["id"] in hidden
+        # O sino mostra so as nao dispensadas; o Status, todas.
+        base["alerts"] = [a for a in every if not a["dismissed"]]
+        base["alerts_all"] = every
     return templates.TemplateResponse(request, template, base | ctx, status_code=status_code)
 
 
@@ -1474,6 +1491,26 @@ async def unack_change(request: Request, user: User, fields: Fields) -> Response
     acks.unmark(cid)
     db.log(f"intencional-desfeito:{cid}", username=user, address=client_ip(request))
     return RedirectResponse("/system#mudancas", status_code=303)
+
+
+@app.post("/alerts/clear")
+async def clear_alerts(request: Request, user: User, fields: Fields) -> Response:
+    """Dispensa as notificacoes que estao no sino agora."""
+    ids = [dismissed.alert_id(a) for a in alerts(current(), snap())]
+    dismissed.dismiss(ids, by=user)
+    db.log(f"notificacoes-limpas:{len(ids)}", username=user, address=client_ip(request))
+    return RedirectResponse(_local(fields.text("back_to")), status_code=303)
+
+
+@app.post("/alerts/restore")
+async def restore_alerts(request: Request, user: User, fields: Fields) -> Response:
+    dismissed.restore()
+    return RedirectResponse(_local(fields.text("back_to")), status_code=303)
+
+
+def _local(path: str) -> str:
+    """So caminho do proprio painel, para o back_to nao virar redirecionamento aberto."""
+    return path if path.startswith("/") and not path.startswith("//") else "/"
 
 
 @app.post("/system/apply")
