@@ -6,7 +6,7 @@
 
 <div class="page-h">
   <div><h1>{{ t.vpn }}</h1><p class="lede">Entrar na rede de casa de qualquer lugar, pelo WireGuard. Cada aparelho é um peer, com chave e endereço próprios.</p></div>
-  <button class="btn primary" type="button" disabled title="Entra com as ações">Novo peer</button>
+  {% if wg.enabled %}<a class="btn primary" href="#novo-peer">{{ icon('plus', 16) }}Novo peer</a>{% endif %}
 </div>
 
 {% if not wg.enabled %}
@@ -23,6 +23,7 @@
       <div class="field"><label for="v-net">Rede do túnel</label><input id="v-net" class="input mono" name="address" value="{{ wg.address }}" {{ ro }}></div>
       <div class="field"><label for="v-port">Porta (udp)</label><input id="v-port" class="input mono" name="listen_port" value="{{ wg.listen_port }}" {{ ro }}></div>
       <div class="field"><label for="v-mtu">MTU</label><input id="v-mtu" class="input mono" name="mtu" value="{{ wg.mtu or '' }}" placeholder="automático" {{ ro }}></div>
+      <div class="field" style="grid-column: span 2"><label for="v-end">Endereço público</label><input id="v-end" class="input mono" name="endpoint" value="{{ wg.endpoint or '' }}" placeholder="casa.exemplo.net · vai no perfil dos aparelhos" {{ ro }}></div>
     </div>
   </form>
   <div class="kvs">
@@ -33,6 +34,18 @@
 
 <section class="card" aria-labelledby="h-peers">
   <div class="card-h"><h2 class="h2" id="h-peers">Peers</h2><span class="chip mute">{{ peers|length }}</span>{% if not observed %}<span class="muted">sem leitura do <span class="mono">wg show</span></span>{% endif %}</div>
+  <form class="addbox" id="novo-peer" method="post" action="/vpn/peer" aria-label="Novo peer">
+    <div class="addbox-h"><span class="addbox-ico">{{ icon('plus', 14) }}</span>Novo peer <span class="muted">· a chave é gerada agora, e o perfil aparece uma vez só</span></div>
+    <div class="form-grid">
+      <div class="field"><label for="p-name">Aparelho</label><input id="p-name" class="input mono" name="name" placeholder="celular-ana" required {{ ro }}></div>
+      <div class="field"><label for="p-ds">Descrição</label><input id="p-ds" class="input" name="description" maxlength="120" placeholder="Celular da Ana" {{ ro }}></div>
+      <div class="field"><label for="p-rt">Pelo túnel passa</label>
+        <select id="p-rt" class="input" name="route" {{ ro }}><option value="lan">só a rede de casa</option><option value="all">toda a internet</option></select></div>
+      <div class="field"><label for="p-end">Chega por</label><input id="p-end" class="input mono" name="endpoint" value="{{ wg.endpoint or '' }}" placeholder="casa.exemplo.net" required {{ ro }}></div>
+      <div class="addbox-go">{{ action(icon('plus', 16) ~ 'Criar', readonly or not runtime, 'primary') }}</div>
+    </div>
+    {% if not runtime %}<div class="row muted"><span>O túnel precisa estar no ar: o perfil leva a chave pública do servidor, lida do <span class="mono">wg show</span>.</span></div>{% endif %}
+  </form>
   <div class="scroll">
     <table class="tbl">
       <thead><tr><th>Aparelho</th><th>Endereço</th><th>Último contato</th><th>De onde</th><th class="num">Recebido</th><th class="num">Enviado</th><th>Situação</th><th><span class="vh">Ações</span></th></tr></thead>
@@ -46,7 +59,7 @@
           <td class="num mono">{{ p.rx|size if observed else '—' }}</td>
           <td class="num mono">{{ p.tx|size if observed else '—' }}</td>
           <td>{% if not p.enabled %}<span class="chip mute">revogado</span>{% elif p.online %}<span class="chip ok">conectado</span>{% elif p.stale %}<span class="chip warn">sem contato</span>{% else %}<span class="chip mute">ocioso</span>{% endif %}</td>
-          <td style="white-space:nowrap"><button class="btn" type="button" disabled title="O perfil e o QR nascem junto com a chave, ao criar o peer">{{ icon('download', 16) }}Perfil</button></td>
+          <td><form method="post" action="/vpn/peer/{{ p.name }}/toggle">{{ action('Reativar' if not p.enabled else 'Revogar', readonly) }}</form></td>
         </tr>
       {% else %}
         <tr><td colspan="8" class="muted">Nenhum peer.</td></tr>

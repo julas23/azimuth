@@ -44,6 +44,7 @@ from fwadmin.models import (
     Reservation,
     Rule,
     Service,
+    WGPeer,
 )
 from fwadmin.render import base_input, dump, load
 
@@ -997,8 +998,138 @@ async def save_vpn(request: Request, user: User, fields: Fields) -> Response:
         wg.address = fields.text("address", wg.address or "") or None
         wg.listen_port = fields.number("listen_port", wg.listen_port)
         wg.mtu = _optional_int(fields, "mtu", wg.mtu)
+        wg.endpoint = fields.text("endpoint") or None
 
     return back("/vpn", edit(request, mutate, "vpn"))
+
+
+def _wg(*args: str, stdin: str = "") -> str:
+    """wg genkey / wg pubkey: so matematica, nao precisa de root."""
+    proc = subprocess.run(
+        ["wg", *args], input=stdin, capture_output=True, text=True, timeout=10, check=True
+    )
+    return proc.stdout.strip()
+
+
+def _qr_svg(text: str) -> str:
+    """QR do perfil em SVG, para o celular ler da tela. Vazio se nao houver qrencode."""
+    try:
+        proc = subprocess.run(
+            ["qrencode", "-t", "SVG", "-o", "-", "-m", "2"],
+            input=text, capture_output=True, text=True, timeout=10, check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    svg = proc.stdout
+    return svg[svg.find("<svg"):] if "<svg" in svg else ""
+
+
+def _next_tunnel_ip(cfg: Config) -> str:
+    """O primeiro endereco livre da rede do tunel, fora o do servidor."""
+    server = ipaddress.IPv4Interface(cfg.wireguard.address)
+    taken = {server.ip}
+    for peer in cfg.wireguard.peers:
+        for net in map(ipaddress.ip_network, peer.allowed_ips):
+            if net.version == 4 and net.overlaps(server.network):
+                taken.update(net)
+    for ip in server.network.hosts():
+        if ip not in taken:
+            return str(ip)
+    raise ValueError(f"a rede do túnel {server.network} não tem mais endereço livre")
+
+
+@app.post("/vpn/peer")
+async def add_peer(request: Request, user: User, fields: Fields) -> Response:
+    """Cria o aparelho e devolve o perfil dele, uma vez so.
+
+    A chave privada nasce aqui, vai para a tela e nao e' gravada em lugar
+    nenhum: o modelo guarda so a publica. Perdeu o perfil, cria outro peer e
+    revoga este — e' o mesmo trato que o wg-quick faz com quem o usa a mao.
+    """
+    cfg = current()
+    wg = cfg.wireguard
+    if not wg.enabled:
+        return back("/vpn", "não há túnel de acesso remoto no modelo")
+    runtime = snap().wireguard.get(wg.device) or {}
+    server_key = runtime.get("public_key", "")
+    if not server_key:
+        return back("/vpn", "a chave pública do servidor não foi lida: o túnel precisa estar no ar")
+    endpoint = fields.text("endpoint") or wg.endpoint
+    if not endpoint:
+        return back("/vpn", "informe o endereço público pelo qual o aparelho chega")
+    try:
+        private = _wg("genkey")
+        public = _wg("pubkey", stdin=private + "\n")
+    except (OSError, subprocess.SubprocessError):
+        return back("/vpn", "não consegui gerar a chave: o comando wg falhou")
+
+    chosen: dict[str, str] = {}
+
+    def mutate(cfg: Config) -> None:
+        ip = _next_tunnel_ip(cfg)
+        chosen["ip"] = ip
+        cfg.wireguard.peers.append(
+            WGPeer(
+                name=fields.text("name"),
+                public_key=public,
+                allowed_ips=[f"{ip}/32"],
+                description=fields.text("description"),
+            )
+        )
+        if not cfg.wireguard.endpoint:
+            cfg.wireguard.endpoint = endpoint
+
+    error = edit(request, mutate, f"peer+:{fields.text('name')}")
+    if error:
+        return back("/vpn", error)
+
+    tunnel = ipaddress.IPv4Interface(wg.address).network
+    routes = "0.0.0.0/0" if fields.text("route") == "all" else f"{tunnel}, {cfg.lan.ipv4.network}"
+    lines = [
+        "[Interface]",
+        f"PrivateKey = {private}",
+        f"Address = {chosen['ip']}/32",
+        f"DNS = {cfg.lan.ipv4.ip}",
+    ]
+    if wg.mtu:
+        lines.append(f"MTU = {wg.mtu}")
+    lines += [
+        "",
+        "[Peer]",
+        f"PublicKey = {server_key}",
+        f"Endpoint = {endpoint}:{wg.listen_port}",
+        f"AllowedIPs = {routes}",
+        "PersistentKeepalive = 25",
+        "",
+    ]
+    profile = "\n".join(lines)
+    response = page(
+        request,
+        "vpn_peer.html",
+        nav="vpn",
+        cfg=current(),
+        name=fields.text("name"),
+        ip=chosen["ip"],
+        profile=profile,
+        qr=_qr_svg(profile),
+    )
+    # A chave privada esta nesta resposta: nada de cache, nem do navegador.
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/vpn/peer/{name}/toggle")
+async def toggle_peer(request: Request, user: User, name: str) -> Response:
+    """Revoga ou reativa. Revogar tira o peer do arquivo gerado e mantem o
+    registro no modelo, como o WGPeer.enabled pede."""
+
+    def mutate(cfg: Config) -> None:
+        peer = next((p for p in cfg.wireguard.peers if p.name == name), None)
+        if peer is None:
+            raise ValueError(f"peer inexistente: {name}")
+        peer.enabled = not peer.enabled
+
+    return back("/vpn", edit(request, mutate, f"peer~:{name}"))
 
 
 # ---------------------------------------------------------------------------

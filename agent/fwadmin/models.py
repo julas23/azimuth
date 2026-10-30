@@ -705,6 +705,10 @@ class WireGuard(Base):
 
     mtu: Annotated[int, Field(ge=1280, le=1500)] | None = None
 
+    endpoint: Annotated[str, Field(pattern=HOSTNAME_RE.pattern)] | None = None
+    """Nome ou IP publico pelo qual os aparelhos chegam, sem a porta. So vai
+    no perfil de cada peer; o servidor nao precisa dele para nada."""
+
     private_key_file: str = "/etc/wireguard/private.key"
     """Caminho da chave privada, modo 0600 e dona do root.
 

@@ -9,7 +9,7 @@
   {% if route[0] %}<span class="chip ok lg"><span class="dot ok"></span>rota padrão por {{ route[0] }}{% if route[1] %} via {{ route[1] }}{% endif %}</span>{% endif %}
 </div>
 
-<form id="page-form" method="post" action="/network" autocomplete="off">
+<form id="page-form" class="stack" method="post" action="/network" autocomplete="off">
 
 <div class="grid two">
   {% for iface in cfg.interfaces if iface.role.value != 'unused' %}
@@ -40,13 +40,17 @@
       </div>
 
       {% if iface.role.value == 'wan' %}
-        <div class="form-grid only-static" style="border-top:1px solid var(--line-2)">
+        <div class="subpanel only-static">
+          <div class="subpanel-h">IP fixo <span class="muted">· endereço e gateway que o provedor entregou</span></div>
+          <div class="form-grid">
           <div class="field"><label for="{{ k }}-addr">IP fixo (CIDR)</label><input id="{{ k }}-addr" class="input mono" name="{{ k }}.address" value="{{ iface.ipv4.address or '' }}" placeholder="203.0.113.10/29" {{ ro }}></div>
           <div class="field"><label for="{{ k }}-gw">Gateway</label><input id="{{ k }}-gw" class="input mono" name="{{ k }}.gateway" value="{{ iface.ipv4.gateway or '' }}" {{ ro }}></div>
+          </div>
         </div>
         {% set ppp = iface.pppoe %}
-        <div class="card-h only-pppoe" style="border-top:1px solid var(--line-2)"><h3 class="h2" style="font-size:14px">PPPoE</h3><span class="muted">usuário e senha do provedor</span></div>
-        <div class="form-grid only-pppoe">
+        <div class="subpanel only-pppoe">
+        <div class="subpanel-h">PPPoE <span class="muted">· usuário e senha do provedor</span></div>
+        <div class="form-grid">
           <div class="field"><label for="{{ k }}-user">Usuário</label><input id="{{ k }}-user" class="input mono" name="{{ k }}.username" value="{{ ppp.username if ppp else '' }}" autocomplete="off" {{ ro }}></div>
           <div class="field"><label for="{{ k }}-pass">Senha</label><input id="{{ k }}-pass" class="input" type="password" name="{{ k }}.password" placeholder="{{ 'guardada · vazio mantém' if ppp and ppp.password_file else 'no chap-secrets do administrador' if ppp else '' }}" autocomplete="new-password" {{ ro }}></div>
           <div class="field"><label for="{{ k }}-mtu">MTU</label><input id="{{ k }}-mtu" class="input mono" name="{{ k }}.mtu" value="{{ ppp.mtu if ppp and ppp.mtu else '' }}" placeholder="negociado" {{ ro }}></div>
@@ -56,7 +60,8 @@
           <div class="field"><label for="{{ k }}-hold">Esperar antes de rediscar (s)</label><input id="{{ k }}-hold" class="input mono" name="{{ k }}.holdoff" value="{{ ppp.holdoff if ppp else 5 }}" {{ ro }}></div>
           <label class="check"><input type="checkbox" name="{{ k }}.default_route" value="1" {% if ppp and ppp.default_route %}checked{% endif %} {{ ro }}> O pppd põe a rota padrão (sem failover)</label>
         </div>
-        {% if ppp and ppp.unit %}<div class="row muted only-pppoe">O link é mantido por <span class="mono">{{ ppp.unit }}</span>; o motor reinicia por ele.</div>{% endif %}
+        {% if ppp and ppp.unit %}<div class="subpanel-f muted">O link é mantido por <span class="mono">{{ ppp.unit }}</span>; o motor reinicia por ele.</div>{% endif %}
+        </div>
       {% endif %}
     </section>
   {% endfor %}
@@ -82,7 +87,7 @@
     <div class="field"><label for="r-i">Testar a cada (s)</label><input id="r-i" class="input mono" name="interval_seconds" value="{{ cfg.routing.failover.interval_seconds }}" {{ ro }}></div>
     <div class="field"><label for="r-t">Trocar após falhas</label><input id="r-t" class="input mono" name="threshold" value="{{ cfg.routing.failover.threshold }}" {{ ro }}></div>
     <div class="field"><label for="r-g">Alvos de ping</label><input id="r-g" class="input mono" name="ping_targets" value="{{ cfg.routing.failover.ping_targets|join(', ') }}" {{ ro }}></div>
-    <label class="check"><input type="checkbox" name="failover" value="1" {% if cfg.routing.failover.enabled %}checked{% endif %} {{ ro }}> Trocar sozinho para a reserva</label>
+    <label class="check wide"><input type="checkbox" name="failover" value="1" {% if cfg.routing.failover.enabled %}checked{% endif %} {{ ro }}> <span><b>Trocar sozinho para a reserva</b><span class="muted"> · quando a principal falha nos pings, a rota padrão passa para a reserva</span></span></label>
   </div>
 </section>
 

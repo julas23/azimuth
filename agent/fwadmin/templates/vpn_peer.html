@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon %}
+{% block title %}{{ t.vpn }} · {{ name }}{% endblock %}
+{% block body %}
+
+<div class="page-h">
+  <div><h1>Perfil de <span class="mono">{{ name }}</span></h1><p class="lede">Endereço <span class="mono">{{ ip }}</span> no túnel <span class="mono">{{ cfg.wireguard.device }}</span>. Leia o QR no app do WireGuard, ou baixe o arquivo.</p></div>
+</div>
+
+<div class="note warn"><b>Esta é a única vez que o perfil aparece</b>A chave privada do aparelho foi gerada agora e não ficou guardada no firewall. Perdeu o perfil, crie outro peer e revogue este. E o peer só passa a valer depois do <b>Aplicar</b>.</div>
+
+<div class="grid two">
+  <section class="card" aria-labelledby="h-qr">
+    <div class="card-h"><h2 class="h2" id="h-qr">QR code</h2><span class="muted">app WireGuard › adicionar › ler QR</span></div>
+    {% if qr %}<div class="qr">{{ qr|safe }}</div>
+    {% else %}<div class="empty">Sem o <span class="mono">qrencode</span> nesta máquina; use o arquivo ao lado.</div>{% endif %}
+  </section>
+  <section class="card" aria-labelledby="h-conf">
+    <div class="card-h"><h2 class="h2" id="h-conf">Arquivo</h2><div class="fill"></div>
+      <a class="btn primary" download="{{ name }}.conf" href="data:text/plain;charset=utf-8,{{ profile|urlencode }}">{{ icon('download', 16) }}Baixar {{ name }}.conf</a></div>
+    <pre class="out">{{ profile }}</pre>
+  </section>
+</div>
+
+<div class="row" style="border:0;padding:0"><a class="btn" href="/vpn">Voltar para a VPN</a><a class="btn primary" href="/system">Revisar e aplicar</a></div>
+{% endblock %}

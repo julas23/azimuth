@@ -258,6 +258,22 @@ input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
 .wan-card:has(option[value="pppoe"]:checked) .only-pppoe.card-h { display: flex; }
 .wan-card:has(option[value="static"]:checked) .only-static { display: grid; }
 
+/* Formulario que embrulha varios cartoes: o espaco entre eles e' o da pagina. */
+.stack { display: flex; flex-direction: column; gap: 20px; }
+.grid.two { align-items: start; }
+.form-grid .check.wide { grid-column: 1 / -1; padding-top: 0; }
+
+/* Subsecao de um cartao (PPPoE, IP fixo): o mesmo painel tingido da caixa
+   de inclusao, para ler como grupo de campos e nao como continuacao. */
+.subpanel { margin: 0 20px 20px; border: 1px solid var(--accent-line); border-radius: 10px; background: linear-gradient(180deg, #F5F8FF 0%, #FBFCFF 100%); }
+.subpanel-h { padding: 12px 16px; border-bottom: 1px solid var(--accent-line); font-weight: 650; color: var(--accent-ink); }
+.subpanel-h .muted { font-weight: 400; font-size: 13px; }
+.subpanel .form-grid { padding: 14px 16px 16px; }
+.subpanel .input { background-color: var(--surface); }
+.subpanel .input:disabled { background-color: var(--surface-2); }
+.subpanel-f { padding: 0 16px 14px; font-size: 13px; }
+@media (max-width: 860px) { .subpanel { margin: 0 12px 12px; } }
+
 /* Caixa de inclusao no topo de cada lista: firewall, reservas, registros.
    Painel recuado e tingido, para ler como formulario e nao como mais uma
    linha da tabela. */
@@ -278,3 +294,7 @@ input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
   .addbox-go { grid-column: 1 / -1; }
   .addbox-go .btn { width: 100%; }
 }
+
+/* VPN: o QR do perfil, grande o bastante para a camera do celular. */
+.qr { display: flex; justify-content: center; padding: 20px; }
+.qr svg { width: min(100%, 320px); height: auto; background: #fff; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }
