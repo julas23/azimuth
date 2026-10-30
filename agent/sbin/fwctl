@@ -701,7 +701,16 @@ def cmd_agente(args: argparse.Namespace) -> int:
             faltam = [p for p in agentes.CATALOG[kind].packages if not run("dpkg", "-s", p, mutating=False).ok]
             if faltam:
                 say(f"instalando do Debian: {' '.join(faltam)}")
-                result = run("apt-get", "install", "-y", "--no-install-recommends", *faltam, timeout=900)
+                # Numa unidade transitoria, e nao direto: chamado pelo painel, o
+                # fwctl herda o ProtectSystem da fwadmin.service, e o /usr fica so
+                # para leitura (o apt de 30/10 morreu no primeiro arquivo e deixou
+                # o dpkg com pacotes pela metade). O systemd-run roda fora disso.
+                result = run(
+                    "systemd-run", "--wait", "--pipe", "--quiet", "--collect",
+                    "--setenv=DEBIAN_FRONTEND=noninteractive",
+                    "apt-get", "install", "-y", "-q", "--no-install-recommends", *faltam,
+                    timeout=900,
+                )
                 if not result.ok:
                     return fail(f"apt-get falhou: {result.output[-400:]}")
             Path(agentes.HOME).mkdir(mode=0o755, exist_ok=True)
