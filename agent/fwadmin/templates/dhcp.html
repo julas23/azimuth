@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import action, actionbar %}
+{% from "_icons.html" import action, actionbar, icon %}
 {% block title %}{{ t.dhcp }}{% endblock %}
 {% block body %}
 {% set d = cfg.dhcp %}
@@ -46,6 +46,17 @@
 
 <section class="card" aria-labelledby="h-res">
   <div class="card-h"><h2 class="h2" id="h-res">Reservas</h2><span class="chip mute">{{ d.reservations|length }}</span></div>
+  {% set ro = 'disabled' if readonly else '' %}
+  <form class="addbox" method="post" action="/dns/reservation" aria-label="Nova reserva">
+    <div class="addbox-h"><span class="addbox-ico">{{ icon('plus', 14) }}</span>Nova reserva</div>
+    <div class="form-grid">
+      <div class="field"><label for="r-name">Nome</label><input id="r-name" class="input mono" name="name" placeholder="impressora" required {{ ro }}></div>
+      <div class="field"><label for="r-ip">IP</label><input id="r-ip" class="input mono" name="ip" placeholder="{{ cfg.lan.ipv4.ip }}" required {{ ro }}></div>
+      <div class="field"><label for="r-mac">MAC</label><input id="r-mac" class="input mono" name="mac" placeholder="aa:bb:cc:dd:ee:ff" required {{ ro }}></div>
+      <div class="field"><label for="r-ds">Descrição</label><input id="r-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
+      <div class="addbox-go">{{ action(icon('plus', 16) ~ 'Adicionar', readonly, 'primary') }}</div>
+    </div>
+  </form>
   <div class="scroll">
     <table class="tbl">
       <thead><tr><th>Nome</th><th>IP</th><th>MAC</th><th>Descrição</th><th>Agora</th><th><span class="vh">Ações</span></th></tr></thead>
@@ -61,17 +72,6 @@
       </tbody>
     </table>
   </div>
-  {% set ro = 'disabled' if readonly else '' %}
-  <form class="addbox" method="post" action="/dns/reservation" aria-label="Nova reserva">
-    <div class="addbox-h">Nova reserva</div>
-    <div class="form-grid">
-      <div class="field"><label for="r-name">Nome</label><input id="r-name" class="input mono" name="name" placeholder="impressora" required {{ ro }}></div>
-      <div class="field"><label for="r-ip">IP</label><input id="r-ip" class="input mono" name="ip" placeholder="{{ cfg.lan.ipv4.ip }}" required {{ ro }}></div>
-      <div class="field"><label for="r-mac">MAC</label><input id="r-mac" class="input mono" name="mac" placeholder="aa:bb:cc:dd:ee:ff" required {{ ro }}></div>
-      <div class="field" style="grid-column: span 2"><label for="r-ds">Descrição</label><input id="r-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
-      <div class="addbox-go">{{ action('Adicionar', readonly) }}</div>
-    </div>
-  </form>
 </section>
 
 {% if d.held %}

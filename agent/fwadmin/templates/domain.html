@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import action, actionbar %}
+{% from "_icons.html" import action, actionbar, icon %}
 {% block title %}{{ t.domain }}{% endblock %}
 {% block body %}
 {% set records = cfg.hosts|selectattr('dns')|list %}
@@ -30,6 +30,18 @@
 
 <section class="card" aria-labelledby="h-rec">
   <div class="card-h"><h2 class="h2" id="h-rec">Registros</h2><span class="chip mute">{{ records|length }}</span></div>
+  <form class="addbox" method="post" action="/dns/host" aria-label="Novo registro">
+    <div class="addbox-h"><span class="addbox-ico">{{ icon('plus', 14) }}</span>Novo registro</div>
+    <div class="form-grid">
+      <div class="field"><label for="h-name">Nome</label><input id="h-name" class="input mono" name="name" placeholder="nas" required {{ ro }}></div>
+      <div class="field"><label for="h-ip">Aponta para</label><input id="h-ip" class="input mono" name="ip" placeholder="{{ cfg.lan.ipv4.ip }}" required {{ ro }}></div>
+      <div class="field"><label for="h-grp">Grupo</label>
+        <select id="h-grp" class="input" name="group" {{ ro }}><option value="">—</option>{% for g in cfg.portal.groups|sort(attribute='order') %}<option value="{{ g.id }}">{{ g.title }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="h-ds">Descrição</label><input id="h-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
+      <div class="addbox-go">{{ action(icon('plus', 16) ~ 'Adicionar', readonly, 'primary') }}</div>
+    </div>
+    <div class="row muted"><span>Nome curto vira <span class="mono">nome.{{ cfg.dns.domain }}</span>; um nome com ponto é usado como está.</span></div>
+  </form>
   <div class="scroll">
     <table class="tbl">
       <thead><tr><th>Nome</th><th>Aponta para</th><th>Grupo</th><th>Descrição</th><th><span class="vh">Ações</span></th></tr></thead>
@@ -44,18 +56,6 @@
       </tbody>
     </table>
   </div>
-  <form class="addbox" method="post" action="/dns/host" aria-label="Novo registro">
-    <div class="addbox-h">Novo registro</div>
-    <div class="form-grid">
-      <div class="field"><label for="h-name">Nome</label><input id="h-name" class="input mono" name="name" placeholder="nas" required {{ ro }}></div>
-      <div class="field"><label for="h-ip">Aponta para</label><input id="h-ip" class="input mono" name="ip" placeholder="{{ cfg.lan.ipv4.ip }}" required {{ ro }}></div>
-      <div class="field"><label for="h-grp">Grupo</label>
-        <select id="h-grp" class="input" name="group" {{ ro }}><option value="">—</option>{% for g in cfg.portal.groups|sort(attribute='order') %}<option value="{{ g.id }}">{{ g.title }}</option>{% endfor %}</select></div>
-      <div class="field" style="grid-column: span 2"><label for="h-ds">Descrição</label><input id="h-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
-      <div class="addbox-go">{{ action('Adicionar', readonly) }}</div>
-    </div>
-    <div class="row muted">Nome curto vira <span class="mono">nome.{{ cfg.dns.domain }}</span>; um nome com ponto é usado como está.</div>
-  </form>
 </section>
 
 {% set outside = cfg.hosts|rejectattr('dns')|list %}

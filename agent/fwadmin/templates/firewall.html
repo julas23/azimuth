@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import action, actionbar %}
+{% from "_icons.html" import action, actionbar, icon %}
 {% block title %}{{ t.firewall }}{% endblock %}
 {% block body %}
 {% set fw = cfg.firewall %}
@@ -26,6 +26,21 @@
 {% set ro = 'disabled' if readonly else '' %}
 <section class="card" aria-labelledby="h-{{ id }}">
   <div class="card-h"><h2 class="h2" id="h-{{ id }}">{{ title }}</h2><span class="chip mute">{{ list|length }}</span></div>
+  <form class="addbox" method="post" action="/firewall/rule/{{ chain }}" aria-label="Nova regra: {{ title }}">
+    <div class="addbox-h"><span class="addbox-ico">{{ icon('plus', 14) }}</span>Nova regra</div>
+    <div class="form-grid">
+      <div class="field"><label for="{{ id }}-act">Ação</label>
+        <select id="{{ id }}-act" class="input" name="action" {{ ro }}>{% for a in ('accept', 'drop', 'reject') %}<option value="{{ a }}">{{ a }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="{{ id }}-src">Origem</label><input id="{{ id }}-src" class="input mono" name="source" list="zones" placeholder="any" {{ ro }}></div>
+      <div class="field"><label for="{{ id }}-dst">Destino</label><input id="{{ id }}-dst" class="input mono" name="destination" list="zones" placeholder="{{ 'this' if chain == 'input' else 'any' }}" value="{{ 'this' if chain == 'input' else '' }}" {{ ro }}></div>
+      <div class="field"><label for="{{ id }}-pr">Protocolo</label>
+        <select id="{{ id }}-pr" class="input" name="proto" {{ ro }}>{% for p in ('tcp', 'udp', 'tcp/udp', 'icmp', 'any') %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="{{ id }}-pt">Portas</label><input id="{{ id }}-pt" class="input mono" name="dest_ports" placeholder="22 · 80,443 · 9000-9010" {{ ro }}></div>
+      <div class="field" style="grid-column: span 2"><label for="{{ id }}-ds">Descrição</label><input id="{{ id }}-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
+      <label class="check"><input type="checkbox" name="log" value="1" {{ ro }}> Registra no log</label>
+      <div class="addbox-go">{{ action(icon('plus', 16) ~ 'Adicionar', readonly, 'primary') }}</div>
+    </div>
+  </form>
   <div class="scroll">
     <table class="tbl">
       <thead><tr><th>#</th><th>Ação</th><th>Origem</th><th>Destino</th><th>Protocolo</th><th>Portas</th><th>Descrição</th><th>Situação</th><th><span class="vh">Ações</span></th></tr></thead>
@@ -48,21 +63,6 @@
       </tbody>
     </table>
   </div>
-  <form class="addbox" method="post" action="/firewall/rule/{{ chain }}" aria-label="Nova regra: {{ title }}">
-    <div class="addbox-h">Nova regra</div>
-    <div class="form-grid">
-      <div class="field"><label for="{{ id }}-act">Ação</label>
-        <select id="{{ id }}-act" class="input" name="action" {{ ro }}>{% for a in ('accept', 'drop', 'reject') %}<option value="{{ a }}">{{ a }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="{{ id }}-src">Origem</label><input id="{{ id }}-src" class="input mono" name="source" list="zones" placeholder="any" {{ ro }}></div>
-      <div class="field"><label for="{{ id }}-dst">Destino</label><input id="{{ id }}-dst" class="input mono" name="destination" list="zones" placeholder="{{ 'this' if chain == 'input' else 'any' }}" value="{{ 'this' if chain == 'input' else '' }}" {{ ro }}></div>
-      <div class="field"><label for="{{ id }}-pr">Protocolo</label>
-        <select id="{{ id }}-pr" class="input" name="proto" {{ ro }}>{% for p in ('tcp', 'udp', 'tcp/udp', 'icmp', 'any') %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="{{ id }}-pt">Portas</label><input id="{{ id }}-pt" class="input mono" name="dest_ports" placeholder="22 · 80,443 · 9000-9010" {{ ro }}></div>
-      <div class="field" style="grid-column: span 2"><label for="{{ id }}-ds">Descrição</label><input id="{{ id }}-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
-      <label class="check"><input type="checkbox" name="log" value="1" {{ ro }}> Registra no log</label>
-      <div class="addbox-go">{{ action('Adicionar', readonly) }}</div>
-    </div>
-  </form>
 </section>
 {% endmacro %}
 
@@ -83,6 +83,21 @@
 
 <section class="card" aria-labelledby="h-pf">
   <div class="card-h"><h2 class="h2" id="h-pf">Redirecionamento de portas</h2><span class="chip mute">{{ fw.port_forwards|length }}</span></div>
+  <form class="addbox" method="post" action="/firewall/forward" aria-label="Novo redirecionamento">
+    <div class="addbox-h"><span class="addbox-ico">{{ icon('plus', 14) }}</span>Novo redirecionamento <span class="muted">· publica um serviço da LAN na internet; o caminho recomendado é a VPN</span></div>
+    <div class="form-grid">
+      <div class="field"><label for="pf-if">WAN</label>
+        <select id="pf-if" class="input" name="interface" {{ ro }}>{% for w in cfg.wans %}<option value="{{ w.name }}">{{ w.description or w.name }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="pf-wp">Porta externa</label><input id="pf-wp" class="input mono" name="wan_port" type="number" min="1" max="65535" required {{ ro }}></div>
+      <div class="field"><label for="pf-ip">Para o IP</label><input id="pf-ip" class="input mono" name="to_ip" placeholder="{{ cfg.lan.ipv4.ip }}" required {{ ro }}></div>
+      <div class="field"><label for="pf-tp">Porta interna</label><input id="pf-tp" class="input mono" name="to_port" type="number" min="1" max="65535" required {{ ro }}></div>
+      <div class="field"><label for="pf-pr">Protocolo</label>
+        <select id="pf-pr" class="input" name="proto" {{ ro }}>{% for p in ('tcp', 'udp', 'tcp/udp') %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="pf-sf">Só de</label><input id="pf-sf" class="input mono" name="source_filter" placeholder="qualquer · 203.0.113.0/24" {{ ro }}></div>
+      <div class="field" style="grid-column: span 2"><label for="pf-ds">Descrição</label><input id="pf-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
+      <div class="addbox-go">{{ action(icon('plus', 16) ~ 'Adicionar', readonly, 'primary') }}</div>
+    </div>
+  </form>
   <div class="scroll">
     <table class="tbl">
       <thead><tr><th>WAN</th><th>Porta externa</th><th>Para</th><th>Protocolo</th><th>Só de</th><th>Descrição</th><th><span class="vh">Ações</span></th></tr></thead>
@@ -103,21 +118,6 @@
       </tbody>
     </table>
   </div>
-  <form class="addbox" method="post" action="/firewall/forward" aria-label="Novo redirecionamento">
-    <div class="addbox-h">Novo redirecionamento <span class="muted">· publica um serviço da LAN na internet; o caminho recomendado é a VPN</span></div>
-    <div class="form-grid">
-      <div class="field"><label for="pf-if">WAN</label>
-        <select id="pf-if" class="input" name="interface" {{ ro }}>{% for w in cfg.wans %}<option value="{{ w.name }}">{{ w.description or w.name }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="pf-wp">Porta externa</label><input id="pf-wp" class="input mono" name="wan_port" type="number" min="1" max="65535" required {{ ro }}></div>
-      <div class="field"><label for="pf-ip">Para o IP</label><input id="pf-ip" class="input mono" name="to_ip" placeholder="{{ cfg.lan.ipv4.ip }}" required {{ ro }}></div>
-      <div class="field"><label for="pf-tp">Porta interna</label><input id="pf-tp" class="input mono" name="to_port" type="number" min="1" max="65535" required {{ ro }}></div>
-      <div class="field"><label for="pf-pr">Protocolo</label>
-        <select id="pf-pr" class="input" name="proto" {{ ro }}>{% for p in ('tcp', 'udp', 'tcp/udp') %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="pf-sf">Só de</label><input id="pf-sf" class="input mono" name="source_filter" placeholder="qualquer · 203.0.113.0/24" {{ ro }}></div>
-      <div class="field" style="grid-column: span 2"><label for="pf-ds">Descrição</label><input id="pf-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
-      <div class="addbox-go">{{ action('Adicionar', readonly) }}</div>
-    </div>
-  </form>
 </section>
 
 <section class="card" aria-labelledby="h-nat">

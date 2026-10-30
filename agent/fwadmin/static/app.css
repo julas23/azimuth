@@ -2,7 +2,7 @@
    conteudo rolando no meio. Fontes do sistema: o painel abre sem internet. */
 
 :root {
-  --bg: #F4F6F8;
+  --bg: #EEF1F5;
   --surface: #fff;
   --surface-2: #F9FAFB;
   --line: #E2E6EB;
@@ -14,6 +14,9 @@
   --accent: #1D4ED8;
   --accent-ink: #1E40AF;
   --accent-soft: #EEF3FE;
+  --accent-line: #C7D6FA;
+  --ring: 0 0 0 3px rgba(29, 78, 216, .18);
+  --shadow: 0 1px 2px rgba(17, 24, 39, .05), 0 1px 3px rgba(17, 24, 39, .04);
   --ok-bg: #DCFCE7; --ok: #166534; --ok-dot: #16A34A;
   --warn-bg: #FEF3C7; --warn: #92400E; --warn-dot: #D97706; --warn-line: #F3D38B;
   --bad-bg: #FEE2E2; --bad: #991B1B; --bad-dot: #DC2626;
@@ -29,7 +32,7 @@ body { background: var(--bg); color: var(--ink); font: 14px/1.45 var(--sans); }
 a { color: var(--accent); }
 a:hover { color: var(--accent-ink); }
 h1 { margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
-.h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.h2 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -0.005em; }
 .mono { font-family: var(--mono); font-size: 13px; }
 .muted { color: var(--muted); }
 .lede { margin: 4px 0 0; color: var(--muted); }
@@ -120,12 +123,12 @@ b, strong { font-weight: 600; }
 .page-h { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; }
 .page-h > div:first-child { flex: 1 1 420px; }
 
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; min-width: 0; box-shadow: var(--shadow); }
 .card.warn { border-color: var(--warn-line); }
-.card.quiet { background: var(--surface-2); }
+.card.quiet { background: var(--surface-2); box-shadow: none; }
 .card-h { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 16px 20px; border-bottom: 1px solid var(--line-2); }
 .card-h:last-child { border-bottom: 0; }
-.card.warn > .card-h { background: #FFFBEB; border-radius: 10px 10px 0 0; }
+.card.warn > .card-h { background: #FFFBEB; border-radius: 12px 12px 0 0; }
 .card-b { padding: 16px 20px; }
 .card-b > p:first-child { margin-top: 0; }
 .card-b > p:last-child { margin-bottom: 0; }
@@ -153,10 +156,16 @@ a.tile:hover { border-color: #93B4F5; color: var(--ink); }
 
 .scroll { overflow-x: auto; position: relative; }
 .tbl { width: 100%; border-collapse: collapse; }
-.tbl th { text-align: left; font-size: 12px; font-weight: 600; color: var(--mute); padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); white-space: nowrap; }
+.tbl th { text-align: left; font-size: 11px; font-weight: 650; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--surface-2); white-space: nowrap; }
 .tbl td { padding: 10px 16px; border-bottom: 1px solid var(--line-2); vertical-align: middle; }
 .tbl tr:last-child td { border-bottom: 0; }
+.tbl tbody tr:hover td { background: #F8FAFD; }
 .tbl tr.off td { color: var(--faint); }
+/* Remover na linha: discreto ate o hover, para nao competir com o dado. */
+.tbl td form { margin: 0; text-align: right; }
+.tbl td .btn { height: 30px; padding: 0 10px; font-size: 12.5px; border-color: transparent; background: transparent; color: var(--muted); }
+.tbl tr:hover td .btn:not(:disabled) { border-color: #FCA5A5; color: var(--bad); background: var(--surface); }
+.tbl td .btn:not(:disabled):hover { background: var(--bad-bg); }
 .tbl .num { text-align: right; font-variant-numeric: tabular-nums; }
 
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -173,7 +182,8 @@ a.tile:hover { border-color: #93B4F5; color: var(--ink); }
 
 .btn { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border-radius: 8px; border: 1px solid #D1D5DB; background: var(--surface); color: var(--ink); font: inherit; font-weight: 500; cursor: pointer; text-decoration: none; white-space: nowrap; }
 .btn:hover { background: #F3F4F6; color: var(--ink); }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 1px 2px rgba(29, 78, 216, .25); }
 .btn.primary:hover { background: var(--accent-ink); color: #fff; }
 .btn.danger { border-color: #FCA5A5; color: var(--bad); }
 .btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
@@ -181,9 +191,16 @@ a.tile:hover { border-color: #93B4F5; color: var(--ink); }
 .btn.primary:disabled:hover { background: var(--accent); }
 
 .field { display: flex; flex-direction: column; gap: 6px; }
-.field label { font-size: 12px; font-weight: 600; color: var(--mute); }
+.field label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.field:has([required]) label::after { content: " *"; color: var(--bad-dot); }
 .input { height: 40px; padding: 0 12px; border: 1px solid #D1D5DB; border-radius: 8px; font: inherit; background: var(--surface); color: var(--ink); width: 100%; }
+.input { transition: border-color .12s, box-shadow .12s; box-shadow: inset 0 1px 1px rgba(17, 24, 39, .03); }
+.input:hover:not(:disabled) { border-color: #9CA3AF; }
+.input:focus { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.input::placeholder { color: #A3AAB5; }
 .input:disabled { background: var(--surface-2); color: var(--muted); }
+select.input { appearance: none; padding-right: 34px; cursor: pointer; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%235B6472' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
+input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; padding: 16px 20px; }
 
 .list { margin: 0; padding: 0; list-style: none; }
@@ -191,7 +208,7 @@ a.tile:hover { border-color: #93B4F5; color: var(--ink); }
 .list li:first-child { border-top: 0; }
 .list li .n { flex: none; width: 24px; color: var(--faint); font-variant-numeric: tabular-nums; }
 
-.out { margin: 0; padding: 14px 20px; background: #0F172A; color: #E2E8F0; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; overflow-x: auto; border-radius: 0 0 10px 10px; max-height: 480px; }
+.out { margin: 0; padding: 14px 20px; background: #0F172A; color: #E2E8F0; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; overflow-x: auto; border-radius: 0 0 12px 12px; max-height: 480px; }
 
 .note { padding: 12px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); }
 .note b { display: block; margin-bottom: 2px; }
@@ -241,9 +258,23 @@ a.tile:hover { border-color: #93B4F5; color: var(--ink); }
 .wan-card:has(option[value="pppoe"]:checked) .only-pppoe.card-h { display: flex; }
 .wan-card:has(option[value="static"]:checked) .only-static { display: grid; }
 
-/* Caixa de inclusao no pe de cada lista: firewall, reservas, registros. */
-.addbox { border-top: 1px solid var(--line-2); background: var(--surface-2); border-radius: 0 0 10px 10px; }
-.addbox-h { padding: 14px 20px 0; font-weight: 600; }
-.addbox-h .muted { font-weight: 400; }
-.addbox .form-grid { padding-top: 12px; }
-.addbox-go { display: flex; align-items: flex-end; }
+/* Caixa de inclusao no topo de cada lista: firewall, reservas, registros.
+   Painel recuado e tingido, para ler como formulario e nao como mais uma
+   linha da tabela. */
+.addbox { margin: 16px 20px; border: 1px solid var(--accent-line); border-radius: 10px; background: linear-gradient(180deg, #F5F8FF 0%, #FBFCFF 100%); }
+.addbox-h { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 12px 16px; border-bottom: 1px solid var(--accent-line); font-weight: 650; color: var(--accent-ink); }
+.addbox-h .muted { font-weight: 400; font-size: 13px; }
+.addbox-ico { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: var(--accent); color: #fff; flex: none; }
+.addbox .form-grid { padding: 14px 16px 16px; gap: 14px 16px; }
+.addbox .input { background-color: var(--surface); }
+.addbox .input:disabled { background-color: var(--surface-2); }
+.addbox .row { padding: 0 16px 14px; border-top: 0; font-size: 13px; }
+.addbox-go { display: flex; align-items: flex-end; justify-content: flex-end; grid-column: -2 / -1; }
+.addbox-go .btn { min-width: 132px; justify-content: center; }
+@media (max-width: 860px) {
+  .addbox { margin: 12px; }
+  /* 180px por coluna nao cabe duas vezes num celular, e a segunda virava coluna implicita estreita. */
+  .addbox .form-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 130px), 1fr)); }
+  .addbox-go { grid-column: 1 / -1; }
+  .addbox-go .btn { width: 100%; }
+}
