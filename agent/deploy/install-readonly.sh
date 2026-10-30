@@ -31,6 +31,30 @@ PORT="${PORT:-8443}"
 UNIT=/etc/systemd/system/fwadmin.service
 DROPIN=/etc/systemd/system/fwadmin.service.d/readonly.conf
 
+# O jail do painel no fail2ban. Validado com 'fail2ban-client -t' antes de
+# recarregar; se nao passar, os arquivos anteriores voltam. Sem fail2ban na
+# maquina, nao ha o que fazer.
+install_f2b() {
+    command -v fail2ban-client >/dev/null || return 0
+    local filter=/etc/fail2ban/filter.d/azimuth-panel.conf jail=/etc/fail2ban/jail.d/azimuth-panel.conf
+    if cmp -s "$SRC/deploy/fail2ban/azimuth-panel-filter.conf" "$filter" \
+       && cmp -s "$SRC/deploy/fail2ban/azimuth-panel-jail.conf" "$jail"; then
+        return 0
+    fi
+    for f in "$filter" "$jail"; do [ -e "$f" ] && cp -p "$f" "$f.anterior"; done
+    install -m 0644 "$SRC/deploy/fail2ban/azimuth-panel-filter.conf" "$filter"
+    install -m 0644 "$SRC/deploy/fail2ban/azimuth-panel-jail.conf" "$jail"
+    if fail2ban-client -t >/dev/null 2>&1; then
+        rm -f "$filter.anterior" "$jail.anterior"
+        fail2ban-client reload >/dev/null && echo "   fail2ban: jail azimuth-panel atualizado"
+    else
+        for f in "$filter" "$jail"; do
+            if [ -e "$f.anterior" ]; then mv "$f.anterior" "$f"; else rm -f "$f"; fi
+        done
+        echo "   fail2ban: config nova invalida — mantida a anterior"
+    fi
+}
+
 # Maquina adotada (adopt.sh): so o codigo e' atualizado. Sudoers, drop-in e
 # config sao do motor; reescreve-los aqui voltaria o painel ao somente leitura.
 if [ -e /etc/fwadmin/config.yaml ] && grep -q '^Environment=FWADMIN_READONLY=0' "$DROPIN" 2>/dev/null; then
@@ -54,6 +78,7 @@ if [ -e /etc/fwadmin/config.yaml ] && grep -q '^Environment=FWADMIN_READONLY=0' 
             echo "   sudoers novo invalido — mantido o anterior"
         fi
     fi
+    install_f2b
     VERSION="$(git -C "$SRC" describe --always --dirty 2>/dev/null || cat "$SRC/VERSION" 2>/dev/null || echo dev)"
     echo "$VERSION" > /opt/fwadmin/VERSION
     echo "   versao $VERSION"

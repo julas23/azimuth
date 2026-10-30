@@ -69,6 +69,17 @@ echo "== 4. sudoers =="
 install -m 0440 "$SRC/deploy/sudoers-fwadmin" /etc/sudoers.d/fwadmin
 visudo -c -q || { rm -f /etc/sudoers.d/fwadmin; echo "sudoers invalido — removido"; exit 1; }
 echo "   validado com visudo"
+if command -v fail2ban-client >/dev/null; then
+    install -m 0644 "$SRC/deploy/fail2ban/azimuth-panel-filter.conf" /etc/fail2ban/filter.d/azimuth-panel.conf
+    install -m 0644 "$SRC/deploy/fail2ban/azimuth-panel-jail.conf" /etc/fail2ban/jail.d/azimuth-panel.conf
+    if fail2ban-client -t >/dev/null 2>&1; then
+        fail2ban-client reload >/dev/null 2>&1 || true
+        echo "   jail azimuth-panel no fail2ban (senha errada no painel)"
+    else
+        rm -f /etc/fail2ban/filter.d/azimuth-panel.conf /etc/fail2ban/jail.d/azimuth-panel.conf
+        echo "   fail2ban recusou o jail do painel — ficou sem ele"
+    fi
+fi
 
 echo "== 5. systemd =="
 install -m 0644 "$SRC/deploy/fwadmin.service"          /etc/systemd/system/

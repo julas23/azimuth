@@ -88,6 +88,17 @@ echo "== 3. sudoers completo =="
 install -m 0440 "$SRC/deploy/sudoers-fwadmin" /etc/sudoers.d/fwadmin
 visudo -c -q || { install -m 0440 "$SRC/deploy/sudoers-fwadmin-readonly" /etc/sudoers.d/fwadmin; echo "   sudoers invalido — voltei ao enxuto"; exit 1; }
 echo "   apply, confirm, rollback, seal, inventory"
+if command -v fail2ban-client >/dev/null; then
+    install -m 0644 "$SRC/deploy/fail2ban/azimuth-panel-filter.conf" /etc/fail2ban/filter.d/azimuth-panel.conf
+    install -m 0644 "$SRC/deploy/fail2ban/azimuth-panel-jail.conf" /etc/fail2ban/jail.d/azimuth-panel.conf
+    if fail2ban-client -t >/dev/null 2>&1; then
+        fail2ban-client reload >/dev/null 2>&1 || true
+        echo "   jail azimuth-panel no fail2ban (senha errada no painel)"
+    else
+        rm -f /etc/fail2ban/filter.d/azimuth-panel.conf /etc/fail2ban/jail.d/azimuth-panel.conf
+        echo "   fail2ban recusou o jail do painel — ficou sem ele"
+    fi
+fi
 
 echo "== 4. tabela do motor no nftables =="
 install -d -m 0755 /etc/nftables.d

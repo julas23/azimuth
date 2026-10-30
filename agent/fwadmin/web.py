@@ -22,6 +22,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -700,6 +701,10 @@ async def login(request: Request, fields: Fields) -> Response:
     user_id = db.verify(username, password)
     if user_id is None:
         db.log("login-negado", username=username, address=client_ip(request))
+        # A linha que o jail azimuth-panel le no journal. So o IP: o usuario e'
+        # texto digitado por quem tenta, e numa linha que o fail2ban casa por
+        # regex ele poderia forjar o endereco de outra pessoa.
+        print(f"fwadmin: login recusado de {client_ip(request)}", file=sys.stderr, flush=True)
         time.sleep(1)  # desacelera tentativa em massa; o fail2ban cuida do resto
         return page(request, "login.html", error="usuário ou senha inválidos")
 
