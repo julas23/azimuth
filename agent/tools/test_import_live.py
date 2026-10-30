@@ -449,6 +449,7 @@ table inet filter {
         ct state established,related accept
         iifname "ens18" oifname $WAN counter accept comment "LAN sai"
         iifname "ppp0" ip saddr 1.2.3.4 drop
+        iifname "ppp0" ip daddr 10.0.0.9 tcp dport 3000 ct status dnat counter accept comment "DNAT que mora no motor"
     }
 }
 table ip nat {
@@ -465,7 +466,7 @@ table ip nat {
 """
 fw = build_firewall(parse_nft(ADMIN_NFT), "ens18", {"ppp0": "wan_vivo"}, None, ["wgvps"])
 check("as duas tabelas do arquivo sao absorvidas", fw["absorbed_tables"], ["inet filter", "ip nat"])
-check("sobra so o que nao tem traducao",
+check("sobra so o que nao tem traducao e tem efeito (accept sob policy accept sai)",
       [(c["table"], c["name"], c["rules"]) for c in fw["admin_chains"]],
       [("inet filter", "forward", ['iifname "ppp0" ip saddr 1.2.3.4 drop']),
        ("ip nat", "prerouting", ['iifname "wgvps" ip daddr 10.91.0.0/24 dnat ip prefix to ip daddr map { 10.91.0.0/24 : 10.0.0.0/24 } comment "NETMAP"'])])

@@ -960,6 +960,15 @@ def build_firewall(
             # motor aceita; os drops explicitos que sobraram continuam valendo.
             decl = decl[: -len("drop;")] + "accept;"
             note(f"nftables: a chain '{chain}' da tabela '{table}' fica com policy accept; quem bloqueia por padrao e' o motor")
+        if re.search(r"hook (input|forward) ", decl):
+            # Com policy accept, accept aqui nao faz nada: o que passa e' o
+            # que o motor aceita. Sobra so o que muda o destino do pacote.
+            mudos = [r for r in rules if re.search(r'\baccept(?: comment "[^"]*")?$', r)]
+            for r in mudos:
+                note(f"nftables/{chain}: accept sem efeito na chain que sobra, sai: {r}")
+            rules = [r for r in rules if r not in mudos]
+            if not rules:
+                continue
         admin_chains.append({"table": table, "name": chain, "decl": decl, "rules": rules})
     absorbed_tables = [t for t in nft.get("tables", []) if t != "inet azimuth"]
     if absorbed_tables:
