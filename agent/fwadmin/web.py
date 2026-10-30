@@ -18,6 +18,7 @@ aqui, prontas para quando o modo for desligado.
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
 import re
 import subprocess
@@ -25,7 +26,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, Callable
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlencode
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -100,7 +101,7 @@ async def form(request: Request) -> FormData:
 Fields = Annotated[FormData, Depends(form)]
 
 FWCTL = "/usr/local/sbin/fwctl"
-ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff", "observe"}
+ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff", "observe", "f2b"}
 
 READONLY = os.environ.get("FWADMIN_READONLY", "1") != "0"
 """Ligado por padrao: desligar e' decisao explicita de quem instala."""
@@ -666,6 +667,11 @@ def vpn_peers(cfg: Config, snapshot: live.Snapshot) -> list[dict[str, Any]]:
 def back(path: str, error: str | None = None) -> RedirectResponse:
     target = f"{path}?erro={error}" if error else f"{path}?ok=1"
     return RedirectResponse(target, status_code=303)
+
+
+def done(path: str, message: str) -> RedirectResponse:
+    """Para acao que vale na hora, sem proposta: o aviso diz o que aconteceu."""
+    return RedirectResponse(f"{path}?{urlencode({'feito': message})}", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -1491,6 +1497,35 @@ async def unack_change(request: Request, user: User, fields: Fields) -> Response
     acks.unmark(cid)
     db.log(f"intencional-desfeito:{cid}", username=user, address=client_ip(request))
     return RedirectResponse("/system#mudancas", status_code=303)
+
+
+def _f2b(request: Request, user: str, action: str, jail: str, ip: str) -> Response:
+    """Grava o pedido e chama 'fwctl f2b'. Validacao aqui e' conforto; a de
+    verdade e' a do fwctl, como root."""
+    try:
+        ip = str(ipaddress.ip_address(ip.strip()))
+    except ValueError:
+        return back("/fail2ban", f"endereço inválido: {ip}")
+    pedido = {"action": action, "jail": jail, "ip": ip}
+    tmp = paths.F2B_REQUEST.with_name(f".{paths.F2B_REQUEST.name}.{os.getpid()}")
+    tmp.write_text(json.dumps(pedido))
+    tmp.replace(paths.F2B_REQUEST)
+    ok, out = fwctl("f2b", timeout=30)
+    if not ok:
+        paths.F2B_REQUEST.unlink(missing_ok=True)
+        return back("/fail2ban", out.removeprefix("erro: ").strip() or "o fwctl recusou o pedido")
+    db.log(f"f2b-{action}:{jail}:{ip}", username=user, address=client_ip(request))
+    return done("/fail2ban", f"{ip} {'banido' if action == 'ban' else 'desbanido'} em {jail}")
+
+
+@app.post("/fail2ban/ban")
+async def f2b_ban(request: Request, user: User, fields: Fields) -> Response:
+    return _f2b(request, user, "ban", fields.text("jail"), fields.text("ip"))
+
+
+@app.post("/fail2ban/unban")
+async def f2b_unban(request: Request, user: User, fields: Fields) -> Response:
+    return _f2b(request, user, "unban", fields.text("jail"), fields.text("ip"))
 
 
 @app.post("/alerts/clear")

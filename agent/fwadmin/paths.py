@@ -64,6 +64,11 @@ checkout` no historico devolveria um selo que nunca correspondeu ao /etc vivo.
 DRIFT = VAR / "drift"
 """Copias de arquivos editados a mao, guardadas antes de serem sobrescritos."""
 
+F2B_REQUEST = VAR / "f2b-pedido.json"
+"""Banir ou desbanir pedido pelo painel. O IP nao pode ir como argumento do
+fwctl (o sudoers nao tem curinga), entao vai por este arquivo, como a nota
+do apply vai pelo apply-note."""
+
 REVERT_UNIT = "fwadmin-revert"
 """Unidade transiente do systemd que desfaz um apply nao confirmado."""
 

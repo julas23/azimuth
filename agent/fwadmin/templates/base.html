@@ -75,6 +75,8 @@
   <div class="frame-in">
     {% if request.query_params.get('erro') %}
       <div class="note bad"><b>Não deu para salvar</b>{{ request.query_params.get('erro') }}</div>
+    {% elif request.query_params.get('feito') %}
+      <div class="note ok"><b>Feito</b>{{ request.query_params.get('feito') }}.</div>
     {% elif request.query_params.get('ok') %}
       <div class="note ok"><b>Salvo como proposta</b>Revise em <a href="/system">Sistema</a> para aplicar.</div>
     {% endif %}

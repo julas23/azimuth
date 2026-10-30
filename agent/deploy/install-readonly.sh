@@ -40,6 +40,20 @@ if [ -e /etc/fwadmin/config.yaml ] && grep -q '^Environment=FWADMIN_READONLY=0' 
     cp -r "$SRC/fwadmin" /opt/fwadmin/
     find /opt/fwadmin -name __pycache__ -prune -exec rm -rf {} +
     install -m 0755 "$SRC/sbin/fwctl" /usr/local/sbin/fwctl
+    # O sudoers do motor acompanha o fwctl: subcomando novo sem a linha dele
+    # no sudoers e' botao que da erro de permissao. Validado antes de valer, e
+    # o anterior volta se o novo nao passar no visudo.
+    if ! cmp -s "$SRC/deploy/sudoers-fwadmin" /etc/sudoers.d/fwadmin; then
+        cp -p /etc/sudoers.d/fwadmin /etc/sudoers.d/.fwadmin.anterior
+        install -m 0440 "$SRC/deploy/sudoers-fwadmin" /etc/sudoers.d/fwadmin
+        if visudo -c -q; then
+            rm -f /etc/sudoers.d/.fwadmin.anterior
+            echo "   sudoers atualizado"
+        else
+            mv /etc/sudoers.d/.fwadmin.anterior /etc/sudoers.d/fwadmin
+            echo "   sudoers novo invalido — mantido o anterior"
+        fi
+    fi
     VERSION="$(git -C "$SRC" describe --always --dirty 2>/dev/null || cat "$SRC/VERSION" 2>/dev/null || echo dev)"
     echo "$VERSION" > /opt/fwadmin/VERSION
     echo "   versao $VERSION"

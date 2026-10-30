@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_icons.html" import icon %}
 {% block title %}{{ t.fail2ban }}{% endblock %}
 {% block body %}
 
@@ -40,15 +41,26 @@
   </section>
 
   {% set nbanned = jails|map(attribute='ips')|map('length')|sum %}
+  {% set ro = 'disabled' if readonly else '' %}
   <section class="card" aria-labelledby="h-ban">
     <div class="card-h"><h2 class="h2" id="h-ban">Banidos agora</h2><span class="chip {{ 'warn' if nbanned else 'mute' }}">{{ nbanned }}</span></div>
+    <form class="addbox" id="f-ban" method="post" action="/fail2ban/ban" aria-label="Banir endereço">
+      <div class="addbox-h"><span class="addbox-ico">{{ icon('fail2ban', 14) }}</span>Banir endereço <span class="muted">· vale na hora, pelo tempo de ban do jail; LAN, VPN e a rede de administração não podem ser banidas</span></div>
+      <div class="form-grid">
+        <div class="field"><label for="b-ip">Endereço</label><input id="b-ip" class="input mono" name="ip" placeholder="203.0.113.7" required {{ ro }}></div>
+        <div class="field"><label for="b-jail">Jail</label>
+          <select id="b-jail" class="input" name="jail" {{ ro }}>{% for j in jails %}<option value="{{ j.name }}">{{ j.name }}</option>{% endfor %}</select></div>
+        <div class="addbox-go"><button class="btn primary" type="submit" {% if readonly %}disabled title="Somente leitura"{% endif %}>{{ icon('fail2ban', 16) }}Banir</button></div>
+      </div>
+    </form>
     {% if nbanned %}
     <div class="scroll">
       <table class="tbl">
-        <thead><tr><th>Endereço</th><th>Jail</th><th>Fica banido por</th></tr></thead>
+        <thead><tr><th>Endereço</th><th>Jail</th><th>Fica banido por</th><th><span class="vh">Ações</span></th></tr></thead>
         <tbody>
         {% for j in jails %}{% for ip in j.ips %}
-          <tr><td class="mono">{{ ip }}</td><td><span class="chip mute">{{ j.name }}</span></td><td class="mono">{{ (j.bantime ~ ' s') if j.bantime else '—' }}</td></tr>
+          <tr><td class="mono">{{ ip }}</td><td><span class="chip mute">{{ j.name }}</span></td><td class="mono">{{ (j.bantime ~ ' s') if j.bantime else '—' }}</td>
+            <td><div class="ra"><form method="post" action="/fail2ban/unban"><input type="hidden" name="jail" value="{{ j.name }}"><input type="hidden" name="ip" value="{{ ip }}"><button class="btn sm" type="submit" {% if readonly %}disabled{% endif %}>{{ icon('play', 14) }}Desbanir</button></form></div></td></tr>
         {% endfor %}{% endfor %}
         </tbody>
       </table>

@@ -20,6 +20,8 @@ da UI vira caminho, argumento de shell ou nome de arquivo.
 from __future__ import annotations
 
 import argparse
+import ipaddress
+import json
 import os
 import shutil
 import sys
@@ -545,6 +547,64 @@ def cmd_observe(args: argparse.Namespace) -> int:
     return 0
 
 
+def f2b_refusal(ip, cfg) -> str:
+    """Por que este IP nao pode ser banido, ou vazio.
+
+    Nenhum bloqueio alcanca a LAN, o tunel nem a rede de administracao: banir
+    o proprio endereco por engano trancaria o dono do lado de fora, e a
+    chance disso e' maior justo quando alguem esta testando o fail2ban.
+    """
+    if ip.is_loopback or ip.is_unspecified or ip.is_multicast:
+        return "endereço local ou especial"
+    protegidas = {"da LAN": cfg.lan.ipv4.network, "da rede de administração": cfg.system.admin_cidr}
+    if cfg.wireguard.enabled and cfg.wireguard.address:
+        protegidas["do túnel da VPN"] = str(ipaddress.ip_interface(cfg.wireguard.address).network)
+    for nome, rede in protegidas.items():
+        if rede and ip in ipaddress.ip_network(rede, strict=False):
+            return f"está dentro {nome} ({rede})"
+    return ""
+
+
+def cmd_f2b(args: argparse.Namespace) -> int:
+    """Bane ou desbane um IP num jail, conforme o pedido que o painel gravou.
+
+    O pedido e' lido de um caminho fixo e apagado antes de qualquer coisa,
+    para nunca ser executado duas vezes; depois, cada campo e' revalidado
+    aqui, como root, sem confiar no que o painel validou.
+    """
+    require_root()
+    try:
+        raw = paths.F2B_REQUEST.read_text()[:1024]
+        paths.F2B_REQUEST.unlink()
+        pedido = json.loads(raw)
+    except (OSError, ValueError):
+        return fail("nenhum pedido de fail2ban legível")
+    if not isinstance(pedido, dict):
+        return fail("pedido de fail2ban malformado")
+
+    acao, jail, alvo = (str(pedido.get(k, "")) for k in ("action", "jail", "ip"))
+    if acao not in ("ban", "unban"):
+        return fail(f"ação desconhecida: {acao!r}")
+    try:
+        ip = ipaddress.ip_address(alvo)
+    except ValueError:
+        return fail(f"endereço inválido: {alvo!r}")
+    estado = observe.fail2ban()
+    if estado is None:
+        return fail("o fail2ban não respondeu: está parado ou não instalado")
+    if jail not in {j["name"] for j in estado["jails"]}:
+        return fail(f"jail inexistente: {jail!r}")
+    if acao == "ban" and (motivo := f2b_refusal(ip, load(paths.CONFIG))):
+        return fail(f"{ip} não pode ser banido: {motivo}")
+
+    result = run("fail2ban-client", "set", jail, f"{acao}ip", str(ip))
+    if not result.ok:
+        return fail(f"fail2ban-client recusou: {result.output}")
+    say(f"{'banido' if acao == 'ban' else 'desbanido'}: {ip} em {jail}")
+    observe.collect()
+    return 0
+
+
 def cmd_inventory(args: argparse.Namespace) -> int:
     """O que o motor possui, e o que roda nesta caixa sem dono.
 
@@ -743,6 +803,10 @@ def main() -> int:
 
     p_confirm = sub.add_parser("confirm", help="confirma o apply e versiona")
     p_confirm.set_defaults(fn=cmd_confirm)
+
+    sub.add_parser(
+        "f2b", help="bane ou desbane um IP, conforme o pedido gravado pelo painel"
+    ).set_defaults(fn=cmd_f2b)
 
     p_rb = sub.add_parser("rollback", help="desfaz o ultimo apply")
     p_rb.add_argument("--auto", action="store_true", help="chamado pelo watchdog")
