@@ -1,6 +1,6 @@
 {% from "_icons.html" import icon, logo %}
 <!doctype html>
-<html lang="{{ lang }}">
+<html lang="{{ lang }}" data-theme="{{ theme }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -28,6 +28,10 @@
       {% for code, name in langs %}<option value="{{ code }}" {% if code == lang %}selected{% endif %}>{{ name }}</option>{% endfor %}
     </select>
   </form>
+
+  {% set next_theme = {'auto': 'dark', 'dark': 'light', 'light': 'auto'}[theme] %}
+  {% set theme_name = {'auto': 'automático, segue o sistema', 'dark': 'escuro', 'light': 'claro'} %}
+  <a class="hbtn theme-btn" href="/theme/{{ next_theme }}?back_to={{ path|urlencode }}" title="Tema {{ theme_name[theme] }} · clique para {{ theme_name[next_theme].split(',')[0] }}" aria-label="Tema {{ theme_name[theme] }}; trocar para {{ theme_name[next_theme].split(',')[0] }}">{{ icon({'auto': 'contrast', 'dark': 'moon', 'light': 'sun'}[theme], 19) }}</a>
 
   <details class="notif">
     <summary class="hbtn" aria-label="{{ t.notifications }}">{{ icon('bell', 20) }}{% if alerts %}<span class="badge">{{ alerts|length }}</span>{% endif %}</summary>

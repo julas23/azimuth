@@ -401,6 +401,9 @@ NAV = [
 preso no fundo e por isso esta fora da lista."""
 
 LANG_COOKIE = "fwadmin_lang"
+THEME_COOKIE = "fwadmin_theme"
+THEMES = ("auto", "dark", "light")
+"""Na ordem em que o botao do cabecalho alterna."""
 
 
 def version() -> str:
@@ -430,6 +433,7 @@ def page(
         "nav": NAV,
         "here": nav,
         "lang": lang,
+        "theme": theme if (theme := request.cookies.get(THEME_COOKIE)) in THEMES else "auto",
         "langs": i18n.LANGS,
         "t": i18n.TEXT[lang],
         "version": version(),
@@ -592,13 +596,13 @@ def stack_state(cfg: Config) -> list[status.UnitInfo]:
 
 def domain_conflicts(cfg: Config) -> list[dict[str, str]]:
     """Nome que o DNS local resolve para um IP e o DHCP reserva para outro."""
-    reserved = {r.name: r.ip for r in cfg.dhcp.reservations}
+    reserved = {r.name: r.ip for r in cfg.dhcp.reservations if r.enabled}
     out = []
     for host in cfg.hosts:
         if host.dns and host.name in reserved and reserved[host.name] != host.ip:
             out.append(
                 {
-                    "name": f"{host.name}.{cfg.dns.domain}",
+                    "name": host.fqdn(cfg.dns.domain),
                     "dns": host.ip,
                     "dhcp": reserved[host.name],
                 }
@@ -713,6 +717,18 @@ async def set_lang(code: str, back_to: str = "/") -> Response:
     response = RedirectResponse(back_to, status_code=303)
     response.set_cookie(
         LANG_COOKIE, i18n.pick(code), max_age=365 * 86400, samesite="strict", path="/"
+    )
+    return response
+
+
+@app.get("/theme/{mode}")
+async def set_theme(mode: str, back_to: str = "/") -> Response:
+    """Tema claro, escuro ou o do sistema. Como o idioma: cookie e GET."""
+    if not back_to.startswith("/") or back_to.startswith("//"):
+        back_to = "/"
+    response = RedirectResponse(back_to, status_code=303)
+    response.set_cookie(
+        THEME_COOKIE, mode if mode in THEMES else "auto", max_age=365 * 86400, samesite="strict", path="/"
     )
     return response
 
@@ -843,19 +859,49 @@ async def vpn(request: Request, user: User) -> Response:
 # ---------------------------------------------------------------------------
 
 
+def _reservation(fields: FormData, enabled: bool = True) -> Reservation:
+    return Reservation(
+        mac=fields.text("mac"),
+        ip=fields.text("ip"),
+        name=fields.text("name"),
+        description=fields.text("description"),
+        enabled=enabled,
+    )
+
+
+def _find(items: list, attr: str, key: str, what: str) -> int:
+    """Indice da entrada cujo `attr` vale `key`, ou ValueError com o nome dela."""
+    for i, item in enumerate(items):
+        if getattr(item, attr) == key:
+            return i
+    raise ValueError(f"{what} inexistente: {key}")
+
+
 @app.post("/dns/reservation")
 async def add_reservation(request: Request, user: User, fields: Fields) -> Response:
     def mutate(cfg: Config) -> None:
-        cfg.dhcp.reservations.append(
-            Reservation(
-                mac=fields.text("mac"),
-                ip=fields.text("ip"),
-                name=fields.text("name"),
-                description=fields.text("description"),
-            )
-        )
+        cfg.dhcp.reservations.append(_reservation(fields))
 
     return back("/dhcp", edit(request, mutate, f"reserva+:{fields.text('name')}"))
+
+
+@app.post("/dns/reservation/{mac}")
+async def update_reservation(request: Request, user: User, mac: str, fields: Fields) -> Response:
+    def mutate(cfg: Config) -> None:
+        items = cfg.dhcp.reservations
+        i = _find(items, "mac", mac, "reserva")
+        items[i] = _reservation(fields, items[i].enabled)
+
+    return back("/dhcp", edit(request, mutate, f"reserva~:{mac}"))
+
+
+@app.post("/dns/reservation/{mac}/toggle")
+async def toggle_reservation(request: Request, user: User, mac: str) -> Response:
+    def mutate(cfg: Config) -> None:
+        r = cfg.dhcp.reservations[_find(cfg.dhcp.reservations, "mac", mac, "reserva")]
+        r.enabled = not r.enabled
+
+    return back("/dhcp", edit(request, mutate, f"reserva!:{mac}"))
 
 
 @app.post("/dns/reservation/{mac}/delete")
@@ -882,6 +928,31 @@ async def add_host(request: Request, user: User, fields: Fields) -> Response:
         )
 
     return back("/domain", edit(request, mutate, f"host+:{fields.text('name')}"))
+
+
+@app.post("/dns/host/{name}")
+async def update_host(request: Request, user: User, name: str, fields: Fields) -> Response:
+    """Edita nome, IP, grupo e descricao; os servicos do portal e o 'dns' ficam."""
+
+    def mutate(cfg: Config) -> None:
+        h = cfg.hosts[_find(cfg.hosts, "name", name, "host")]
+        h.name = fields.text("name")
+        h.ip = fields.text("ip")
+        h.group = fields.text("group") or None
+        h.description = fields.text("description")
+
+    return back("/domain", edit(request, mutate, f"host~:{name}"))
+
+
+@app.post("/dns/host/{name}/toggle")
+async def toggle_host(request: Request, user: User, name: str) -> Response:
+    """Desativar tira o registro do dnsmasq e deixa o host no modelo (dns=False)."""
+
+    def mutate(cfg: Config) -> None:
+        h = cfg.hosts[_find(cfg.hosts, "name", name, "host")]
+        h.dns = not h.dns
+
+    return back("/domain", edit(request, mutate, f"host!:{name}"))
 
 
 @app.post("/dns/host/{name}/delete")
@@ -1152,24 +1223,53 @@ def _chain_of(cfg: Config, chain: str) -> list[Rule]:
     return getattr(cfg.firewall, f"{chain}_rules")
 
 
+def _rule(fields: FormData, enabled: bool = True) -> Rule:
+    return Rule(
+        enabled=enabled,
+        action=fields.text("action"),
+        # Campo em branco chega como "", e nao ausente: o default do text()
+        # nao cobriria.
+        source=fields.text("source") or "any",
+        destination=fields.text("destination") or "any",
+        proto=fields.text("proto") or "any",
+        dest_ports=fields.text("dest_ports"),
+        description=fields.text("description"),
+        log=fields.flag("log"),
+    )
+
+
+def _at(items: list, index: int, what: str) -> Any:
+    if not 0 <= index < len(items):
+        raise ValueError(f"{what} inexistente")
+    return items[index]
+
+
 @app.post("/firewall/rule/{chain}")
 async def add_rule(request: Request, user: User, chain: str, fields: Fields) -> Response:
     def mutate(cfg: Config) -> None:
-        _chain_of(cfg, chain).append(
-            Rule(
-                action=fields.text("action"),
-                # Campo em branco chega como "", e nao ausente: o default do
-                # text() nao cobriria.
-                source=fields.text("source") or "any",
-                destination=fields.text("destination") or "any",
-                proto=fields.text("proto") or "any",
-                dest_ports=fields.text("dest_ports"),
-                description=fields.text("description"),
-                log=fields.flag("log"),
-            )
-        )
+        _chain_of(cfg, chain).append(_rule(fields))
 
     return back("/firewall", edit(request, mutate, f"regra+:{chain}"))
+
+
+@app.post("/firewall/rule/{chain}/{index}")
+async def update_rule(
+    request: Request, user: User, chain: str, index: int, fields: Fields
+) -> Response:
+    def mutate(cfg: Config) -> None:
+        rules = _chain_of(cfg, chain)
+        rules[index] = _rule(fields, _at(rules, index, "regra").enabled)
+
+    return back("/firewall", edit(request, mutate, f"regra~:{chain}:{index}"))
+
+
+@app.post("/firewall/rule/{chain}/{index}/toggle")
+async def toggle_rule(request: Request, user: User, chain: str, index: int) -> Response:
+    def mutate(cfg: Config) -> None:
+        rule = _at(_chain_of(cfg, chain), index, "regra")
+        rule.enabled = not rule.enabled
+
+    return back("/firewall", edit(request, mutate, f"regra!:{chain}:{index}"))
 
 
 @app.post("/firewall/rule/{chain}/{index}/delete")
@@ -1197,22 +1297,43 @@ async def move_rule(
     return back("/firewall", edit(request, mutate, f"regra~:{chain}:{index}"))
 
 
+def _forward(fields: FormData, enabled: bool = True) -> PortForward:
+    return PortForward(
+        enabled=enabled,
+        interface=fields.text("interface"),
+        wan_port=fields.number("wan_port"),
+        to_ip=fields.text("to_ip"),
+        to_port=fields.number("to_port"),
+        proto=fields.text("proto") or "tcp",
+        description=fields.text("description"),
+        source_filter=fields.text("source_filter"),
+    )
+
+
 @app.post("/firewall/forward")
 async def add_forward(request: Request, user: User, fields: Fields) -> Response:
     def mutate(cfg: Config) -> None:
-        cfg.firewall.port_forwards.append(
-            PortForward(
-                interface=fields.text("interface"),
-                wan_port=fields.number("wan_port"),
-                to_ip=fields.text("to_ip"),
-                to_port=fields.number("to_port"),
-                proto=fields.text("proto") or "tcp",
-                description=fields.text("description"),
-                source_filter=fields.text("source_filter"),
-            )
-        )
+        cfg.firewall.port_forwards.append(_forward(fields))
 
     return back("/firewall", edit(request, mutate, f"dnat+:{fields.text('wan_port')}"))
+
+
+@app.post("/firewall/forward/{index}")
+async def update_forward(request: Request, user: User, index: int, fields: Fields) -> Response:
+    def mutate(cfg: Config) -> None:
+        items = cfg.firewall.port_forwards
+        items[index] = _forward(fields, _at(items, index, "port-forward").enabled)
+
+    return back("/firewall", edit(request, mutate, f"dnat~:{index}"))
+
+
+@app.post("/firewall/forward/{index}/toggle")
+async def toggle_forward(request: Request, user: User, index: int) -> Response:
+    def mutate(cfg: Config) -> None:
+        pf = _at(cfg.firewall.port_forwards, index, "port-forward")
+        pf.enabled = not pf.enabled
+
+    return back("/firewall", edit(request, mutate, f"dnat!:{index}"))
 
 
 @app.post("/firewall/forward/{index}/delete")

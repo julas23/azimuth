@@ -59,7 +59,7 @@
           <td class="num mono">{{ p.rx|size if observed else '—' }}</td>
           <td class="num mono">{{ p.tx|size if observed else '—' }}</td>
           <td>{% if not p.enabled %}<span class="chip mute">revogado</span>{% elif p.online %}<span class="chip ok">conectado</span>{% elif p.stale %}<span class="chip warn">sem contato</span>{% else %}<span class="chip mute">ocioso</span>{% endif %}</td>
-          <td><form method="post" action="/vpn/peer/{{ p.name }}/toggle">{{ action('Reativar' if not p.enabled else 'Revogar', readonly) }}</form></td>
+          <td><div class="ra"><form method="post" action="/vpn/peer/{{ p.name }}/toggle"><button class="btn sm{{ ' danger' if p.enabled }}" type="submit" {% if readonly %}disabled{% endif %}>{% if p.enabled %}{{ icon('pause', 14) }}Revogar{% else %}{{ icon('play', 14) }}Reativar{% endif %}</button></form></div></td>
         </tr>
       {% else %}
         <tr><td colspan="8" class="muted">Nenhum peer.</td></tr>

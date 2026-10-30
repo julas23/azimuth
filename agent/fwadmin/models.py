@@ -265,6 +265,10 @@ class Reservation(Base):
     ip: str
     name: Annotated[str, Field(pattern=HOSTLABEL_RE.pattern)]
     description: Annotated[str, Field(max_length=120)] = ""
+    enabled: bool = True
+    """Desligada sai do dnsmasq e fica no modelo, com IP e MAC guardados: os
+    validadores de duplicata continuam contando com ela, para o IP nao ser
+    entregue a outro aparelho enquanto ela estiver so pausada."""
 
     @field_validator("mac")
     @classmethod

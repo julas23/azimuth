@@ -20,6 +20,12 @@
 {%- elif key == 'logout' %}<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>
 {%- elif key == 'download' %}<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>
 {%- elif key == 'plus' %}<path d="M12 5v14M5 12h14"/>
+{%- elif key == 'edit' %}<path d="M4 20h4L19 9l-4-4L4 16zM14 6l4 4"/>
+{%- elif key == 'pause' %}<path d="M9 6v12M15 6v12"/>
+{%- elif key == 'trash' %}<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>
+{%- elif key == 'sun' %}<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+{%- elif key == 'moon' %}<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>
+{%- elif key == 'contrast' %}<circle cx="12" cy="12" r="9"/><path d="M12 3v18a9 9 0 0 0 0-18z" fill="currentColor"/>
 {%- elif key == 'lock' %}<rect x="5" y="11" width="14" height="10" rx="1.5"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>
 {%- endif %}
 </svg>
@@ -50,5 +56,28 @@
       <button class="btn" type="submit" {% if readonly %}disabled title="Somente leitura"{% elif not applicable %}disabled title="Nada salvo para aplicar"{% endif %}>Aplicar</button>
     </form>
   </div>
+</div>
+{%- endmacro %}
+
+{#- Acoes de uma linha de lista: Editar abre o formulario da caixa preenchido
+    (?editar=), Desativar/Ativar e Remover postam direto. Sempre visiveis. -#}
+{% macro rowactions(base, enabled, edit_href, readonly, off='Desativar', on='Ativar') -%}
+<div class="ra">
+  {% if readonly %}<span class="btn sm" aria-disabled="true" title="Somente leitura">{{ icon('edit', 14) }}Editar</span>
+  {% else %}<a class="btn sm" href="{{ edit_href }}">{{ icon('edit', 14) }}Editar</a>{% endif %}
+  <form method="post" action="{{ base }}/toggle"><button class="btn sm" type="submit" {% if readonly %}disabled{% endif %}>{% if enabled %}{{ icon('pause', 14) }}{{ off }}{% else %}{{ icon('play', 14) }}{{ on }}{% endif %}</button></form>
+  <form method="post" action="{{ base }}/delete"><button class="btn sm danger" type="submit" {% if readonly %}disabled{% endif %}>{{ icon('trash', 14) }}Remover</button></form>
+</div>
+{%- endmacro %}
+
+{#- Cabecalho e botao da caixa de inclusao, que vira caixa de edicao. -#}
+{% macro boxhead(new, editing, note='') -%}
+<div class="addbox-h"><span class="addbox-ico">{{ icon('edit' if editing else 'plus', 14) }}</span>{{ editing or new }}{% if note and not editing %} <span class="muted">· {{ note }}</span>{% endif %}</div>
+{%- endmacro %}
+
+{% macro boxgo(editing, readonly, cancel) -%}
+<div class="addbox-go">
+  {% if editing %}<a class="btn" href="{{ cancel }}">Cancelar</a>{% endif %}
+  <button class="btn primary" type="submit" {% if readonly %}disabled title="Somente leitura"{% endif %}>{{ icon('edit' if editing else 'plus', 16) }}{{ 'Salvar alteração' if editing else 'Adicionar' }}</button>
 </div>
 {%- endmacro %}

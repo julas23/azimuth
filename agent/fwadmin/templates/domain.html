@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% from "_icons.html" import action, actionbar, icon %}
+{% from "_icons.html" import action, actionbar, icon, rowactions, boxhead, boxgo %}
 {% block title %}{{ t.domain }}{% endblock %}
 {% block body %}
-{% set records = cfg.hosts|selectattr('dns')|list %}
+{% set records = cfg.hosts %}
 
 <div class="page-h">
   <div><h1>{{ t.domain }}</h1><p class="lede">Os nomes da rede de casa em <span class="mono">{{ cfg.dns.domain }}</span>, respondidos pelo dnsmasq. O que não for daqui segue para o <a href="/dns">DNS</a>.</p></div>
@@ -30,41 +30,37 @@
 
 <section class="card" aria-labelledby="h-rec">
   <div class="card-h"><h2 class="h2" id="h-rec">Registros</h2><span class="chip mute">{{ records|length }}</span></div>
-  <form class="addbox" method="post" action="/dns/host" aria-label="Novo registro">
-    <div class="addbox-h"><span class="addbox-ico">{{ icon('plus', 14) }}</span>Novo registro</div>
+  {% set editar = request.query_params.get('editar', '') %}
+  {% set e = records|selectattr('name', 'equalto', editar)|first if editar else none %}
+  <form class="addbox{% if e %} editing{% endif %}" id="f-host" method="post" action="/dns/host{% if e %}/{{ e.name }}{% endif %}" aria-label="{{ 'Editar' if e else 'Novo' }} registro">
+    {{ boxhead('Novo registro', ('Editar ' ~ e.name) if e else '') }}
     <div class="form-grid">
-      <div class="field"><label for="h-name">Nome</label><input id="h-name" class="input mono" name="name" placeholder="nas" required {{ ro }}></div>
-      <div class="field"><label for="h-ip">Aponta para</label><input id="h-ip" class="input mono" name="ip" placeholder="{{ cfg.lan.ipv4.ip }}" required {{ ro }}></div>
+      <div class="field"><label for="h-name">Nome</label><input id="h-name" class="input mono" name="name" placeholder="nas" value="{{ e.name if e else '' }}" required {{ ro }}></div>
+      <div class="field"><label for="h-ip">Aponta para</label><input id="h-ip" class="input mono" name="ip" placeholder="{{ cfg.lan.ipv4.ip }}" value="{{ e.ip if e else '' }}" required {{ ro }}></div>
       <div class="field"><label for="h-grp">Grupo</label>
-        <select id="h-grp" class="input" name="group" {{ ro }}><option value="">—</option>{% for g in cfg.portal.groups|sort(attribute='order') %}<option value="{{ g.id }}">{{ g.title }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="h-ds">Descrição</label><input id="h-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
-      <div class="addbox-go">{{ action(icon('plus', 16) ~ 'Adicionar', readonly, 'primary') }}</div>
+        <select id="h-grp" class="input" name="group" {{ ro }}><option value="">—</option>{% for g in cfg.portal.groups|sort(attribute='order') %}<option value="{{ g.id }}" {% if e and e.group == g.id %}selected{% endif %}>{{ g.title }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="h-ds">Descrição</label><input id="h-ds" class="input" name="description" maxlength="120" value="{{ e.description if e else '' }}" {{ ro }}></div>
+      {{ boxgo(e, readonly, '/domain#f-host') }}
     </div>
-    <div class="row muted"><span>Nome curto vira <span class="mono">nome.{{ cfg.dns.domain }}</span>; um nome com ponto é usado como está.</span></div>
+    <div class="row muted"><span>Nome curto vira <span class="mono">nome.{{ cfg.dns.domain }}</span>; um nome com ponto é usado como está. Desativar tira o nome do DNS e mantém o registro aqui.</span></div>
   </form>
   <div class="scroll">
     <table class="tbl">
-      <thead><tr><th>Nome</th><th>Aponta para</th><th>Grupo</th><th>Descrição</th><th><span class="vh">Ações</span></th></tr></thead>
+      <thead><tr><th>Nome</th><th>Aponta para</th><th>Grupo</th><th>Descrição</th><th>Situação</th><th><span class="vh">Ações</span></th></tr></thead>
       <tbody>
       {% set wrong = conflicts|map(attribute='name')|list %}
       {% for h in records|sort(attribute='name') %}
-        <tr><td class="mono">{{ h.name }}.{{ cfg.dns.domain }}</td><td class="mono">{{ h.ip }}{% if (h.name ~ '.' ~ cfg.dns.domain) in wrong %} <span class="chip warn">conflito</span>{% endif %}</td><td>{{ h.group or '—' }}</td><td class="muted">{{ h.description }}</td>
-          <td><form method="post" action="/dns/host/{{ h.name }}/delete">{{ action('Remover', readonly) }}</form></td></tr>
+        <tr class="{{ '' if h.dns else 'off' }}{{ ' sel' if e and h.name == e.name }}"><td class="mono">{{ h.fqdn(cfg.dns.domain) }}</td><td class="mono">{{ h.ip }}{% if h.fqdn(cfg.dns.domain) in wrong %} <span class="chip warn">conflito</span>{% endif %}</td><td>{{ h.group or '—' }}</td><td class="muted">{{ h.description }}</td>
+          <td>{% if h.dns %}<span class="chip ok">no DNS</span>{% else %}<span class="chip mute">fora do DNS</span>{% endif %}</td>
+          <td>{{ rowactions('/dns/host/' ~ h.name, h.dns, '?editar=' ~ h.name ~ '#f-host', readonly) }}</td></tr>
       {% else %}
-        <tr><td colspan="5" class="muted">Nenhum registro manual; só os nomes que vêm do DHCP.</td></tr>
+        <tr><td colspan="6" class="muted">Nenhum registro manual; só os nomes que vêm do DHCP.</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
 
-{% set outside = cfg.hosts|rejectattr('dns')|list %}
-{% if outside %}
-<section class="card quiet" aria-labelledby="h-out">
-  <div class="card-h"><h2 class="h2" id="h-out">Fora do DNS</h2><span class="chip mute">{{ outside|length }}</span><span class="muted">conhecidos pelo modelo, mas sem registro na zona</span></div>
-  {% for h in outside %}<div class="row"><span class="mono grow">{{ h.name }}</span><span class="muted">{{ h.description }}</span></div>{% endfor %}
-</section>
-{% endif %}
 
 {{ actionbar('page-form', readonly, applicable) }}
 {% endblock %}

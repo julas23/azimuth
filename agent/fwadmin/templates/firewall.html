@@ -1,8 +1,9 @@
 {% extends "base.html" %}
-{% from "_icons.html" import action, actionbar, icon %}
+{% from "_icons.html" import action, actionbar, icon, rowactions, boxhead, boxgo %}
 {% block title %}{{ t.firewall }}{% endblock %}
 {% block body %}
 {% set fw = cfg.firewall %}
+{% set editar = request.query_params.get('editar', '') %}
 {% set ro = 'disabled' if readonly else '' %}
 
 <div class="page-h">
@@ -24,21 +25,24 @@
 
 {% macro rules(title, id, list, chain) %}
 {% set ro = 'disabled' if readonly else '' %}
+{% set ed = request.query_params.get('editar', '').split(':') %}
+{% set ix = ed[1]|int(-1) if ed[0] == chain and ed|length == 2 else -1 %}
+{% set e = list[ix] if 0 <= ix < list|length else none %}
 <section class="card" aria-labelledby="h-{{ id }}">
   <div class="card-h"><h2 class="h2" id="h-{{ id }}">{{ title }}</h2><span class="chip mute">{{ list|length }}</span></div>
-  <form class="addbox" method="post" action="/firewall/rule/{{ chain }}" aria-label="Nova regra: {{ title }}">
-    <div class="addbox-h"><span class="addbox-ico">{{ icon('plus', 14) }}</span>Nova regra</div>
+  <form class="addbox{% if e %} editing{% endif %}" id="f-{{ id }}" method="post" action="/firewall/rule/{{ chain }}{% if e %}/{{ ix }}{% endif %}" aria-label="{{ 'Editar' if e else 'Nova' }} regra: {{ title }}">
+    {{ boxhead('Nova regra', ('Editar regra #' ~ (ix + 1)) if e else '') }}
     <div class="form-grid">
       <div class="field"><label for="{{ id }}-act">Ação</label>
-        <select id="{{ id }}-act" class="input" name="action" {{ ro }}>{% for a in ('accept', 'drop', 'reject') %}<option value="{{ a }}">{{ a }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="{{ id }}-src">Origem</label><input id="{{ id }}-src" class="input mono" name="source" list="zones" placeholder="any" {{ ro }}></div>
-      <div class="field"><label for="{{ id }}-dst">Destino</label><input id="{{ id }}-dst" class="input mono" name="destination" list="zones" placeholder="{{ 'this' if chain == 'input' else 'any' }}" value="{{ 'this' if chain == 'input' else '' }}" {{ ro }}></div>
+        <select id="{{ id }}-act" class="input" name="action" {{ ro }}>{% for a in ('accept', 'drop', 'reject') %}<option value="{{ a }}" {% if e and e.action.value == a %}selected{% endif %}>{{ a }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="{{ id }}-src">Origem</label><input id="{{ id }}-src" class="input mono" name="source" list="zones" placeholder="any" value="{{ (e.source.value if e.source.value is defined else e.source) if e else '' }}" {{ ro }}></div>
+      <div class="field"><label for="{{ id }}-dst">Destino</label><input id="{{ id }}-dst" class="input mono" name="destination" list="zones" placeholder="{{ 'this' if chain == 'input' else 'any' }}" value="{{ (e.destination.value if e.destination.value is defined else e.destination) if e else ('this' if chain == 'input' else '') }}" {{ ro }}></div>
       <div class="field"><label for="{{ id }}-pr">Protocolo</label>
-        <select id="{{ id }}-pr" class="input" name="proto" {{ ro }}>{% for p in ('tcp', 'udp', 'tcp/udp', 'icmp', 'any') %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="{{ id }}-pt">Portas</label><input id="{{ id }}-pt" class="input mono" name="dest_ports" placeholder="22 · 80,443 · 9000-9010" {{ ro }}></div>
-      <div class="field" style="grid-column: span 2"><label for="{{ id }}-ds">Descrição</label><input id="{{ id }}-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
-      <label class="check"><input type="checkbox" name="log" value="1" {{ ro }}> Registra no log</label>
-      <div class="addbox-go">{{ action(icon('plus', 16) ~ 'Adicionar', readonly, 'primary') }}</div>
+        <select id="{{ id }}-pr" class="input" name="proto" {{ ro }}>{% for p in ('tcp', 'udp', 'tcp/udp', 'icmp', 'any') %}<option value="{{ p }}" {% if e and e.proto.value == p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="{{ id }}-pt">Portas</label><input id="{{ id }}-pt" class="input mono" name="dest_ports" placeholder="22 · 80,443 · 9000-9010" value="{{ e.dest_ports if e else '' }}" {{ ro }}></div>
+      <div class="field" style="grid-column: span 2"><label for="{{ id }}-ds">Descrição</label><input id="{{ id }}-ds" class="input" name="description" maxlength="120" value="{{ e.description if e else '' }}" {{ ro }}></div>
+      <label class="check"><input type="checkbox" name="log" value="1" {% if e and e.log %}checked{% endif %} {{ ro }}> Registra no log</label>
+      {{ boxgo(e, readonly, '/firewall#f-' ~ id) }}
     </div>
   </form>
   <div class="scroll">
@@ -46,7 +50,7 @@
       <thead><tr><th>#</th><th>Ação</th><th>Origem</th><th>Destino</th><th>Protocolo</th><th>Portas</th><th>Descrição</th><th>Situação</th><th><span class="vh">Ações</span></th></tr></thead>
       <tbody>
       {% for r in list %}
-        <tr class="{{ '' if r.enabled else 'off' }}">
+        <tr class="{{ '' if r.enabled else 'off' }}{{ ' sel' if loop.index0 == ix }}">
           <td class="muted">{{ loop.index }}</td>
           <td><span class="chip {{ 'ok' if r.action.value == 'accept' else 'bad' }}">{{ r.action.value }}</span></td>
           <td class="mono">{{ r.source.value if r.source.value is defined else r.source }}</td>
@@ -54,8 +58,8 @@
           <td class="mono">{{ r.proto.value }}</td>
           <td class="mono">{{ r.dest_ports or '—' }}</td>
           <td>{{ r.description }}</td>
-          <td>{% if r.enabled %}<span class="chip ok">ativa</span>{% else %}<span class="chip mute">desligada</span>{% endif %}{% if r.log %} <span class="chip info">log</span>{% endif %}</td>
-          <td><form method="post" action="/firewall/rule/{{ chain }}/{{ loop.index0 }}/delete">{{ action('Remover', readonly) }}</form></td>
+          <td>{% if r.enabled %}<span class="chip ok">ativa</span>{% else %}<span class="chip mute">desativada</span>{% endif %}{% if r.log %} <span class="chip info">log</span>{% endif %}</td>
+          <td>{{ rowactions('/firewall/rule/' ~ chain ~ '/' ~ loop.index0, r.enabled, '?editar=' ~ chain ~ ':' ~ loop.index0 ~ '#f-' ~ id, readonly) }}</td>
         </tr>
       {% else %}
         <tr><td colspan="9" class="muted">Nenhuma: só passa o que as exceções de base deixam.</td></tr>
@@ -83,37 +87,41 @@
 
 <section class="card" aria-labelledby="h-pf">
   <div class="card-h"><h2 class="h2" id="h-pf">Redirecionamento de portas</h2><span class="chip mute">{{ fw.port_forwards|length }}</span></div>
-  <form class="addbox" method="post" action="/firewall/forward" aria-label="Novo redirecionamento">
-    <div class="addbox-h"><span class="addbox-ico">{{ icon('plus', 14) }}</span>Novo redirecionamento <span class="muted">· publica um serviço da LAN na internet; o caminho recomendado é a VPN</span></div>
+  {% set ed = editar.split(':') %}
+  {% set ix = ed[1]|int(-1) if ed[0] == 'pf' and ed|length == 2 else -1 %}
+  {% set e = fw.port_forwards[ix] if 0 <= ix < fw.port_forwards|length else none %}
+  <form class="addbox{% if e %} editing{% endif %}" id="f-pf" method="post" action="/firewall/forward{% if e %}/{{ ix }}{% endif %}" aria-label="{{ 'Editar' if e else 'Novo' }} redirecionamento">
+    {{ boxhead('Novo redirecionamento', 'Editar redirecionamento' if e else '', 'publica um serviço da LAN na internet; o caminho recomendado é a VPN') }}
     <div class="form-grid">
       <div class="field"><label for="pf-if">WAN</label>
-        <select id="pf-if" class="input" name="interface" {{ ro }}>{% for w in cfg.wans %}<option value="{{ w.name }}">{{ w.description or w.name }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="pf-wp">Porta externa</label><input id="pf-wp" class="input mono" name="wan_port" type="number" min="1" max="65535" required {{ ro }}></div>
-      <div class="field"><label for="pf-ip">Para o IP</label><input id="pf-ip" class="input mono" name="to_ip" placeholder="{{ cfg.lan.ipv4.ip }}" required {{ ro }}></div>
-      <div class="field"><label for="pf-tp">Porta interna</label><input id="pf-tp" class="input mono" name="to_port" type="number" min="1" max="65535" required {{ ro }}></div>
+        <select id="pf-if" class="input" name="interface" {{ ro }}>{% for w in cfg.wans %}<option value="{{ w.name }}" {% if e and e.interface == w.name %}selected{% endif %}>{{ w.description or w.name }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="pf-wp">Porta externa</label><input id="pf-wp" class="input mono" name="wan_port" type="number" min="1" max="65535" value="{{ e.wan_port if e else '' }}" required {{ ro }}></div>
+      <div class="field"><label for="pf-ip">Para o IP</label><input id="pf-ip" class="input mono" name="to_ip" placeholder="{{ cfg.lan.ipv4.ip }}" value="{{ e.to_ip if e else '' }}" required {{ ro }}></div>
+      <div class="field"><label for="pf-tp">Porta interna</label><input id="pf-tp" class="input mono" name="to_port" type="number" min="1" max="65535" value="{{ e.to_port if e else '' }}" required {{ ro }}></div>
       <div class="field"><label for="pf-pr">Protocolo</label>
-        <select id="pf-pr" class="input" name="proto" {{ ro }}>{% for p in ('tcp', 'udp', 'tcp/udp') %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="pf-sf">Só de</label><input id="pf-sf" class="input mono" name="source_filter" placeholder="qualquer · 203.0.113.0/24" {{ ro }}></div>
-      <div class="field" style="grid-column: span 2"><label for="pf-ds">Descrição</label><input id="pf-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
-      <div class="addbox-go">{{ action(icon('plus', 16) ~ 'Adicionar', readonly, 'primary') }}</div>
+        <select id="pf-pr" class="input" name="proto" {{ ro }}>{% for p in ('tcp', 'udp', 'tcp/udp') %}<option value="{{ p }}" {% if e and e.proto == p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="pf-sf">Só de</label><input id="pf-sf" class="input mono" name="source_filter" placeholder="qualquer · 203.0.113.0/24" value="{{ e.source_filter if e else '' }}" {{ ro }}></div>
+      <div class="field" style="grid-column: span 2"><label for="pf-ds">Descrição</label><input id="pf-ds" class="input" name="description" maxlength="120" value="{{ e.description if e else '' }}" {{ ro }}></div>
+      {{ boxgo(e, readonly, '/firewall#f-pf') }}
     </div>
   </form>
   <div class="scroll">
     <table class="tbl">
-      <thead><tr><th>WAN</th><th>Porta externa</th><th>Para</th><th>Protocolo</th><th>Só de</th><th>Descrição</th><th><span class="vh">Ações</span></th></tr></thead>
+      <thead><tr><th>WAN</th><th>Porta externa</th><th>Para</th><th>Protocolo</th><th>Só de</th><th>Descrição</th><th>Situação</th><th><span class="vh">Ações</span></th></tr></thead>
       <tbody>
       {% for pf in fw.port_forwards %}
-        <tr class="{{ '' if pf.enabled else 'off' }}">
+        <tr class="{{ '' if pf.enabled else 'off' }}{{ ' sel' if loop.index0 == ix }}">
           <td>{{ cfg.iface(pf.interface).description or pf.interface }}</td>
           <td class="mono">{{ pf.wan_port }}</td>
           <td class="mono">{{ pf.to_ip }}:{{ pf.to_port }}</td>
           <td class="mono">{{ pf.proto }}</td>
           <td class="mono">{{ pf.source_filter or 'qualquer' }}</td>
           <td>{{ pf.description }}</td>
-          <td><form method="post" action="/firewall/forward/{{ loop.index0 }}/delete">{{ action('Remover', readonly) }}</form></td>
+          <td>{% if pf.enabled %}<span class="chip ok">ativo</span>{% else %}<span class="chip mute">desativado</span>{% endif %}</td>
+          <td>{{ rowactions('/firewall/forward/' ~ loop.index0, pf.enabled, '?editar=pf:' ~ loop.index0 ~ '#f-pf', readonly) }}</td>
         </tr>
       {% else %}
-        <tr><td colspan="7" class="muted">Nenhuma porta aberta para dentro.</td></tr>
+        <tr><td colspan="8" class="muted">Nenhuma porta aberta para dentro.</td></tr>
       {% endfor %}
       </tbody>
     </table>

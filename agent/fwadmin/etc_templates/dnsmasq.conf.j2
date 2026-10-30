@@ -25,7 +25,7 @@ dhcp-option=option:router,{{ dhcp.router or lan.ipv4.address.split('/')[0] }}
 dhcp-option=6,{{ (dhcp.dns_servers or [lan.ipv4.address.split('/')[0]]) | join(',') }}
 
 # --- reservas por MAC -------------------------------------------------------
-{% for r in dhcp.reservations %}
+{% for r in dhcp.reservations if r.enabled %}
 dhcp-host={{ r.mac }},{{ r.ip }},{{ r.name }}{% if r.description %}  # {{ r.description }}{% endif %}
 
 {% endfor %}

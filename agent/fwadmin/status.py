@@ -161,7 +161,7 @@ LEASE_FILES = ("/var/lib/misc/dnsmasq.leases", "/var/lib/dnsmasq/dnsmasq.leases"
 
 def leases(cfg: Config | None = None) -> list[Lease]:
     """Leases ativos do dnsmasq, marcando quais vem de reserva."""
-    reserved = {r.mac for r in cfg.dhcp.reservations} if cfg else set()
+    reserved = {r.mac for r in cfg.dhcp.reservations if r.enabled} if cfg else set()
     for candidate in LEASE_FILES:
         path = paths.sys_path(candidate)
         if not path.exists():

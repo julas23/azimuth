@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_icons.html" import action, actionbar, icon %}
+{% from "_icons.html" import action, actionbar, icon, rowactions, boxhead, boxgo %}
 {% block title %}{{ t.dhcp }}{% endblock %}
 {% block body %}
 {% set d = cfg.dhcp %}
@@ -47,14 +47,16 @@
 <section class="card" aria-labelledby="h-res">
   <div class="card-h"><h2 class="h2" id="h-res">Reservas</h2><span class="chip mute">{{ d.reservations|length }}</span></div>
   {% set ro = 'disabled' if readonly else '' %}
-  <form class="addbox" method="post" action="/dns/reservation" aria-label="Nova reserva">
-    <div class="addbox-h"><span class="addbox-ico">{{ icon('plus', 14) }}</span>Nova reserva</div>
+  {% set editar = request.query_params.get('editar', '') %}
+  {% set e = d.reservations|selectattr('mac', 'equalto', editar)|first if editar else none %}
+  <form class="addbox{% if e %} editing{% endif %}" id="f-res" method="post" action="/dns/reservation{% if e %}/{{ e.mac }}{% endif %}" aria-label="{{ 'Editar' if e else 'Nova' }} reserva">
+    {{ boxhead('Nova reserva', ('Editar reserva ' ~ e.name) if e else '') }}
     <div class="form-grid">
-      <div class="field"><label for="r-name">Nome</label><input id="r-name" class="input mono" name="name" placeholder="impressora" required {{ ro }}></div>
-      <div class="field"><label for="r-ip">IP</label><input id="r-ip" class="input mono" name="ip" placeholder="{{ cfg.lan.ipv4.ip }}" required {{ ro }}></div>
-      <div class="field"><label for="r-mac">MAC</label><input id="r-mac" class="input mono" name="mac" placeholder="aa:bb:cc:dd:ee:ff" required {{ ro }}></div>
-      <div class="field"><label for="r-ds">Descrição</label><input id="r-ds" class="input" name="description" maxlength="120" {{ ro }}></div>
-      <div class="addbox-go">{{ action(icon('plus', 16) ~ 'Adicionar', readonly, 'primary') }}</div>
+      <div class="field"><label for="r-name">Nome</label><input id="r-name" class="input mono" name="name" placeholder="impressora" value="{{ e.name if e else '' }}" required {{ ro }}></div>
+      <div class="field"><label for="r-ip">IP</label><input id="r-ip" class="input mono" name="ip" placeholder="{{ cfg.lan.ipv4.ip }}" value="{{ e.ip if e else '' }}" required {{ ro }}></div>
+      <div class="field"><label for="r-mac">MAC</label><input id="r-mac" class="input mono" name="mac" placeholder="aa:bb:cc:dd:ee:ff" value="{{ e.mac if e else '' }}" required {{ ro }}></div>
+      <div class="field"><label for="r-ds">Descrição</label><input id="r-ds" class="input" name="description" maxlength="120" value="{{ e.description if e else '' }}" {{ ro }}></div>
+      {{ boxgo(e, readonly, '/dhcp#f-res') }}
     </div>
   </form>
   <div class="scroll">
@@ -63,9 +65,9 @@
       <tbody>
       {% set online = leases|map(attribute='mac')|list %}
       {% for r in d.reservations|sort(attribute='ip') %}
-        <tr><td>{{ r.name }}</td><td class="mono">{{ r.ip }}</td><td class="mono">{{ r.mac }}</td><td class="muted">{{ r.description }}</td>
-          <td>{% if r.mac|lower in online %}<span class="chip ok">conectado</span>{% else %}<span class="chip mute">fora do ar</span>{% endif %}</td>
-          <td><form method="post" action="/dns/reservation/{{ r.mac }}/delete">{{ action('Remover', readonly) }}</form></td></tr>
+        <tr class="{{ '' if r.enabled else 'off' }}{{ ' sel' if e and r.mac == e.mac }}"><td>{{ r.name }}</td><td class="mono">{{ r.ip }}</td><td class="mono">{{ r.mac }}</td><td class="muted">{{ r.description }}</td>
+          <td>{% if not r.enabled %}<span class="chip mute">desativada</span>{% elif r.mac|lower in online %}<span class="chip ok">conectado</span>{% else %}<span class="chip mute">fora do ar</span>{% endif %}</td>
+          <td>{{ rowactions('/dns/reservation/' ~ r.mac, r.enabled, '?editar=' ~ r.mac ~ '#f-res', readonly) }}</td></tr>
       {% else %}
         <tr><td colspan="6" class="muted">Nenhuma reserva.</td></tr>
       {% endfor %}
