@@ -1,18 +1,22 @@
 {% extends "base.html" %}
-{% from "_icons.html" import actionbar %}
+{% from "_icons.html" import actionbar, icon, rowactions, boxhead, boxgo %}
 {% block title %}{{ t.dns }}{% endblock %}
 {% block body %}
 {% set srv = unbound.server %}
 {% set fwd = unbound['forward-zone'] %}
+{% set r = cfg.resolver %}
+{% set ro = 'disabled' if readonly else '' %}
+{% set editar = request.query_params.get('editar', '') %}
 {% macro opt(key, default='—') %}{{ (srv.get(key) or [default])|join(', ') }}{% endmacro %}
 {% macro yes(key) %}{% set v = (srv.get(key) or ['no'])[-1] %}<span class="chip {{ 'ok' if v == 'yes' else 'mute' }}">{{ 'sim' if v == 'yes' else 'não' }}</span>{% endmacro %}
 
 <div class="page-h">
   <div><h1>{{ t.dns }}</h1><p class="lede">O resolvedor recursivo, unbound. Responde ao dnsmasq tudo o que não é da rede de casa.</p></div>
-  <span class="chip {{ 'info' if fwd else 'ok' }} lg">{{ 'encaminha para terceiros' if fwd else 'resolve pelas raízes' }}</span>
+  {% if r.enabled %}<span class="chip {{ 'info' if r.mode == 'forward' else 'ok' }} lg">{{ 'encaminha' ~ (' por TLS' if r.tls else '') if r.mode == 'forward' else 'resolve pelas raízes' }}</span>
+  {% else %}<span class="chip mute lg">fora do modelo</span>{% endif %}
 </div>
 
-{% if not srv %}
+{% if not srv and not r.enabled %}
   <div class="note warn"><b>Não encontrei a config do unbound</b>Nem <span class="mono">/etc/unbound/unbound.conf</span> nem <span class="mono">unbound.conf.d</span> foram lidos. O unbound pode não estar instalado.</div>
 {% else %}
 
@@ -21,8 +25,12 @@
   <ol class="flow steps">
     <li class="node"><span class="n">1</span><span><b>Aparelho da LAN</b><span class="muted">pergunta um nome</span></span></li>
     <li class="node"><span class="n">2</span><span><b>dnsmasq</b><span class="mono muted">{{ cfg.lan.ipv4.ip }}:53 · nomes de casa</span></span></li>
-    <li class="node"><span class="n">3</span><span><b>unbound</b><span class="mono muted">{{ opt('interface') }} · cache</span></span></li>
+    <li class="node"><span class="n">3</span><span><b>unbound</b><span class="mono muted">{{ r.listen if r.enabled else opt('interface') }} · cache</span></span></li>
+    {% if r.enabled %}
+    <li class="node end"><span class="n">4</span><span><b>{{ 'Encaminhado' if r.mode == 'forward' else 'Servidores raiz' }}</b><span class="{{ 'mono ' if r.mode == 'forward' }}muted">{% if r.mode == 'forward' %}{{ r.forwarders|map(attribute='address')|join(', ') }}{% else %}resolve sozinho, sem intermediário{% endif %}</span></span></li>
+    {% else %}
     <li class="node end"><span class="n">4</span><span><b>{% if fwd %}Encaminhado{% else %}Servidores raiz{% endif %}</b><span class="{{ 'mono ' if fwd }}muted">{% if fwd %}{{ fwd|map(attribute='forward-addr')|map('join', ', ')|join('; ') }}{% else %}resolve sozinho, sem intermediário{% endif %}</span></span></li>
+    {% endif %}
   </ol>
 </section>
 
@@ -36,6 +44,110 @@
 {% else %}
   <div class="note"><b>Sem contadores</b>O <span class="mono">unbound-control</span> não respondeu. Os números aparecem quando o controle remoto local estiver habilitado.</div>
 {% endif %}
+
+{% if r.enabled %}
+{# ---------------------------------------------------------------- no modelo #}
+
+<section class="card" aria-labelledby="h-res">
+  <div class="card-h"><h2 class="h2" id="h-res">Resolvedor</h2><span class="muted">o unbound escreve só <span class="mono">unbound.conf.d/azimuth.conf</span>{% if r.absorbed %}; absorveu {{ r.absorbed|join(', ') }}{% endif %}</span></div>
+  <form id="page-form" method="post" action="/dns/resolver">
+    <div class="form-grid">
+      <div class="field"><label for="r-mode">Como resolve</label>
+        <select id="r-mode" class="input" name="mode" {{ ro }}>
+          <option value="recursive" {% if r.mode == 'recursive' %}selected{% endif %}>pelas raízes, sozinho</option>
+          <option value="forward" {% if r.mode == 'forward' %}selected{% endif %}>encaminha para servidores</option>
+        </select></div>
+      <div class="field" style="grid-column: span 2"><label for="r-fwd">Servidores (no modo encaminhado)</label>
+        <input id="r-fwd" class="input mono" name="forwarders" value="{% for f in r.forwarders %}{{ f.address }}{% if f.port %}@{{ f.port }}{% endif %}{% if f.tls_name %}#{{ f.tls_name }}{% endif %}{{ ', ' if not loop.last }}{% endfor %}" placeholder="1.1.1.1#cloudflare-dns.com, 1.0.0.1#cloudflare-dns.com" {{ ro }}></div>
+      <div class="field"><label for="r-thr">Threads</label><input id="r-thr" class="input mono" name="threads" type="number" min="1" max="16" value="{{ r.threads }}" {{ ro }}></div>
+      <div class="field"><label for="r-min">TTL mínimo (s)</label><input id="r-min" class="input mono" name="min_ttl" type="number" min="0" max="3600" value="{{ r.cache.min_ttl }}" {{ ro }}></div>
+      <div class="field"><label for="r-max">TTL máximo (s)</label><input id="r-max" class="input mono" name="max_ttl" type="number" min="60" max="604800" value="{{ r.cache.max_ttl }}" {{ ro }}></div>
+      <div class="field"><label for="r-msg">Cache de mensagens</label><input id="r-msg" class="input mono" name="msg_size" value="{{ r.cache.msg_size }}" {{ ro }}></div>
+      <div class="field"><label for="r-rr">Cache de registros</label><input id="r-rr" class="input mono" name="rrset_size" value="{{ r.cache.rrset_size }}" {{ ro }}></div>
+      <label class="check"><input type="checkbox" name="dnssec" value="1" {% if r.dnssec %}checked{% endif %} {{ ro }}> Valida DNSSEC</label>
+      <label class="check"><input type="checkbox" name="qname_minimisation" value="1" {% if r.privacy.qname_minimisation %}checked{% endif %} {{ ro }}> Pergunta só o necessário</label>
+      <label class="check"><input type="checkbox" name="hide_identity" value="1" {% if r.privacy.hide_identity %}checked{% endif %} {{ ro }}> Esconde nome e versão</label>
+      <label class="check"><input type="checkbox" name="prefetch" value="1" {% if r.cache.prefetch %}checked{% endif %} {{ ro }}> Renova antes de vencer</label>
+      <label class="check"><input type="checkbox" name="ipv6" value="1" {% if r.ipv6 %}checked{% endif %} {{ ro }}> Usa IPv6</label>
+    </div>
+    <div class="row muted"><span>Com <span class="mono">#nome</span> depois do IP, o encaminhamento vai por DNS sobre TLS (porta 853) e confere o certificado desse nome. Escuta em <span class="mono">{{ r.listen }}</span>, só no loopback: quem atende a LAN é o dnsmasq.</span></div>
+  </form>
+</section>
+
+<section class="card" aria-labelledby="h-fz">
+  <div class="card-h"><h2 class="h2" id="h-fz">Domínios encaminhados</h2><span class="chip mute">{{ r.forward_zones|length }}</span><span class="muted">um domínio que vai para servidores dados, e não para as raízes</span></div>
+  {% set e = r.forward_zones|selectattr('domain', 'equalto', editar)|first if editar and request.query_params.get('lista') == 'fz' else none %}
+  <form class="addbox{% if e %} editing{% endif %}" id="f-fz" method="post" action="/dns/forward{% if e %}/{{ e.domain }}{% endif %}" aria-label="{{ 'Editar' if e else 'Novo' }} domínio encaminhado">
+    {{ boxhead('Encaminhar domínio', ('Editar ' ~ e.domain) if e else '', 'ex.: o domínio interno da VPN do trabalho') }}
+    <div class="form-grid">
+      <div class="field"><label for="fz-d">Domínio</label><input id="fz-d" class="input mono" name="domain" placeholder="corp.exemplo" value="{{ e.domain if e else '' }}" required {{ ro }}></div>
+      <div class="field"><label for="fz-s">Servidores</label><input id="fz-s" class="input mono" name="servers" placeholder="10.8.0.1, 10.8.0.2@5353" value="{{ e.servers|join(', ') if e else '' }}" required {{ ro }}></div>
+      <div class="field" style="grid-column: span 2"><label for="fz-ds">Descrição</label><input id="fz-ds" class="input" name="description" maxlength="120" value="{{ e.description if e else '' }}" {{ ro }}></div>
+      {{ boxgo(e, readonly, '/dns#f-fz') }}
+    </div>
+    {% if r.dnssec %}<div class="row muted"><span>Com DNSSEC ligado, o domínio encaminhado entra também como <span class="mono">domain-insecure</span>: sem isso, um domínio interno que a raiz diz não existir nunca resolve.</span></div>{% endif %}
+  </form>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Domínio</th><th>Servidores</th><th>Descrição</th><th>Situação</th><th><span class="vh">Ações</span></th></tr></thead>
+      <tbody>
+      {% for z in r.forward_zones|sort(attribute='domain') %}
+        <tr class="{{ '' if z.enabled else 'off' }}{{ ' sel' if e and z.domain == e.domain }}"><td class="mono">{{ z.domain }}</td><td class="mono">{{ z.servers|join(', ') }}</td><td class="muted">{{ z.description }}</td>
+          <td>{% if z.enabled %}<span class="chip ok">ativo</span>{% else %}<span class="chip mute">desativado</span>{% endif %}</td>
+          <td>{{ rowactions('/dns/forward/' ~ z.domain, z.enabled, '?lista=fz&editar=' ~ z.domain ~ '#f-fz', readonly) }}</td></tr>
+      {% else %}
+        <tr><td colspan="5" class="muted">Nenhum: tudo o que não é da casa vai para {{ 'os servidores acima' if r.mode == 'forward' else 'as raízes' }}.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="h-bl">
+  <div class="card-h"><h2 class="h2" id="h-bl">Domínios bloqueados</h2><span class="chip mute">{{ r.blocked|length }}</span><span class="muted">o domínio e tudo abaixo dele respondem "não existe"</span></div>
+  {% set e = r.blocked|selectattr('domain', 'equalto', editar)|first if editar and request.query_params.get('lista') == 'bl' else none %}
+  <form class="addbox{% if e %} editing{% endif %}" id="f-bl" method="post" action="/dns/block{% if e %}/{{ e.domain }}{% endif %}" aria-label="{{ 'Editar' if e else 'Novo' }} domínio bloqueado">
+    {{ boxhead('Bloquear domínio', ('Editar ' ~ e.domain) if e else '', 'responde NXDOMAIN: o aparelho desiste na hora, sem esperar timeout') }}
+    <div class="form-grid">
+      <div class="field"><label for="bl-d">Domínio</label><input id="bl-d" class="input mono" name="domain" placeholder="telemetria.exemplo" value="{{ e.domain if e else '' }}" required {{ ro }}></div>
+      <div class="field" style="grid-column: span 2"><label for="bl-ds">Descrição</label><input id="bl-ds" class="input" name="description" maxlength="120" value="{{ e.description if e else '' }}" {{ ro }}></div>
+      {{ boxgo(e, readonly, '/dns#f-bl') }}
+    </div>
+  </form>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Domínio</th><th>Descrição</th><th>Situação</th><th><span class="vh">Ações</span></th></tr></thead>
+      <tbody>
+      {% for b in r.blocked|sort(attribute='domain') %}
+        <tr class="{{ '' if b.enabled else 'off' }}{{ ' sel' if e and b.domain == e.domain }}"><td class="mono">{{ b.domain }}</td><td class="muted">{{ b.description }}</td>
+          <td>{% if b.enabled %}<span class="chip bad">bloqueado</span>{% else %}<span class="chip mute">desativado</span>{% endif %}</td>
+          <td>{{ rowactions('/dns/block/' ~ b.domain, b.enabled, '?lista=bl&editar=' ~ b.domain ~ '#f-bl', readonly) }}</td></tr>
+      {% else %}
+        <tr><td colspan="4" class="muted">Nenhum domínio bloqueado.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% else %}
+{# ------------------------------------------------------------ fora do modelo #}
+
+<section class="card{% if preview and preview.enabled %} warn{% endif %}" aria-labelledby="h-adopt">
+  <div class="card-h"><h2 class="h2" id="h-adopt">O unbound ainda não é do modelo</h2>
+    <span class="muted">a config dele está em arquivos escritos à mão, e o painel só a lê</span></div>
+  {% if preview and preview.enabled %}
+    <div class="row"><span class="grow">Trazer para o modelo faz isto, e vira proposta como qualquer edição: o diff aparece em <a href="/system">Sistema</a>, e o Aplicar prova que o unbound carregou a config nova.</span></div>
+    <ol class="list">{% for c in preview_changes %}<li><span class="n">{{ loop.index }}</span><span>{{ c }}</span></li>{% endfor %}</ol>
+    <div class="row"><span class="grow muted">Escuta {{ preview.listen }} · {{ 'DNSSEC' if preview.dnssec else 'sem DNSSEC' }} · cache {{ preview.cache.msg_size }}/{{ preview.cache.rrset_size }} · {{ preview.threads }} threads · {{ preview.forward_zones|length }} encaminhados · {{ preview.blocked|length }} bloqueados</span>
+      <form method="post" action="/dns/resolver/adopt" style="margin:0"><button class="btn primary" type="submit" {% if readonly %}disabled title="Somente leitura"{% endif %}>{{ icon('plus', 16) }}Trazer para o modelo</button></form></div>
+  {% elif preview %}
+    <div class="row"><span class="grow">Não dá para trazer agora: o motor não absorve arquivo pela metade.</span></div>
+    <ol class="list">{% for c in preview_changes %}<li><span class="n">{{ loop.index }}</span><span>{{ c }}</span></li>{% endfor %}</ol>
+  {% else %}
+    <div class="row"><span class="grow muted">Não achei uma config do unbound para trazer.</span></div>
+  {% endif %}
+</section>
 
 <div class="grid two">
   <section class="card" aria-labelledby="h-sec">
@@ -58,8 +170,7 @@
   </section>
 </div>
 {% endif %}
+{% endif %}
 
-<div class="note"><b>Ainda só leitura, mesmo quando as ações chegarem às outras telas</b>O modelo do motor ainda não tem o unbound. Esta página lê o arquivo de config e os contadores direto do sistema.</div>
-
-{{ actionbar('', readonly, applicable, 'o unbound ainda não está no modelo') }}
+{% if r.enabled %}{{ actionbar('page-form', readonly, applicable) }}{% else %}{{ actionbar('', readonly, applicable, 'o unbound ainda não está no modelo') }}{% endif %}
 {% endblock %}

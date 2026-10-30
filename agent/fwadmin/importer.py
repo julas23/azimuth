@@ -1047,6 +1047,237 @@ def pick_peer(live: Path, ppp_units: list[str], aliases: dict[str, str] | None =
     return peers[0] if peers else live / "ppp-peers-vivo"
 
 
+# ---------------------------------------------------------------------------
+# unbound — o resolvedor atras do dnsmasq (UNBOUND.md, "Adocao")
+# ---------------------------------------------------------------------------
+
+UNBOUND_DEFAULTS = {
+    # o que o unbound faz quando a opcao nao esta escrita; o modelo tem outros
+    # padroes, e trazer o padrao do modelo mudaria a caixa sem ninguem pedir
+    "do-ip6": "yes",
+    "qname-minimisation": "yes",
+    "hide-identity": "no",
+    "hide-version": "no",
+    "prefetch": "no",
+    "prefetch-key": "no",
+    "cache-min-ttl": "0",
+    "cache-max-ttl": "86400",
+    "msg-cache-size": "4m",
+    "rrset-cache-size": "4m",
+    "num-threads": "1",
+    "edns-buffer-size": "1232",
+    "harden-dnssec-stripped": "yes",
+    "aggressive-nsec": "yes",
+    "harden-glue": "yes",
+    "harden-referral-path": "no",
+    "so-reuseport": "yes",
+}
+
+UNBOUND_FIXED = {
+    # o que o render escreve sempre; divergir disto e' mudanca da adocao
+    "do-ip4": "yes",
+    "do-udp": "yes",
+    "do-tcp": "yes",
+    "prefer-ip6": "no",
+    "harden-glue": "yes",
+    "harden-referral-path": "yes",
+    "so-reuseport": "yes",
+}
+
+UNBOUND_SERVER_KEYS = set(UNBOUND_DEFAULTS) | set(UNBOUND_FIXED) | {
+    "interface", "access-control", "root-hints", "module-config", "local-zone",
+    "domain-insecure", "tls-cert-bundle",
+}
+UNBOUND_PACKAGE_KEYS = {"include", "include-toplevel", "auto-trust-anchor-file"}
+
+
+def parse_unbound_file(text: str) -> list[tuple[str, str, str]]:
+    """(secao, chave, valor) de cada linha. Comentario e aspas saem."""
+    out, section = [], ""
+    for raw in text.splitlines():
+        # '#' so abre comentario no inicio ou depois de espaco: o nome TLS do
+        # forward-addr ('1.1.1.1@853#cloudflare-dns.com') tem '#' no meio.
+        line = re.sub(r"(^|\s)#.*$", "", raw).strip()
+        m = re.match(r"^([a-z0-9-]+):\s*(.*)$", line)
+        if not m:
+            continue
+        key, value = m.group(1), m.group(2).strip()
+        if value.startswith("'") and value.endswith("'"):
+            value = value[1:-1]
+        elif value.startswith('"') and value.endswith('"'):
+            value = value[1:-1]
+        if not value and key in ("server", "remote-control", "forward-zone", "stub-zone"):
+            section = key
+            out.append((section, "", ""))
+            continue
+        out.append((section, key, value))
+    return out
+
+
+def build_resolver(live: Path) -> tuple[dict[str, Any] | None, list[str], list[str]]:
+    """Traduz o unbound vivo para a secao 'resolver'. (modelo, decisoes, mudancas).
+
+    Devolve as proprias listas, e nao so as globais, porque a pagina de DNS
+    usa esta funcao numa caixa ja adotada, para trazer o unbound ao modelo.
+
+    Arquivo do pacote (so include e trust anchor) fica como esta. Arquivo em
+    que toda linha tem traducao e' absorvido. Arquivo com sobra nao e'
+    absorvido pela metade: o modulo sai desligado e a mudanca lista a sobra.
+    """
+    notes: list[str] = []
+    changes: list[str] = []
+    root = live / "unbound"
+    files = sorted((root / "unbound.conf.d").glob("*.conf")) if (root / "unbound.conf.d").is_dir() else []
+    if not files and not (root / "unbound.conf").exists():
+        return None, notes, changes
+
+    live_opts: dict[str, list[str]] = {}
+    zones: list[dict[str, Any]] = []
+    absorbed: list[str] = []
+    sobra: list[str] = []
+    for path in [root / "unbound.conf", *files]:
+        if not path.exists():
+            continue
+        lines = parse_unbound_file(path.read_text())
+        keys = {k for _, k, _ in lines if k}
+        if keys <= UNBOUND_PACKAGE_KEYS:
+            continue  # do pacote: o motor nao mexe
+        if path.name == "azimuth.conf":
+            continue
+        resto = []
+        zone: dict[str, Any] | None = None
+        for section, key, value in lines:
+            if not key:
+                zone = {"name": "", "addrs": [], "tls": False} if section == "forward-zone" else None
+                if zone is not None:
+                    zones.append(zone)
+                continue
+            if section == "server" and key in UNBOUND_SERVER_KEYS:
+                live_opts.setdefault(key, []).append(value)
+            elif section == "remote-control" and key in ("control-enable", "control-interface"):
+                live_opts.setdefault(f"rc:{key}", []).append(value)
+            elif section == "forward-zone" and zone is not None and key in ("name", "forward-addr", "forward-tls-upstream"):
+                if key == "name":
+                    zone["name"] = value.rstrip(".").lower()
+                elif key == "forward-addr":
+                    zone["addrs"].append(value)
+                else:
+                    zone["tls"] = value == "yes"
+            else:
+                resto.append(f"{section or '(topo)'}: {key}: {value}")
+        if resto:
+            sobra += [f"{path.name}: {r}" for r in resto]
+        else:
+            absorbed.append(path.name)
+
+    if not live_opts.get("interface"):
+        return None, notes, changes  # unbound sem config da casa: nada a trazer
+
+    def opt(key: str) -> str:
+        values = live_opts.get(key)
+        return values[-1] if values else UNBOUND_DEFAULTS.get(key, "")
+
+    yes = lambda key: opt(key) == "yes"  # noqa: E731
+
+    listen = live_opts["interface"][0]
+    if "@" not in listen:
+        listen += "@53"
+    for extra in live_opts["interface"][1:]:
+        sobra.append(f"interface: {extra} (o modelo escuta num endereco so)")
+    try:
+        loopback = ipaddress.IPv4Address(listen.partition("@")[0]).is_loopback
+    except ValueError:
+        loopback = False
+    if not loopback:
+        sobra.append(f"interface: {listen} (o modelo so escuta no loopback)")
+
+    for key, fixed in UNBOUND_FIXED.items():
+        if opt(key) != fixed:
+            changes.append(f"unbound: '{key}: {opt(key)}' passa a '{fixed}' (valor fixo do modelo)")
+    acl = set(live_opts.get("access-control", []))
+    if acl != {"127.0.0.0/8 allow", "0.0.0.0/0 refuse"} and acl != {
+        "127.0.0.0/8 allow", "0.0.0.0/0 refuse", "::1 allow", "::/0 refuse"
+    }:
+        changes.append(f"unbound: access-control passa a so loopback (hoje: {', '.join(sorted(acl)) or 'o padrao'})")
+    if live_opts.get("root-hints", ["/usr/share/dns/root.hints"])[-1] != "/usr/share/dns/root.hints":
+        notes.append("unbound: root-hints passa a /usr/share/dns/root.hints, a lista do pacote dns-root-data")
+    rc_iface = live_opts.get("rc:control-interface", [""])[-1]
+    if live_opts.get("rc:control-enable", ["no"])[-1] != "yes" or rc_iface != "/run/unbound.ctl":
+        changes.append(
+            "unbound: o controle passa a /run/unbound.ctl (unbound-control por socket), "
+            "que o painel e a recarga sem perder cache usam"
+        )
+
+    dnssec = opt("module-config") != "iterator"
+    if dnssec and not yes("harden-dnssec-stripped"):
+        changes.append("unbound: 'harden-dnssec-stripped' passa a yes, que acompanha o DNSSEC ligado")
+    if opt("hide-identity") != opt("hide-version"):
+        changes.append("unbound: hide-identity e hide-version passam a andar juntos")
+    if opt("prefetch") != opt("prefetch-key"):
+        changes.append("unbound: prefetch e prefetch-key passam a andar juntos")
+
+    blocked = []
+    for value in live_opts.get("local-zone", []):
+        m = re.fullmatch(r'"?([^"\s]+?)\.?"?\s+always_nxdomain', value)
+        if m:
+            blocked.append({"domain": m.group(1).lower()})
+        else:
+            sobra.append(f"local-zone: {value} (o modelo so sabe always_nxdomain)")
+
+    forward_zones, forwarders, mode = [], [], "recursive"
+    for z in zones:
+        if z["name"] in ("", "."):
+            mode = "forward"
+            for addr in z["addrs"]:
+                main, _, tls_name = addr.partition("#")  # ip[@porta][#nome]
+                ip, _, port = main.partition("@")
+                f: dict[str, Any] = {"address": ip}
+                if z["tls"] and tls_name:
+                    f["tls_name"] = tls_name
+                if port and not (z["tls"] and port == "853"):
+                    f["port"] = int(port)
+                forwarders.append(f)
+        else:
+            forward_zones.append({"domain": z["name"], "servers": [a.partition("#")[0] for a in z["addrs"]]})
+    insecure = {d.rstrip(".").lower() for d in live_opts.get("domain-insecure", [])}
+    for d in insecure - {z["domain"] for z in forward_zones}:
+        sobra.append(f"domain-insecure: {d} (o modelo so o usa nos dominios encaminhados)")
+
+    resolver: dict[str, Any] = {
+        "enabled": not sobra,
+        "listen": listen,
+        "mode": mode,
+        "forwarders": forwarders,
+        "dnssec": dnssec,
+        "ipv6": yes("do-ip6"),
+        "privacy": {"qname_minimisation": yes("qname-minimisation"), "hide_identity": yes("hide-identity")},
+        "cache": {
+            "min_ttl": int(opt("cache-min-ttl")),
+            "max_ttl": int(opt("cache-max-ttl")),
+            "msg_size": opt("msg-cache-size"),
+            "rrset_size": opt("rrset-cache-size"),
+            "prefetch": yes("prefetch"),
+        },
+        "threads": int(opt("num-threads")),
+        "edns_buffer_size": int(opt("edns-buffer-size")),
+        "forward_zones": forward_zones,
+        "blocked": blocked,
+        "absorbed": absorbed if not sobra else [],
+    }
+    if sobra:
+        changes.append(
+            "unbound: fica fora do modelo, porque estas linhas nao tem traducao e o motor nao "
+            "absorve arquivo pela metade: " + "; ".join(sobra)
+        )
+    else:
+        for name in absorbed:
+            changes.append(
+                f"unbound: {name} e' absorvido — o conteudo passa a vir do config.yaml, escrito em "
+                f"azimuth.conf, e o arquivo fica so com um aviso (o original vai para o backup do apply)"
+            )
+    return resolver, notes, changes
+
+
 def build(live: Path, portal_html: Path | None = None) -> dict[str, Any]:
     iface_text = (live / "interfaces").read_text()
     ifaces_raw = parse_interfaces(iface_text)
@@ -1182,6 +1413,23 @@ def build(live: Path, portal_html: Path | None = None) -> dict[str, Any]:
     }
     if wireguard:
         config["wireguard"] = wireguard
+
+    resolver, r_notes, r_changes = build_resolver(live)
+    FINDINGS.extend(r_notes)
+    CHANGES.extend(r_changes)
+    if resolver:
+        server = f"{resolver['listen'].partition('@')[0]}#{resolver['listen'].partition('@')[2]}"
+        if resolver["enabled"] and dns["upstream"] == [server]:
+            dns["upstream"] = []
+            note(f"dnsmasq: o upstream {server} e' o unbound, que entra no modelo; o server= passa a sair dele")
+        elif resolver["enabled"]:
+            resolver["enabled"] = False
+            resolver["absorbed"] = []
+            CHANGES.append(
+                f"unbound: fica fora do modelo, porque o dnsmasq pergunta a {', '.join(dns['upstream']) or 'ninguem'} "
+                f"e nao so a ele ({server})"
+            )
+        config["resolver"] = resolver
     return config
 
 

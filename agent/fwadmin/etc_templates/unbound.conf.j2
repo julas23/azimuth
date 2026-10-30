@@ -1,0 +1,92 @@
+{# gera /etc/unbound/unbound.conf.d/azimuth.conf #}
+# ATENCAO: arquivo gerado pelo fwadmin a partir de /etc/fwadmin/config.yaml.
+# Edicoes manuais sao perdidas no proximo apply. Edite o config.yaml.
+#
+# O unbound.conf do Debian inclui este arquivo. O trust anchor do DNSSEC
+# continua no root-auto-trust-anchor-file.conf, do pacote.
+
+server:
+    # --- escuta: so loopback, quem atende a LAN e' o dnsmasq ---------------
+    interface: {{ r.listen }}
+    access-control: 127.0.0.0/8 allow
+    access-control: 0.0.0.0/0 refuse
+{% if r.ipv6 %}
+    access-control: ::1 allow
+    access-control: ::/0 refuse
+{% endif %}
+    do-ip4: yes
+    do-ip6: {{ 'yes' if r.ipv6 else 'no' }}
+    prefer-ip6: no
+    do-udp: yes
+    do-tcp: yes
+    so-reuseport: yes
+    num-threads: {{ r.threads }}
+    edns-buffer-size: {{ r.edns_buffer_size }}
+    root-hints: "/usr/share/dns/root.hints"
+
+    # --- DNSSEC ---------------------------------------------------------------
+{% if r.dnssec %}
+    harden-dnssec-stripped: yes
+    aggressive-nsec: yes
+{% else %}
+    module-config: "iterator"
+{% endif %}
+    harden-glue: yes
+    harden-referral-path: yes
+
+    # --- privacidade ----------------------------------------------------------
+    qname-minimisation: {{ 'yes' if r.privacy.qname_minimisation else 'no' }}
+    hide-identity: {{ 'yes' if r.privacy.hide_identity else 'no' }}
+    hide-version: {{ 'yes' if r.privacy.hide_identity else 'no' }}
+
+    # --- cache ----------------------------------------------------------------
+    cache-min-ttl: {{ r.cache.min_ttl }}
+    cache-max-ttl: {{ r.cache.max_ttl }}
+    msg-cache-size: {{ r.cache.msg_size }}
+    rrset-cache-size: {{ r.cache.rrset_size }}
+    prefetch: {{ 'yes' if r.cache.prefetch else 'no' }}
+    prefetch-key: {{ 'yes' if r.cache.prefetch else 'no' }}
+{% if r.mode == 'forward' and r.tls %}
+    tls-cert-bundle: "/etc/ssl/certs/ca-certificates.crt"
+{% endif %}
+
+    # --- dominios bloqueados: o dominio e tudo abaixo dele -------------------
+{% for b in r.blocked if b.enabled %}
+    local-zone: "{{ b.domain }}." always_nxdomain{% if b.description %}  # {{ b.description }}{% endif %}
+
+{% endfor %}
+{% if r.dnssec %}
+{% for z in r.forward_zones if z.enabled %}
+    # sem isto um dominio interno que a raiz nega (com assinatura) vira bogus
+    domain-insecure: "{{ z.domain }}."
+{% endfor %}
+{% endif %}
+
+    # --- versao: a prova de funcao pergunta isto e compara com o modelo ------
+    local-zone: "azimuth." static
+    local-data: 'versao.azimuth. TXT "{{ versao }}"'
+
+remote-control:
+    control-enable: yes
+    control-interface: /run/unbound.ctl
+{% for z in r.forward_zones if z.enabled %}
+
+forward-zone:{% if z.description %}  # {{ z.description }}{% endif %}
+
+    name: "{{ z.domain }}."
+{% for s in z.servers %}
+    forward-addr: {{ s }}
+{% endfor %}
+{% endfor %}
+{% if r.mode == 'forward' %}
+
+forward-zone:
+    name: "."
+{% if r.tls %}
+    forward-tls-upstream: yes
+{% endif %}
+{% for f in r.forwarders %}
+    forward-addr: {{ f.address }}{% if f.port %}@{{ f.port }}{% elif r.tls %}@853{% endif %}{% if f.tls_name %}#{{ f.tls_name }}{% endif %}
+
+{% endfor %}
+{% endif %}

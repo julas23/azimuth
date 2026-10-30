@@ -368,14 +368,6 @@ class DNS(Base):
             out.append(_ipv4(ip) + (f"#{port}" if sep else ""))
         return out
 
-    @model_validator(mode="after")
-    def _resolve_algum(self) -> DNS:
-        if self.no_resolv and not self.upstream:
-            raise ValueError(
-                "no_resolv sem upstream deixa o dnsmasq sem ninguem para perguntar: "
-                "a LAN ficaria sem DNS"
-            )
-        return self
 
 
 # ---------------------------------------------------------------------------
@@ -749,6 +741,178 @@ class WireGuard(Base):
     def active_peers(self) -> list[WGPeer]:
         return [p for p in self.peers if p.enabled]
 
+# ---------------------------------------------------------------------------
+# resolvedor recursivo (unbound)
+# ---------------------------------------------------------------------------
+
+CACHE_SIZE_RE = re.compile(r"^\d{1,5}[kmg]?$")
+
+
+def _domain(v: str) -> str:
+    """Dominio em minusculas e sem o ponto final: 'Corp.Exemplo.' -> 'corp.exemplo'."""
+    v = v.strip().lower().rstrip(".")
+    if not HOSTNAME_RE.match(v):
+        raise ValueError(f"dominio invalido: {v!r}")
+    return v
+
+
+class Forwarder(Base):
+    """Um servidor para o qual o unbound encaminha, no modo 'forward'."""
+
+    address: str
+    port: Annotated[int, Field(ge=1, le=65535)] | None = None
+    tls_name: str = ""
+    """Com nome, a consulta vai por DNS sobre TLS (853) e o certificado tem de
+    ser desse nome. Sem nome, vai em claro, na 53."""
+
+    @field_validator("address")
+    @classmethod
+    def _check_ip(cls, v: str) -> str:
+        return _ipv4(v)
+
+    @field_validator("tls_name")
+    @classmethod
+    def _check_tls(cls, v: str) -> str:
+        return _domain(v) if v else ""
+
+
+class ForwardZone(Base):
+    """Um dominio que nao vai para as raizes, e sim para servidores dados."""
+
+    domain: str
+    servers: Annotated[list[str], Field(min_length=1)]
+    """IPv4, com porta opcional no formato do unbound: '10.8.0.1@5353'."""
+
+    description: Annotated[str, Field(max_length=120)] = ""
+    enabled: bool = True
+
+    @field_validator("domain")
+    @classmethod
+    def _check_domain(cls, v: str) -> str:
+        return _domain(v)
+
+    @field_validator("servers")
+    @classmethod
+    def _check_servers(cls, v: list[str]) -> list[str]:
+        out = []
+        for item in v:
+            ip, sep, port = item.strip().partition("@")
+            if sep and not (port.isdigit() and 0 < int(port) < 65536):
+                raise ValueError(f"porta invalida: {item!r}")
+            out.append(_ipv4(ip) + (f"@{port}" if sep else ""))
+        return out
+
+
+class BlockedDomain(Base):
+    """Um dominio, e tudo abaixo dele, que responde NXDOMAIN."""
+
+    domain: str
+    description: Annotated[str, Field(max_length=120)] = ""
+    enabled: bool = True
+
+    @field_validator("domain")
+    @classmethod
+    def _check_domain(cls, v: str) -> str:
+        return _domain(v)
+
+
+class ResolverPrivacy(Base):
+    qname_minimisation: bool = True
+    hide_identity: bool = True
+    """hide-identity e hide-version juntos."""
+
+
+class ResolverCache(Base):
+    min_ttl: Annotated[int, Field(ge=0, le=3600)] = 0
+    max_ttl: Annotated[int, Field(ge=60, le=604800)] = 86400
+    msg_size: Annotated[str, Field(pattern=CACHE_SIZE_RE.pattern)] = "4m"
+    rrset_size: Annotated[str, Field(pattern=CACHE_SIZE_RE.pattern)] = "4m"
+    prefetch: bool = True
+    """prefetch e prefetch-key juntos."""
+
+
+class Resolver(Base):
+    """O unbound, atras do dnsmasq. Desligado por padrao.
+
+    O motor escreve so /etc/unbound/unbound.conf.d/azimuth.conf. O unbound.conf
+    do Debian e o arquivo do trust anchor continuam do pacote.
+    """
+
+    enabled: bool = False
+    listen: str = "127.0.0.1@5335"
+    """So loopback: a porta da LAN e' o dnsmasq. Um recursivo aberto na LAN e'
+    um amplificador de DDoS esperando acontecer."""
+
+    mode: Literal["recursive", "forward"] = "recursive"
+    forwarders: list[Forwarder] = []
+    dnssec: bool = True
+    ipv6: bool = False
+    privacy: ResolverPrivacy = ResolverPrivacy()
+    cache: ResolverCache = ResolverCache()
+    threads: Annotated[int, Field(ge=1, le=16)] = 1
+    edns_buffer_size: Annotated[int, Field(ge=512, le=4096)] = 1232
+
+    forward_zones: list[ForwardZone] = []
+    blocked: list[BlockedDomain] = []
+
+    absorbed: list[str] = []
+    """Arquivos de unbound.conf.d que a adocao trouxe para o modelo. O motor
+    passa a ser dono deles tambem, e os escreve so com um aviso: o conteudo
+    vive no azimuth.conf, e o original fica no backup do apply que os
+    absorveu, de onde o rollback o devolve."""
+
+    @field_validator("listen")
+    @classmethod
+    def _check_listen(cls, v: str) -> str:
+        ip, sep, port = v.partition("@")
+        if not (sep and port.isdigit() and 0 < int(port) < 65536):
+            raise ValueError(f"escuta invalida: {v!r} (esperado 127.0.0.1@5335)")
+        if not ipaddress.IPv4Address(ip).is_loopback:
+            raise ValueError(f"o unbound escuta so no loopback, nao em {ip}: a porta da LAN e' o dnsmasq")
+        return f"{ip}@{port}"
+
+    @field_validator("absorbed")
+    @classmethod
+    def _check_absorbed(cls, v: list[str]) -> list[str]:
+        for name in v:
+            if not re.fullmatch(r"[A-Za-z0-9_.-]{1,60}\.conf", name) or name == "azimuth.conf":
+                raise ValueError(f"arquivo absorvido invalido: {name!r}")
+        return v
+
+    @model_validator(mode="after")
+    def _coerencia(self) -> Resolver:
+        if self.mode == "forward" and not self.forwarders:
+            raise ValueError("modo 'forward' sem servidor: o unbound nao teria para onde perguntar")
+        if len({bool(f.tls_name) for f in self.forwarders}) > 1:
+            # forward-tls-upstream vale para a zona inteira: misturar mandaria
+            # o servidor sem nome por TLS e sem certificado para conferir.
+            raise ValueError("encaminhamento: ou todos os servidores tem nome TLS, ou nenhum")
+        _reject_dups([z.domain for z in self.forward_zones], "dominio encaminhado repetido")
+        _reject_dups([b.domain for b in self.blocked], "dominio bloqueado repetido")
+        _reject_dups(
+            [z.domain for z in self.forward_zones] + [b.domain for b in self.blocked],
+            "dominio encaminhado e bloqueado ao mesmo tempo",
+        )
+        _reject_dups(self.absorbed, "arquivo absorvido repetido")
+        return self
+
+    @property
+    def ip(self) -> str:
+        return self.listen.partition("@")[0]
+
+    @property
+    def port(self) -> int:
+        return int(self.listen.partition("@")[2])
+
+    @property
+    def tls(self) -> bool:
+        return any(f.tls_name for f in self.forwarders)
+
+    @property
+    def dnsmasq_server(self) -> str:
+        """O mesmo endereco na sintaxe do dnsmasq: '127.0.0.1#5335'."""
+        return f"{self.ip}#{self.port}"
+
 
 # ---------------------------------------------------------------------------
 # raiz
@@ -783,6 +947,7 @@ class Config(Base):
     portal: Portal = Portal()
     firewall: Firewall = Firewall()
     wireguard: WireGuard = WireGuard()
+    resolver: Resolver = Resolver()
 
     # -- indices de conveniencia -------------------------------------------
 
@@ -809,6 +974,24 @@ class Config(Base):
     def _consistent(self) -> Config:
         names = [i.name for i in self.interfaces]
         _reject_dups(names, "nome logico de interface duplicado")
+
+        # Quem responde ao dnsmasq: o unbound do modelo, ou o upstream escrito.
+        # Os dois juntos seriam dois lugares dizendo a mesma coisa, e um dia
+        # dizendo coisas diferentes.
+        if self.resolver.enabled and self.dns.upstream:
+            raise ValueError(
+                "com o unbound ligado (resolver.enabled), o dnsmasq pergunta a ele: "
+                "dns.upstream precisa ficar vazio"
+            )
+        if self.dns.no_resolv and not self.dns.upstream and not self.resolver.enabled:
+            raise ValueError(
+                "no_resolv sem upstream deixa o dnsmasq sem ninguem para perguntar: "
+                "a LAN ficaria sem DNS"
+            )
+        casa = self.dns.domain
+        for d in [z.domain for z in self.resolver.forward_zones] + [b.domain for b in self.resolver.blocked]:
+            if d == casa or d.endswith("." + casa) or d == "azimuth":
+                raise ValueError(f"{d!r} e' do dnsmasq (o dominio da casa), nao do unbound")
         _reject_dups([i.device for i in self.interfaces], "device duplicado")
 
         lans = [i for i in self.interfaces if i.role is IfRole.lan]

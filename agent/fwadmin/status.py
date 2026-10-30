@@ -401,39 +401,94 @@ def wireguard(device: str) -> WGState | None:
     return estado
 
 
-def dns_answers(name: str, server: str = "127.0.0.1", timeout: float = 2.0) -> bool:
-    """Pergunta um registro A direto ao resolvedor e diz se ele respondeu.
+@dataclass(frozen=True)
+class DnsReply:
+    rcode: int
+    """0 = NOERROR, 2 = SERVFAIL, 3 = NXDOMAIN."""
+    answers: int
+    authentic: bool
+    """Flag AD: o resolvedor validou a resposta por DNSSEC."""
+    txt: tuple[str, ...] = ()
+
+
+QTYPES = {"A": 1, "TXT": 16}
+
+
+def _skip_name(data: bytes, i: int) -> int:
+    """Pula um nome no pacote, inclusive comprimido. Devolve o indice seguinte."""
+    while i < len(data):
+        n = data[i]
+        if n == 0:
+            return i + 1
+        if n & 0xC0 == 0xC0:
+            return i + 2
+        i += 1 + n
+    raise ValueError("nome truncado")
+
+
+def dns_query(
+    name: str, server: str = "127.0.0.1", port: int = 53, qtype: str = "A", timeout: float = 2.0
+) -> DnsReply | None:
+    """Uma consulta DNS crua, por UDP. None = ninguem respondeu.
 
     Consulta crua de proposito: 'dig' vem do dnsutils, que nem toda instalacao
     tem, e uma prova de funcao que depende de pacote opcional vira prova
-    inconclusiva justamente na caixa mais magra. Sao trinta linhas de UDP
+    inconclusiva justamente na caixa mais magra. Sao poucas linhas de UDP
     contra uma dependencia a mais na ISO.
     """
     if not _valid_target(name):
-        return False
-    query = struct.pack(">HHHHHH", 0x4157, 0x0100, 1, 0, 0, 0)
+        return None
+    # RD + AD, e um registro EDNS com o bit DO: sem EDNS a resposta para em
+    # 512 bytes e um TXT maior volta truncado, vazio; sem DO, quem fica no
+    # meio (o dnsmasq) nao repassa a flag de validacao.
+    query = struct.pack(">HHHHHH", 0x4157, 0x0120, 1, 0, 0, 1)
     for label in name.rstrip(".").split("."):
         encoded = label.encode("idna" if not label.isascii() else "ascii")
         if not 0 < len(encoded) < 64:
-            return False
+            return None
         query += bytes([len(encoded)]) + encoded
-    query += b"\x00" + struct.pack(">HH", 1, 1)  # QTYPE=A, QCLASS=IN
+    query += b"\x00" + struct.pack(">HH", QTYPES[qtype], 1)
+    query += b"\x00" + struct.pack(">HHIH", 41, 1232, 0x8000, 0)  # OPT, DO
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(timeout)
     try:
-        sock.sendto(query, (server, 53))
-        data, _ = sock.recvfrom(1232)
+        sock.sendto(query, (server, port))
+        data, _ = sock.recvfrom(4096)
     except OSError:
-        return False
+        return None
     finally:
         sock.close()
 
     if len(data) < 12 or data[:2] != query[:2]:
-        return False
-    rcode = data[3] & 0x0F
-    answers = struct.unpack(">H", data[6:8])[0]
-    return rcode == 0 and answers > 0
+        return None
+    flags, qd, an = struct.unpack(">HHH", data[2:8])
+    txt: list[str] = []
+    try:
+        i = 12
+        for _ in range(qd):
+            i = _skip_name(data, i) + 4
+        for _ in range(an):
+            i = _skip_name(data, i)
+            rtype, _cls, _ttl, rdlen = struct.unpack(">HHIH", data[i : i + 10])
+            i += 10
+            if rtype == 16:
+                j, end, parts = i, i + rdlen, []
+                while j < end:
+                    n = data[j]
+                    parts.append(data[j + 1 : j + 1 + n].decode("utf-8", "replace"))
+                    j += 1 + n
+                txt.append("".join(parts))
+            i += rdlen
+    except (ValueError, struct.error, IndexError):
+        pass
+    return DnsReply(rcode=flags & 0x0F, answers=an, authentic=bool(flags & 0x0020), txt=tuple(txt))
+
+
+def dns_answers(name: str, server: str = "127.0.0.1", timeout: float = 2.0) -> bool:
+    """Pergunta um registro A direto ao resolvedor e diz se ele respondeu."""
+    reply = dns_query(name, server, timeout=timeout)
+    return reply is not None and reply.rcode == 0 and reply.answers > 0
 
 
 def journal(unit: str = "", lines: int = 100) -> str:

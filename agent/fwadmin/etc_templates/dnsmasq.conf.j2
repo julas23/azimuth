@@ -45,7 +45,16 @@ address=/{{ h.fqdn(dns.domain) }}/{{ h.ip }}
 {% endif %}
 {% endfor %}
 
-{% if dns.upstream or dns.no_resolv or dns.proxy_dnssec %}
+{% if resolver.enabled %}
+# --- quem responde o que nao e' da casa: o unbound do modelo ---------------
+no-resolv
+{% if dns.proxy_dnssec %}
+proxy-dnssec
+{% endif %}
+server={{ resolver.dnsmasq_server }}
+# a versao que a prova de funcao le no unbound nao sai para a LAN
+local=/azimuth/
+{% elif dns.upstream or dns.no_resolv or dns.proxy_dnssec %}
 # --- resolvedores upstream --------------------------------------------------
 {% if dns.no_resolv %}
 no-resolv

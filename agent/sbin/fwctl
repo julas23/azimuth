@@ -314,6 +314,11 @@ def cmd_apply(args: argparse.Namespace) -> int:
     )
     paths.PENDING.unlink(missing_ok=True)
 
+    # Unidades sem dono que mexem no servico sozinhas param ate o confirm ou o
+    # rollback: um healthcheck que reinicia o unbound no meio da prova faria a
+    # prova medir o restart dele, e nao o apply.
+    paused = pause_quiet(services.quiet(proposed, plan.changed))
+
     say()
     for action in plan.reloads:
         result = run(*action.argv, timeout=120)
@@ -341,6 +346,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         files=installed,
         reloads=[a.label for a in plan.reloads],
         note=nota,
+        paused=paused,
     )
     state.save()
 
@@ -386,6 +392,7 @@ def cmd_confirm(args: argparse.Namespace) -> int:
 
     disarm_watchdog()
     State.clear()
+    resume_quiet(state.paused)
     say(f"{GREEN}confirmado{OFF} — {len(state.files)} arquivos mantidos")
 
     # O selo so e' gravado aqui, e nao no apply: ate o confirm o estado ainda
@@ -397,6 +404,26 @@ def cmd_confirm(args: argparse.Namespace) -> int:
 
     git_commit(state.note or "apply via fwadmin")
     return 0
+
+
+def pause_quiet(units: list[str]) -> list[str]:
+    """Para as unidades ativas da lista e devolve quais parou de fato."""
+    paused = []
+    for unit in units:
+        if run("systemctl", "is-active", "--quiet", unit, mutating=False).ok:
+            if run("systemctl", "stop", unit).ok:
+                say(f"  {DIM}pausado ate o confirm: {unit}{OFF}")
+                paused.append(unit)
+    return paused
+
+
+def resume_quiet(units: list[str]) -> None:
+    for unit in units:
+        result = run("systemctl", "start", unit)
+        if result.ok:
+            say(f"  {DIM}religado: {unit}{OFF}")
+        else:
+            say(f"  {YELLOW}nao consegui religar {unit}{OFF}: {result.output}")
 
 
 def revert(state: State, reason: str, auto: bool = False) -> int:
@@ -436,6 +463,7 @@ def revert(state: State, reason: str, auto: bool = False) -> int:
 
     disarm_watchdog()
     State.clear()
+    resume_quiet(state.paused)
 
     # Depois do rollback o /etc restaurado tambem e' estado oficial: sem
     # reselar, o proximo apply acusaria de "editado a mao" um arquivo que quem

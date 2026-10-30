@@ -1,7 +1,8 @@
 # Módulo do Unbound — desenho
 
-Status: **em discussão** (30/10/2026). As decisões abertas estão no fim, cada uma com a
-recomendação. Nada disto tem código ainda.
+Status: **implementado** (30/10/2026), com as quatro recomendações aceitas. Os três pontos "a
+verificar" foram verificados no fw, numa instância de teste do unbound, antes do código. O que a
+verificação mudou no desenho está marcado *(verificado)*.
 
 O módulo tira o unbound da lista de "unidades sem dono" do `fwctl inventory`: o resolvedor
 recursivo passa a ser declarado no `config.yaml`, gerado, validado, recarregado e provado como o
@@ -152,8 +153,12 @@ validação roda duas vezes no staging:
 O render escreve sempre um registro sintético:
 
 ```
-local-data: "versao.azimuth. TXT <sha256 do render, 12 caracteres>"
+local-data: 'versao.azimuth. TXT "<12 caracteres>"'
 ```
+
+A versão é o hash da seção `resolver` do modelo junto com o texto do template, e não do arquivo
+gerado: o arquivo contém o próprio TXT, e o hash dele seria circular. Muda o modelo ou o
+template, muda a versão.
 
 - **Fatal:** `dig @127.0.0.1 -p 5335 versao.azimuth TXT` devolve o hash do arquivo que acabou de
   ser aplicado. Isso prova que o unbound está no ar, na porta certa, e que **carregou esta
@@ -163,6 +168,10 @@ local-data: "versao.azimuth. TXT <sha256 do render, 12 caracteres>"
   `dnssec-failed.org` dá `SERVFAIL`. São os testes do `dns-healthcheck`, que dependem da WAN.
 - Com domínio bloqueado novo, ele precisa responder NXDOMAIN. Isso também não depende da
   internet, então é fatal.
+- A consulta é UDP crua, como a do dnsmasq (sem `dig`), agora com EDNS e o bit DO: sem EDNS a
+  resposta para em 512 bytes, e sem DO quem está no meio não repassa a flag `ad`.
+- *(verificado)* O dnsmasq repassaria `versao.azimuth` para o unbound, e a LAN veria o TXT. O
+  dnsmasq gerado ganha `local=/azimuth/`, que responde sozinho e não repassa.
 
 ---
 
@@ -189,16 +198,27 @@ módulo fica `enabled: false`, e a mudança da adoção lista as linhas sem trad
 continua só leitura até a sobra ser resolvida: ou o modelo aprende a opção, ou alguém tira a
 linha do arquivo.
 
+**Opção ausente vale o padrão do unbound, não o do modelo.** Sem `prefetch` no arquivo, o unbound
+roda sem prefetch, e o modelo (cujo padrão é ligado) precisa trazer "desligado"; senão a adoção
+mudaria a caixa sem ninguém pedir. O importador tem a tabela de padrões do unbound para isso.
+
+**Máquina já adotada** (como esta) não passa de novo pelo importador. A página de DNS, com o
+unbound fora do modelo, mostra o que o tradutor faria e um botão "Trazer para o modelo", que grava
+o resultado como proposta. O diff do Sistema mostra os arquivos absorvidos virando aviso, e o
+Aplicar prova.
+
 Nesta caixa, `homelab.conf` e `remote-control.conf` são 100% absorvíveis. Conferi linha por
 linha: as 24 opções do `homelab.conf` (25 linhas, porque `access-control` aparece duas vezes)
-estão todas no modelo acima, como campo ou como valor fixo.
+estão todas no modelo acima, como campo ou como valor fixo. E a árvore nova é equivalente à de
+hoje: comparando com `unbound-checkconf -o` as 28 opções que o render escreve, a árvore atual e a
+nova (com `azimuth.conf` e os dois arquivos virando aviso) dão o mesmo valor em todas.
 
 ### Os ajustes à mão em volta do unbound
 
 | Unidade | Decisão |
 |---|---|
 | `dns-cache-dump.timer` + `cache-load.conf` | **ficam de fora na v1**, como decisão escrita. Continuam funcionando, porque o módulo mantém o mesmo socket de controle. Com o `reload_keep_cache`, o restart, que é o caso que eles cobrem, fica raro. |
-| `dns-healthcheck.timer` | **fica, com uma ressalva**: o auto-heal dele reinicia o unbound, e se isso cair dentro da janela de prova de um apply, a prova vê o unbound subindo. O fwctl passa a pausar esse timer durante a janela (`systemctl stop` no começo, `start` no confirm ou no rollback). Depois do módulo, a prova e o alerta do painel cobrem o que ele faz, e ele pode ser aposentado (decisão aberta 4). |
+| `dns-healthcheck.timer` | **fica, com uma ressalva**: o auto-heal dele reinicia o unbound, e se isso cair dentro da janela de prova de um apply, a prova vê o unbound subindo. O módulo declara o timer em `quiet`, e o fwctl o para antes das recargas e o religa no confirm ou no rollback (só se estava ativo). Aposentar fica para uma versão depois (decisão 4). |
 | `dnsmasq-vps.service` | fora deste módulo. Pergunta ao dnsmasq principal e não sabe que o unbound existe. |
 
 ---
@@ -216,34 +236,35 @@ A página de DNS deixa de ser só leitura:
 
 ---
 
-## Decisões abertas
+## Decisões (fechadas em 30/10/2026, todas pela recomendação)
 
-1. **Encaminhar domínio no unbound ou no dnsmasq?** O dnsmasq também sabe
-   (`server=/corp.exemplo/10.8.0.1`).
-   *Recomendo o unbound.* Mantém cada um no seu papel (dnsmasq = nomes de casa e DHCP, unbound =
-   tudo o que é de fora), e o `domain-insecure` do DNSSEC só existe ali. No dnsmasq, o domínio
-   interno passaria pelo `proxy-dnssec` sem validação e sem aviso.
-2. **Bloqueio na v1: só o manual?**
-   *Recomendo que sim.* Listas de bloqueio são o "dado assinado" do README: precisam de
-   origem, assinatura, atualização e a regra de que exceção do dono vence lista. É desenho próprio.
-   O manual cabe agora, e o formato do `local-zone` já deixa espaço para a lista entrar depois.
-3. **Modo encaminhado com DNS sobre TLS entra na v1?** Hoje a caixa resolve pelas raízes, e isso
-   continua o padrão.
-   *Recomendo entrar.* É pouco código (`forward-tls-upstream` + `tls-cert-bundle`), e é a
-   opção que muita gente quer quando o provedor intercepta a porta 53.
-4. **O `dns-healthcheck` é aposentado quando o módulo entrar?**
-   *Recomendo esperar uma versão.* Primeiro a prova e um alerta "DNSSEC falhando" no painel
-   precisam provar que cobrem o que ele cobre. Até lá, ele fica, com a pausa durante a janela
-   de prova.
+1. **Encaminhar domínio no unbound**, e não no dnsmasq: mantém cada um no seu papel, e o
+   `domain-insecure` do DNSSEC só existe ali.
+2. **Bloqueio na v1: só o manual.** Listas são o "dado assinado" do README e pedem desenho
+   próprio; o `local-zone` deixa espaço para elas.
+3. **Modo encaminhado com DNS sobre TLS entra na v1**, como opção. O padrão continua sendo
+   resolver pelas raízes. Ou todos os servidores têm nome TLS, ou nenhum: o
+   `forward-tls-upstream` vale para a zona inteira.
+4. **O `dns-healthcheck` fica por enquanto**, pausado durante a janela de prova.
 
 ---
 
-## A verificar antes do código
+## Verificado antes do código
 
-1. O `reload_keep_cache` do unbound 1.26 (Debian 13) mantém o cache ao mudar `forward-zone` e
-   `local-zone`. A documentação diz que mantém se não mudarem as opções de cache e de threads,
-   mas isso precisa ser visto numa caixa de teste.
-2. O `unbound-checkconf` aceita o `unbound.conf` de staging com `include` para fora de
-   `/etc/unbound` (o staging fica em `/var/lib/fwadmin/staging`), com o `chroot` do pacote Debian.
-3. O `local-data` TXT sintético não aparece para a LAN pelo dnsmasq. Se aparecer, usar um nome
-   em `.invalid`, que o dnsmasq não encaminha.
+Numa segunda instância do unbound no fw (loopback, porta de teste, diretório próprio), sem tocar
+no de produção:
+
+1. **`reload_keep_cache` mantém o cache** ao mudar `forward-zone`, `local-zone` e `local-data`, e
+   a versão no TXT troca na hora. Mudar o tamanho do cache faz ele descartar o cache, mas aplica
+   sem restart. Por isso restart só para escuta, threads e EDNS.
+2. **O `unbound-checkconf` aceita** um staging fora de `/etc/unbound` incluindo a árvore real. O
+   validador não é confinado; o daemon é (próximo item).
+3. **O unbound roda confinado pelo AppArmor**: não lê `/tmp` nem abre socket fora dos caminhos
+   do perfil. Não afeta o módulo, que escreve em `/etc/unbound/unbound.conf.d` e usa
+   `/run/unbound.ctl`, mas qualquer teste com instância própria precisa morar em
+   `/var/lib/unbound`.
+4. **A validação da árvore pega o que o arquivo sozinho não pega**: com o `homelab.conf` no lugar
+   ao lado do `azimuth.conf`, o arquivo passa e a árvore falha com `interface: 127.0.0.1@5335
+   present twice`.
+5. **O `#` do nome TLS não é comentário**: `forward-addr: 1.1.1.1@853#cloudflare-dns.com`. O leitor
+   do painel e o importador cortavam tudo depois do `#`; agora só no começo ou depois de espaço.

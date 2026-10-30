@@ -285,5 +285,59 @@ check "e diz qual foi"                   "$(grep -c 'nao selado azimuth.nft' "$S
 check "os outros seguem selados"         "$(grep -c 'selado dnsmasq.conf' "$SANDBOX/out")" "1"
 echo
 
+echo "== 10. unbound: absorve, valida a arvore e o rollback devolve =="
+"$FWCTL" confirm > /dev/null 2>&1 || true
+# a secao 9 deixa o azimuth.nft editado a mao de proposito; aqui o assunto e' outro
+sed -i '/# outra edicao a mao/d' "$SANDBOX/etc/nftables.d/azimuth.nft"
+UB="$SANDBOX/etc/unbound/unbound.conf.d"
+mkdir -p "$UB"
+printf 'include-toplevel: "%s/*.conf"\n' "$UB" > "$SANDBOX/etc/unbound/unbound.conf"
+printf 'server:\n    auto-trust-anchor-file: "/var/lib/unbound/root.key"\n' > "$UB/root-auto-trust-anchor-file.conf"
+cat > "$UB/homelab.conf" <<'HOMELAB'
+server:
+    interface: 127.0.0.1@5335
+    access-control: 127.0.0.0/8 allow
+    access-control: 0.0.0.0/0 refuse
+    num-threads: 2
+    msg-cache-size: 64m
+    rrset-cache-size: 128m
+HOMELAB
+printf 'remote-control:\n  control-enable: yes\n  control-interface: /run/unbound.ctl\n' > "$UB/remote-control.conf"
+cp "$UB/homelab.conf" "$SANDBOX/homelab.original"
+
+python3 - "$SANDBOX" <<'RESOLVER'
+import sys, os
+sandbox = sys.argv[1]
+os.environ["FWADMIN_SYSROOT"] = sandbox
+sys.path.insert(0, os.environ["FWADMIN_CODE"])
+from pathlib import Path
+from fwadmin.render import load, dump
+cfg = load(Path(sandbox) / "etc/fwadmin/config.yaml")
+cfg.dns.upstream = []
+cfg.resolver = cfg.resolver.model_validate({
+    "enabled": True, "threads": 2, "cache": {"msg_size": "64m", "rrset_size": "128m", "prefetch": False},
+    "absorbed": ["homelab.conf", "remote-control.conf"],
+    "blocked": [{"domain": "telemetria.exemplo"}],
+})
+Path(sandbox, "etc/fwadmin/config.pending.yaml").write_text(dump(cfg))
+RESOLVER
+
+"$FWCTL" apply --yes > "$SANDBOX/out" 2>&1 && rc=0 || rc=$?
+sed 's/^/     /' "$SANDBOX/out"
+check "apply com o unbound passa"           "$rc" "0"
+check "validou o arquivo e a arvore"        "$(grep -c '\[OK\] .*unbound-checkconf' "$SANDBOX/out")" "2"
+check "azimuth.conf escrito"                "$(grep -c 'interface: 127.0.0.1@5335' "$UB/azimuth.conf")" "1"
+check "o bloqueio entrou"                   "$(grep -c 'telemetria.exemplo." always_nxdomain' "$UB/azimuth.conf")" "1"
+check "homelab.conf virou aviso"            "$(grep -c 'Absorvido pelo Azimuth' "$UB/homelab.conf")" "1"
+check "o do pacote nao foi tocado"          "$(grep -c 'auto-trust-anchor-file' "$UB/root-auto-trust-anchor-file.conf")" "1"
+check "o dnsmasq pergunta ao unbound"       "$(grep -c '^server=127.0.0.1#5335$' "$SANDBOX/etc/dnsmasq.conf")" "1"
+check "e nao repassa a versao para a LAN"   "$(grep -c '^local=/azimuth/$' "$SANDBOX/etc/dnsmasq.conf")" "1"
+
+"$FWCTL" rollback > "$SANDBOX/out" 2>&1 || true
+sed 's/^/     /' "$SANDBOX/out"
+check "rollback devolve o homelab.conf original" "$(cmp -s "$UB/homelab.conf" "$SANDBOX/homelab.original" && echo igual)" "igual"
+check "e tira o azimuth.conf (nao existia)"      "$(test -e "$UB/azimuth.conf" && echo existe || echo removido)" "removido"
+echo
+
 printf '\033[1m%d passaram, %d falharam\033[0m\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

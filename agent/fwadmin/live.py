@@ -144,7 +144,7 @@ def parse_unbound(root: Path) -> dict[str, Any]:
         except OSError:
             continue
         for raw in text.splitlines():
-            line = raw.split("#", 1)[0]
+            line = re.sub(r"(^|\s)#.*$", "", raw)  # o '#' do nome TLS nao e' comentario
             m = UNBOUND_LINE.match(line)
             if not m:
                 continue

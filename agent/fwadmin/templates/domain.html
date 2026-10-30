@@ -18,11 +18,15 @@
   <form id="page-form" method="post" action="/domain">
     <div class="form-grid">
       <div class="field"><label for="d-dom">Domínio</label><input id="d-dom" class="input mono" name="domain" value="{{ cfg.dns.domain }}" {{ ro }}></div>
+      {% if cfg.resolver.enabled %}
+      <div class="field" style="grid-column: span 2"><label for="d-up">Encaminha para</label><input id="d-up" class="input mono" value="o unbound, em {{ cfg.resolver.listen }} (página DNS)" disabled></div>
+      {% else %}
       <div class="field" style="grid-column: span 2"><label for="d-up">Encaminha para</label><input id="d-up" class="input mono" name="upstream" value="{{ cfg.dns.upstream|join(', ') }}" placeholder="vazio = o que estiver no /etc/resolv.conf" {{ ro }}></div>
+      {% endif %}
       <label class="check"><input type="checkbox" name="local_only" value="1" {% if cfg.dns.local_only %}checked{% endif %} {{ ro }}> Só responde localmente o domínio</label>
       <label class="check"><input type="checkbox" name="expand_hosts" value="1" {% if cfg.dns.expand_hosts %}checked{% endif %} {{ ro }}> Nome do DHCP vira registro</label>
       <label class="check"><input type="checkbox" name="bind_interfaces" value="1" {% if cfg.dns.bind_interfaces %}checked{% endif %} {{ ro }}> Escuta só na LAN</label>
-      <label class="check"><input type="checkbox" name="no_resolv" value="1" {% if cfg.dns.no_resolv %}checked{% endif %} {{ ro }}> Ignora o /etc/resolv.conf</label>
+      <label class="check"><input type="checkbox" name="no_resolv" value="1" {% if cfg.dns.no_resolv or cfg.resolver.enabled %}checked{% endif %} {{ 'disabled' if cfg.resolver.enabled else ro }}> Ignora o /etc/resolv.conf</label>
       <label class="check"><input type="checkbox" name="proxy_dnssec" value="1" {% if cfg.dns.proxy_dnssec %}checked{% endif %} {{ ro }}> Repassa o selo DNSSEC</label>
     </div>
   </form>

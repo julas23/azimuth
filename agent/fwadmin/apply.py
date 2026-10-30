@@ -160,6 +160,9 @@ class State:
     files: list[str] = field(default_factory=list)
     reloads: list[str] = field(default_factory=list)
     note: str = ""
+    paused: list[str] = field(default_factory=list)
+    """Unidades que o apply pausou para a prova e que o confirm ou o rollback
+    religam (services.quiet)."""
 
     @property
     def deadline(self) -> float:

@@ -16,13 +16,14 @@ from pathlib import Path
 from fwadmin import paths
 from fwadmin.command import Result, run
 from fwadmin.models import Config
-from fwadmin.services import dnsmasq, failover, interfaces, nftables, pppoe, wireguard
+from fwadmin.services import dnsmasq, failover, interfaces, nftables, pppoe, unbound, wireguard
 from fwadmin.services.base import Prova, Reload, ServiceModule
 
 REGISTRY: tuple[ServiceModule, ...] = tuple(
     sorted(
         (
             nftables.SERVICE,
+            unbound.SERVICE,
             dnsmasq.SERVICE,
             interfaces.SERVICE,
             pppoe.SERVICE,
@@ -41,6 +42,7 @@ __all__ = [
     "executables",
     "owner",
     "provas",
+    "quiet",
     "reloads",
     "rollback_reloads",
     "targets",
@@ -105,14 +107,34 @@ def context_for(name: str, cfg: Config) -> dict:
 
 
 def validate_syntax(staging: Path, names: list[str], cfg: Config) -> list[Result]:
-    """Passa cada arquivo gerado pela ferramenta nativa do servico dele."""
+    """Passa cada arquivo gerado pela ferramenta nativa do servico dele.
+
+    Servico com 'validate' proprio e' chamado uma vez, com todos os nomes dele
+    que estao na rodada.
+    """
     results = []
+    custom: dict[str, list[str]] = {}
     for name in names:
         service = owner(name, cfg)
-        if service is None or service.validator is None:
+        if service is None:
             continue
-        results.append(run(*service.validator, str(staging / name), mutating=False))
+        if service.validate is not None:
+            custom.setdefault(service.name, []).append(name)
+        elif service.validator is not None:
+            results.append(run(*service.validator, str(staging / name), mutating=False))
+    for service in REGISTRY:
+        if service.name in custom:
+            results.extend(service.validate(staging, custom[service.name], cfg))
     return results
+
+
+def quiet(cfg: Config, changed: list[str]) -> list[str]:
+    """Unidades a pausar durante a prova, dos servicos mexidos nesta rodada."""
+    out: list[str] = []
+    for service in REGISTRY:
+        if set(service.targets(cfg)) & set(changed):
+            out.extend(sorted(service.quiet))
+    return out
 
 
 def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Reload]:

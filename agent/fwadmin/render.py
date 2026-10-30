@@ -191,6 +191,7 @@ def render_all(cfg: Config) -> dict[str, str]:
         "hosts": cfg.hosts,
         "firewall": cfg.firewall,
         "routing": cfg.routing,
+        "resolver": cfg.resolver,
         "rule_to_nft": lambda r: rule_to_nft(cfg, r),
         "base_input": base_input(cfg),
         "device_of": lambda name: device_of(cfg, name),

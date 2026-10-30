@@ -35,16 +35,20 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from fwadmin import acks, db, dismissed, i18n, live, ownership, paths, secretstore, status
+from fwadmin import acks, db, dismissed, i18n, importer, live, observe, ownership, paths, secretstore, status
 from fwadmin.models import (
+    BlockedDomain,
     Config,
     Failover,
+    Forwarder,
+    ForwardZone,
     Host,
     IPv4Mode,
     PPPoE,
     PortForward,
     Reservation,
     Rule,
+    Resolver,
     Service,
     WGPeer,
 )
@@ -854,13 +858,21 @@ async def domain(request: Request, user: User) -> Response:
 @app.get("/dns", response_class=HTMLResponse)
 async def dns(request: Request, user: User) -> Response:
     snapshot = snap()
+    cfg = current()
+    # Fora do modelo, a pagina mostra o que "trazer o unbound" faria, com o
+    # mesmo tradutor da adocao, antes de alguem clicar.
+    preview, preview_changes = (None, [])
+    if not cfg.resolver.enabled:
+        preview, _, preview_changes = importer.build_resolver(observe.LIVE)
     return page(
         request,
         "dns.html",
         nav="dns",
-        cfg=current(),
+        cfg=cfg,
         unbound=snapshot.unbound,
         stats=snapshot.unbound_stats,
+        preview=preview,
+        preview_changes=preview_changes,
     )
 
 
@@ -992,6 +1004,153 @@ async def del_host(request: Request, user: User, name: str) -> Response:
         cfg.hosts = remaining
 
     return back("/domain", edit(request, mutate, f"host-:{name}"))
+
+
+# ---------------------------------------------------------------------------
+# DNS recursivo (unbound) — UNBOUND.md
+# ---------------------------------------------------------------------------
+
+
+@app.post("/dns/resolver/adopt")
+async def adopt_resolver(request: Request, user: User) -> Response:
+    """Traz o unbound vivo para o modelo, numa caixa ja adotada.
+
+    O mesmo tradutor da adocao. Vira proposta como qualquer edicao: o diff do
+    Sistema mostra os arquivos absorvidos virando aviso, e o Aplicar prova.
+    """
+
+    def mutate(cfg: Config) -> None:
+        resolver, _, changes = importer.build_resolver(observe.LIVE)
+        if resolver is None:
+            raise ValueError("nao achei config do unbound nesta maquina")
+        if not resolver["enabled"]:
+            raise ValueError(" ".join(changes) or "o unbound desta maquina nao tem traducao completa")
+        if cfg.dns.upstream not in ([], [f"{resolver['listen'].replace('@', '#')}"]):
+            raise ValueError(
+                f"o dnsmasq pergunta a {', '.join(cfg.dns.upstream)}, e nao so ao unbound: "
+                "acerte o 'Encaminha para' do Dominio antes"
+            )
+        cfg.dns.upstream = []
+        cfg.resolver = Resolver.model_validate(resolver)
+
+    return back("/dns", edit(request, mutate, "unbound:adocao"))
+
+
+def _forwarders(text: str) -> list[Forwarder]:
+    """'1.1.1.1#cloudflare-dns.com, 9.9.9.9' -> servidores do modo forward."""
+    out = []
+    for item in (part.strip() for part in text.split(",")):
+        if not item:
+            continue
+        main, _, tls_name = item.partition("#")
+        ip, _, port = main.partition("@")
+        out.append(Forwarder(address=ip, port=int(port) if port else None, tls_name=tls_name))
+    return out
+
+
+@app.post("/dns/resolver")
+async def save_resolver(request: Request, user: User, fields: Fields) -> Response:
+    def mutate(cfg: Config) -> None:
+        r = cfg.resolver
+        if not r.enabled:
+            raise ValueError("o unbound ainda nao e' do modelo: traga-o primeiro")
+        r.mode = fields.text("mode") or "recursive"
+        r.forwarders = _forwarders(fields.text("forwarders"))
+        r.dnssec = fields.flag("dnssec")
+        r.ipv6 = fields.flag("ipv6")
+        r.privacy.qname_minimisation = fields.flag("qname_minimisation")
+        r.privacy.hide_identity = fields.flag("hide_identity")
+        r.cache.prefetch = fields.flag("prefetch")
+        r.cache.min_ttl = fields.number("min_ttl", r.cache.min_ttl)
+        r.cache.max_ttl = fields.number("max_ttl", r.cache.max_ttl)
+        r.cache.msg_size = fields.text("msg_size") or r.cache.msg_size
+        r.cache.rrset_size = fields.text("rrset_size") or r.cache.rrset_size
+        r.threads = fields.number("threads", r.threads)
+
+    return back("/dns", edit(request, mutate, "unbound"))
+
+
+def _zone(fields: FormData, enabled: bool = True) -> ForwardZone:
+    return ForwardZone(
+        domain=fields.text("domain"),
+        servers=fields.csv("servers"),
+        description=fields.text("description"),
+        enabled=enabled,
+    )
+
+
+def _block(fields: FormData, enabled: bool = True) -> BlockedDomain:
+    return BlockedDomain(domain=fields.text("domain"), description=fields.text("description"), enabled=enabled)
+
+
+@app.post("/dns/forward")
+async def add_zone(request: Request, user: User, fields: Fields) -> Response:
+    def mutate(cfg: Config) -> None:
+        cfg.resolver.forward_zones.append(_zone(fields))
+
+    return back("/dns", edit(request, mutate, f"encaminha+:{fields.text('domain')}"))
+
+
+@app.post("/dns/forward/{domain}")
+async def update_zone(request: Request, user: User, domain: str, fields: Fields) -> Response:
+    def mutate(cfg: Config) -> None:
+        items = cfg.resolver.forward_zones
+        i = _find(items, "domain", domain, "dominio encaminhado")
+        items[i] = _zone(fields, items[i].enabled)
+
+    return back("/dns", edit(request, mutate, f"encaminha~:{domain}"))
+
+
+@app.post("/dns/forward/{domain}/toggle")
+async def toggle_zone(request: Request, user: User, domain: str) -> Response:
+    def mutate(cfg: Config) -> None:
+        z = cfg.resolver.forward_zones[_find(cfg.resolver.forward_zones, "domain", domain, "dominio encaminhado")]
+        z.enabled = not z.enabled
+
+    return back("/dns", edit(request, mutate, f"encaminha!:{domain}"))
+
+
+@app.post("/dns/forward/{domain}/delete")
+async def del_zone(request: Request, user: User, domain: str) -> Response:
+    def mutate(cfg: Config) -> None:
+        cfg.resolver.forward_zones.pop(_find(cfg.resolver.forward_zones, "domain", domain, "dominio encaminhado"))
+
+    return back("/dns", edit(request, mutate, f"encaminha-:{domain}"))
+
+
+@app.post("/dns/block")
+async def add_block(request: Request, user: User, fields: Fields) -> Response:
+    def mutate(cfg: Config) -> None:
+        cfg.resolver.blocked.append(_block(fields))
+
+    return back("/dns", edit(request, mutate, f"bloqueio+:{fields.text('domain')}"))
+
+
+@app.post("/dns/block/{domain}")
+async def update_block(request: Request, user: User, domain: str, fields: Fields) -> Response:
+    def mutate(cfg: Config) -> None:
+        items = cfg.resolver.blocked
+        i = _find(items, "domain", domain, "dominio bloqueado")
+        items[i] = _block(fields, items[i].enabled)
+
+    return back("/dns", edit(request, mutate, f"bloqueio~:{domain}"))
+
+
+@app.post("/dns/block/{domain}/toggle")
+async def toggle_block(request: Request, user: User, domain: str) -> Response:
+    def mutate(cfg: Config) -> None:
+        b = cfg.resolver.blocked[_find(cfg.resolver.blocked, "domain", domain, "dominio bloqueado")]
+        b.enabled = not b.enabled
+
+    return back("/dns", edit(request, mutate, f"bloqueio!:{domain}"))
+
+
+@app.post("/dns/block/{domain}/delete")
+async def del_block(request: Request, user: User, domain: str) -> Response:
+    def mutate(cfg: Config) -> None:
+        cfg.resolver.blocked.pop(_find(cfg.resolver.blocked, "domain", domain, "dominio bloqueado"))
+
+    return back("/dns", edit(request, mutate, f"bloqueio-:{domain}"))
 
 
 # ---------------------------------------------------------------------------

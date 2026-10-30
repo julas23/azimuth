@@ -12,6 +12,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from pathlib import Path
+
+from fwadmin.command import Result
 from fwadmin.models import Config
 
 
@@ -79,6 +82,7 @@ Units = Callable[[Config], frozenset[str]]
 Reloads = Callable[[Config, "Config | None", list[str]], list[Reload]]
 Rollback = Callable[["Config | None", list[str]], list[Reload]]
 Probe = Callable[[Config, "Config | None", list[str]], "Prova | None"]
+Validate = Callable[["Path", list[str], Config], "list[Result]"]
 
 
 @dataclass(frozen=True)
@@ -134,6 +138,16 @@ class ServiceModule:
 
     validator: tuple[str, ...] | None = None
     """Ferramenta nativa que aprova o arquivo, aplicada ao staging."""
+
+    validate: Validate | None = None
+    """Validacao propria, no lugar do 'validator', para quem precisa de mais
+    que o arquivo sozinho: o unbound valida tambem a arvore do conf.d inteira,
+    porque o erro mais provavel e' duplicata com um arquivo vizinho."""
+
+    quiet: frozenset[str] = field(default_factory=frozenset)
+    """Unidades sem dono que mexem neste servico sozinhas e que o fwctl pausa
+    da recarga ate o confirm ou o rollback. Um healthcheck que reinicia o
+    unbound no meio da prova de funcao faria a prova medir o restart dele."""
 
     executable: frozenset[str] = field(default_factory=frozenset)
     """Renders que vao para o disco com bit de execucao."""

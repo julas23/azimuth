@@ -320,5 +320,90 @@ check("as duas regras por WAN viram uma so",
       [(r.source.value, r.destination.value) for r in cfg.firewall.forward_rules],
       [("lan", "wan")])
 
+print("\n== unbound: absorvido so quando tudo tem traducao ==")
+from fwadmin.importer import build_resolver  # noqa: E402
+from fwadmin.models import Resolver  # noqa: E402
+
+PACOTE = {
+    "unbound.conf": 'include-toplevel: "/etc/unbound/unbound.conf.d/*.conf"\n',
+    "unbound.conf.d/root-auto-trust-anchor-file.conf": 'server:\n    auto-trust-anchor-file: "/var/lib/unbound/root.key"\n',
+}
+HOMELAB = """server:
+    # resolvedor recursivo local
+    interface: 127.0.0.1@5335
+    access-control: 127.0.0.0/8 allow
+    access-control: 0.0.0.0/0 refuse
+    do-ip4: yes
+    do-ip6: no
+    do-udp: yes
+    do-tcp: yes
+    prefer-ip6: no
+    root-hints: "/usr/share/dns/root.hints"
+    harden-dnssec-stripped: yes
+    harden-glue: yes
+    harden-referral-path: yes
+    aggressive-nsec: yes
+    qname-minimisation: yes
+    prefetch: yes
+    prefetch-key: yes
+    cache-min-ttl: 60
+    cache-max-ttl: 86400
+    msg-cache-size: 64m
+    rrset-cache-size: 128m
+    num-threads: 2
+    so-reuseport: yes
+    edns-buffer-size: 1232
+    hide-identity: yes
+    hide-version: yes
+"""
+CONTROLE = "remote-control:\n  control-enable: yes\n  control-interface: /run/unbound.ctl\n"
+
+
+def unbound_live(files: dict[str, str]) -> Path:
+    root = Path(tempfile.mkdtemp(prefix="unbound-live."))
+    for name, text in (PACOTE | files).items():
+        path = root / "unbound" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return root
+
+
+r, _, mud = build_resolver(unbound_live({"unbound.conf.d/homelab.conf": HOMELAB, "unbound.conf.d/remote-control.conf": CONTROLE}))
+check("o arquivo da casa entra ligado", r["enabled"], True)
+check("os dois arquivos a mao sao absorvidos, o do pacote nao", r["absorbed"], ["homelab.conf", "remote-control.conf"])
+check("valores trazidos como estao",
+      (r["listen"], r["threads"], r["cache"]["msg_size"], r["cache"]["rrset_size"], r["cache"]["min_ttl"], r["ipv6"], r["cache"]["prefetch"]),
+      ("127.0.0.1@5335", 2, "64m", "128m", 60, False, True))
+check("nenhuma mudanca alem da absorcao", [m for m in mud if "absorvido" not in m], [])
+check("e o modelo aceita", Resolver.model_validate(r).enabled, True)
+
+r, _, mud = build_resolver(unbound_live({"unbound.conf.d/minimo.conf": "server:\n    interface: 127.0.0.1@5335\n"}))
+check("opcao ausente vale o padrao do unbound, nao o do modelo",
+      (r["cache"]["prefetch"], r["ipv6"], r["threads"], r["privacy"]["hide_identity"]), (False, True, 1, False))
+check("e o que o render fixa diferente vira mudanca", mentions(mud, "harden-referral-path"), True)
+
+r, _, mud = build_resolver(unbound_live({"unbound.conf.d/homelab.conf": HOMELAB + "    verbosity: 2\n"}))
+check("linha sem traducao: fica fora, sem absorver pela metade", (r["enabled"], r["absorbed"]), (False, []))
+check("e a mudanca diz qual linha", mentions(mud, "verbosity: 2"), True)
+
+r, _, mud = build_resolver(unbound_live({"unbound.conf.d/x.conf": HOMELAB + """    local-zone: "ads.exemplo." always_nxdomain
+    domain-insecure: "corp.exemplo."
+forward-zone:
+    name: "corp.exemplo."
+    forward-addr: 10.8.0.1
+forward-zone:
+    name: "."
+    forward-tls-upstream: yes
+    forward-addr: 1.1.1.1@853#cloudflare-dns.com
+""", "unbound.conf.d/remote-control.conf": CONTROLE}))
+check("always_nxdomain vira bloqueio", [b["domain"] for b in r["blocked"]], ["ads.exemplo"])
+check("forward-zone vira dominio encaminhado", r["forward_zones"], [{"domain": "corp.exemplo", "servers": ["10.8.0.1"]}])
+check("forward-zone '.' com TLS vira o modo encaminhado",
+      (r["mode"], r["forwarders"]), ("forward", [{"address": "1.1.1.1", "tls_name": "cloudflare-dns.com"}]))
+check("domain-insecure do encaminhado nao e' sobra", r["enabled"], True)
+
+r, _, _ = build_resolver(unbound_live({}))
+check("so arquivos do pacote: nada a trazer", r, None)
+
 print(f"\n\033[1m{pass_n} passaram, {fail_n} falharam\033[0m")
 sys.exit(1 if fail_n else 0)
