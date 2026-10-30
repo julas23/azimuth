@@ -541,7 +541,9 @@ def alerts(cfg: Config, snapshot: live.Snapshot) -> list[dict[str, str]]:
                 "href": "/system",
             }
         )
-    pending, _ = acks.split(snapshot.changes)
+    # A lista da adocao trava so o primeiro apply. Depois do selo ela compara
+    # o importador com uma caixa que o motor ja escreve, e so gera ruido.
+    pending, _ = acks.split(snapshot.changes) if not ownership.read_seal() else ([], [])
     if pending:
         out.append(
             {
@@ -1624,7 +1626,11 @@ def system_view(request: Request, **extra: Any) -> HTMLResponse:
     if not READONLY:
         _, state = fwctl("status", timeout=20)
         _, diff = fwctl("diff", timeout=60) if applicable() else (True, "")
-        ctx |= {"state": state, "diff": diff}
+        # So ha o que confirmar com um apply gravado no state.json, o mesmo
+        # arquivo que o 'fwctl confirm' consulta. Procurar texto na saida do
+        # status nao serve: "nenhum apply aguardando confirmacao" contem a frase.
+        ctx |= {"state": state, "diff": diff, "awaiting": paths.STATE.exists()}
+    ctx["sealed"] = bool(ownership.read_seal())
     return page(
         request,
         "system.html",

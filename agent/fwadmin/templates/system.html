@@ -8,6 +8,7 @@
   <span class="muted mono">{{ cfg.system.hostname }} · kernel {{ system.kernel }} · ligado há {{ system.uptime }}</span>
 </div>
 
+{% if readonly or not sealed %}
 <section class="card{% if adopt_pending %} warn{% endif %}" id="mudancas" aria-labelledby="h-chg">
   <div class="card-h"><h2 class="h2" id="h-chg">O que o motor mudaria ao assumir</h2>
     <span class="chip {{ 'warn' if adopt_pending else 'ok' }}">{{ adopt_pending|length }} sem marcação</span>
@@ -25,6 +26,7 @@
     {% if not adopt_pending and not adopt_accepted %}<li><span>Nada: aplicar o modelo reproduziria exatamente o que está rodando.</span></li>{% endif %}
   </ol>
 </section>
+{% endif %}
 
 <section class="card" id="decisoes" aria-labelledby="h-fnd">
   <div class="card-h"><h2 class="h2" id="h-fnd">Ajustes do importador</h2><span class="chip mute">{{ findings|length }}</span>
@@ -36,16 +38,22 @@
 </section>
 
 {% if not readonly %}
+{% if awaiting %}
+<div class="note warn" id="confirmar"><b>Um apply está aguardando confirmação</b>Confirme se a rede está funcionando; se ninguém confirmar, ele volta sozinho no fim do prazo.
+  <div class="row" style="padding:10px 0 0;border:0">
+    <form method="post" action="/system/confirm" style="margin:0"><button class="btn primary" type="submit">Confirmar</button></form>
+    <form method="post" action="/system/rollback" style="margin:0"><button class="btn danger" type="submit">Reverter agora</button></form>
+  </div>
+</div>
+{% endif %}
 <section class="card" aria-labelledby="h-apply">
-  <div class="card-h"><h2 class="h2" id="h-apply">{{ 'Primeiro apply (adoção)' if adopting and not pending else 'Alterações pendentes' }}</h2>{% if applicable %}<span class="chip warn">aguardando</span>{% endif %}<div class="fill"></div>
+  <div class="card-h"><h2 class="h2" id="h-apply">{{ 'Primeiro apply (adoção)' if adopting and not pending else ('Aguardando confirmação' if awaiting else ('Alterações pendentes' if applicable else 'Nada pendente')) }}</h2>{% if applicable %}<span class="chip warn">proposta salva</span>{% elif awaiting %}<span class="chip warn">confirme</span>{% else %}<span class="chip ok">estável</span>{% endif %}<div class="fill"></div>
     {% if pending %}
       <form method="post" action="/system/discard"><button class="btn" type="submit">Descartar</button></form>
     {% endif %}
-    {% if applicable %}
-      <form method="post" action="/system/apply"><input type="hidden" name="yes" value="1"><button class="btn primary" type="submit" {% if adopt_pending %}disabled title="Há mudanças da adoção sem marcação"{% endif %}>Aplicar</button></form>
+    {% if applicable and not awaiting %}
+      <form method="post" action="/system/apply"><input type="hidden" name="yes" value="1"><button class="btn primary" type="submit" {% if adopt_pending and not sealed %}disabled title="Há mudanças da adoção sem marcação"{% endif %}>Aplicar</button></form>
     {% endif %}
-    <form method="post" action="/system/confirm"><button class="btn" type="submit">Confirmar</button></form>
-    <form method="post" action="/system/rollback"><button class="btn danger" type="submit">Reverter</button></form>
   </div>
   <pre class="out">{{ state }}</pre>
   {% if applicable and diff %}<pre class="out" style="border-top:1px solid #1E293B">{{ diff }}</pre>{% endif %}

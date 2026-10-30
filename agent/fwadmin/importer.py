@@ -551,7 +551,9 @@ def build_dns(dns_raw: dict[str, list[str]], domain: str) -> dict[str, Any]:
     for extra in dns_raw["interface"][1:]:
         change(f"dnsmasq: 'interface={extra}' sai; o modelo escuta so na LAN")
     for loc in dns_raw.get("local", []):
-        if loc != f"/{domain}/":
+        # local=/azimuth/ e' do proprio motor (a versao do unbound nao sai
+        # para a LAN) e volta sozinho quando o resolvedor esta no modelo
+        if loc not in (f"/{domain}/", "/azimuth/"):
             change(f"dnsmasq: 'local={loc}' sai; o modelo so declara local=/{domain}/")
 
     upstream = []

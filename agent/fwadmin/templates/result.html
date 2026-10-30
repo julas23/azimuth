@@ -4,7 +4,11 @@
 
 <div class="page-h"><div><h1>{{ title }}</h1></div></div>
 
-{% if ok %}
+{% if ok and 'CONFIRME' in output %}
+  <div class="note warn"><b>Aplicado — falta confirmar</b>A prova de função passou. Confirme abaixo; sem confirmação, tudo volta sozinho no fim do prazo.</div>
+{% elif ok and 'nada aguardando confirmacao' in output %}
+  <div class="note ok"><b>Já estava confirmado</b>Não há apply aguardando: a última alteração já vale.</div>
+{% elif ok %}
   <div class="note ok"><b>Comando concluído</b>Veja a saída abaixo.</div>
 {% else %}
   <div class="note bad"><b>O comando falhou</b>Nada foi deixado pela metade: o fwctl aborta antes de escrever quando algo não valida.</div>
@@ -14,7 +18,7 @@
   <pre class="out">{{ output }}</pre>
   <div class="row">
     <a class="btn" href="/system">Voltar ao Sistema</a>
-    {% if 'CONFIRME' in output %}
+    {% if 'CONFIRME' in output and ok %}
       <form method="post" action="/system/confirm"><button class="btn primary" type="submit">Confirmar agora</button></form>
       <form method="post" action="/system/rollback"><button class="btn danger" type="submit">Reverter</button></form>
     {% endif %}
