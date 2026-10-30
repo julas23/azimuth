@@ -265,6 +265,10 @@ textarea.input { height: auto; min-height: 92px; padding: 10px 12px; line-height
 .term-card { overflow: hidden; background: #0F172A; border-color: #1E293B; }
 .term { height: calc(100vh - 330px); min-height: 360px; padding: 10px 12px; }
 .term-foot { background: var(--surface); border-top: 1px solid var(--line); }
+.term-hint { font-size: 12px; }
+.term-hint kbd { font: 11px var(--mono); padding: 1px 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-2); }
+.term-links { margin-bottom: -8px; }
+.term-url { overflow-wrap: anywhere; font-size: 12.5px; }
 @media (max-width: 860px) { .term { height: 60vh; } }
 
 /* Passos que nao sao sequencia (as pastas do Storage): sem seta. */

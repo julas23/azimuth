@@ -9,9 +9,16 @@
   <div class="ra"><span class="chip {{ 'ok' if row.info.running else 'mute' }} lg" id="term-state">{{ 'rodando' if row.info.running else 'parado' }}</span><a class="btn" href="/agentes">Voltar</a></div>
 </div>
 
+<section class="card term-links" id="term-links" hidden aria-label="Links na tela do terminal">
+  <div class="card-h"><h2 class="h2">Links na tela</h2><span class="muted">os endereços que o agente mostrou, inteiros, mesmo quando quebram de linha</span></div>
+  <div id="term-links-list"></div>
+</section>
+
 <section class="card term-card">
   <div id="term" class="term" aria-label="Terminal do agente {{ row.name }}"></div>
-  <div class="row term-foot"><span class="grow muted" id="term-msg">Conectando…</span><button class="btn sm" type="button" id="term-reconnect" hidden>Reconectar</button></div>
+  <div class="row term-foot"><span class="grow muted" id="term-msg">Conectando…</span>
+    <span class="muted term-hint">Selecionar: <kbd>Shift</kbd> + arrastar (copia sozinho) · Colar: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd></span>
+    <button class="btn sm" type="button" id="term-reconnect" hidden>Reconectar</button></div>
 </section>
 
 <script src="/static/vendor/xterm/xterm.js"></script>
@@ -40,6 +47,55 @@
   }
   term.onData((d) => send({t: "i", d}));
   window.addEventListener("resize", resize);
+
+  // Copiar e colar. O mouse do tmux fica ligado (rolagem), entao arrastar
+  // seleciona no tmux; com Shift o xterm.js seleciona ele mesmo, e o que for
+  // selecionado vai direto para a area de transferencia.
+  const copy = (text) => text && navigator.clipboard && navigator.clipboard.writeText(text).then(
+    () => { msg.textContent = "Copiado."; }, () => { msg.textContent = "O navegador não deixou copiar."; });
+  term.onSelectionChange(() => copy(term.getSelection()));
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== "keydown" || !e.ctrlKey || !e.shiftKey) return true;
+    if (e.code === "KeyC") { copy(term.getSelection()); return false; }
+    if (e.code === "KeyV") { navigator.clipboard.readText().then((t) => t && term.paste(t)); return false; }
+    return true;
+  });
+
+  // Links na tela. O xterm.js nao faz link sozinho, e um endereco maior que a
+  // largura do terminal chega quebrado em varias linhas (o tmux desenha linha a
+  // linha). Junta as linhas que vao ate a ultima coluna, procura os enderecos e
+  // os mostra inteiros, com Abrir e Copiar.
+  const linksBox = document.getElementById("term-links"), linksList = document.getElementById("term-links-list");
+  let seen = "";
+  function scanLinks() {
+    const buf = term.buffer.active, rows = [];
+    for (let y = Math.max(0, buf.length - 400); y < buf.length; y++) {
+      const line = buf.getLine(y);
+      if (line) rows.push(line.translateToString(false));
+    }
+    let text = "";
+    rows.forEach((r) => { const t = r.replace(/\s+$/, ""); text += t + (t.length >= term.cols ? "" : "\n"); });
+    let urls = [...new Set((text.match(/https?:\/\/[^\s"'<>│]+/g) || []).map((u) => u.replace(/[).,;]+$/, "")))];
+    // um desenho antigo, noutra largura, deixa no historico pedacos do mesmo
+    // endereco: fica so o inteiro
+    urls = urls.filter((u) => !urls.some((v) => v !== u && v.startsWith(u))).slice(-6);
+    const key = urls.join(" ");
+    if (key === seen) return;
+    seen = key;
+    linksList.replaceChildren(...urls.map((u) => {
+      const row = document.createElement("div"); row.className = "row";
+      const a = document.createElement("a"); a.href = u; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.className = "mono grow term-url"; a.textContent = u;
+      const open = document.createElement("a"); open.href = u; open.target = "_blank"; open.rel = "noopener noreferrer";
+      open.className = "btn sm"; open.textContent = "Abrir";
+      const cp = document.createElement("button"); cp.type = "button"; cp.className = "btn sm"; cp.textContent = "Copiar";
+      cp.addEventListener("click", () => copy(u));
+      row.append(a, open, cp); return row;
+    }));
+    linksBox.hidden = urls.length === 0;
+  }
+  let scanTimer;
+  term.onWriteParsed(() => { clearTimeout(scanTimer); scanTimer = setTimeout(scanLinks, 250); });
   again.addEventListener("click", connect);
   connect();
 })();
