@@ -2,35 +2,35 @@
    conteudo rolando no meio. Fontes do sistema: o painel abre sem internet. */
 
 :root {
-  --bg: #EEF1F5;
+  --bg: #E6EAF0;
   --surface: #fff;
-  --surface-2: #F9FAFB;
-  --line: #E2E6EB;
-  --line-2: #EEF0F3;
+  --surface-2: #F0F3F7;
+  --line: #D3D9E2;
+  --line-2: #E2E7ED;
   --ink: #111827;
   --ink-2: #374151;
   --muted: #5B6472;
   --faint: #8A93A0;
   --accent: #1D4ED8;
   --accent-ink: #1E40AF;
-  --accent-soft: #EEF3FE;
-  --accent-line: #C7D6FA;
+  --accent-soft: #E6EEFD;
+  --accent-line: #B4C8F3;
   --ring: 0 0 0 3px rgba(29, 78, 216, .18);
-  --shadow: 0 1px 2px rgba(17, 24, 39, .05), 0 1px 3px rgba(17, 24, 39, .04);
+  --shadow: 0 1px 2px rgba(17, 24, 39, .06), 0 2px 6px rgba(17, 24, 39, .05);
   --ok-bg: #DCFCE7; --ok: #166534; --ok-dot: #16A34A;
   --warn-bg: #FEF3C7; --warn: #92400E; --warn-dot: #D97706; --warn-line: #F3D38B;
   --bad-bg: #FEE2E2; --bad: #991B1B; --bad-dot: #DC2626;
   --info-bg: #DBEAFE; --info: #1E40AF;
-  --mute-bg: #F1F3F5; --mute: #4B5563;
+  --mute-bg: #E9ECF1; --mute: #4B5563;
   --hover: #F3F4F6;
   --accent-hover: #1E40AF;
-  --zebra: #F7F9FB;
-  --row-hover: #EEF3FB;
-  --field-line: #AEB7C4;
+  --zebra: #F3F5F9;
+  --row-hover: #E9F0FC;
+  --field-line: #A3ADBC;
   --field-line-hover: #7D8796;
   --placeholder: #9AA2AE;
-  --panel-top: #F5F8FF;
-  --panel-bot: #FBFCFF;
+  --panel-top: #E9F0FE;
+  --panel-bot: #F1F5FE;
   --accent-line-strong: #93B4F5;
   --accent-faint: #5B7FD6;
   --warn-soft: #FFFBEB;
