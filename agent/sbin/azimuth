@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""azimuth — as maos de um agente no firewall (AGENTES.md).
+
+Fala com o painel por HTTPS local, com o token do agente, que o 'fwctl
+agente' grava em ~/.config/azimuth/agente.json conforme o nivel escolhido
+pelo dono: leitura le; motor (e root) tambem propoe, aplica e mexe nos
+servicos da stack. O confirmar do apply nunca passa por aqui: e' do dono, no
+painel, porque so ele prova que ainda alcanca a caixa.
+
+So biblioteca padrao: roda em qualquer agente, sem pacote nenhum.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import ssl
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+CONFIG = Path.home() / ".config" / "azimuth" / "agente.json"
+
+
+def load() -> dict:
+    try:
+        return json.loads(CONFIG.read_text())
+    except OSError:
+        sys.exit("azimuth: sem acesso ao firewall (nivel isolado, ou o agente foi criado antes do comando existir).\n"
+                 "O dono escolhe o nivel na pagina Agentes do painel.")
+    except ValueError:
+        sys.exit(f"azimuth: {CONFIG} ilegivel")
+
+
+def call(method: str, path: str, body: dict | None = None, query: dict | None = None) -> tuple[int, str]:
+    conf = load()
+    # confia exatamente no certificado do painel, e em nenhum outro (o SAN dele
+    # traz o IP da LAN, entao o nome tambem e' conferido)
+    ctx = ssl.create_default_context(cafile=conf["cert"])
+    url = conf["url"].rstrip("/") + path + (("?" + urllib.parse.urlencode(query)) if query else "")
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method, headers={
+        "authorization": f"Bearer {conf['token']}", "content-type": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=900) as resp:
+            return resp.status, resp.read().decode()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read().decode()
+    except (urllib.error.URLError, OSError) as exc:
+        sys.exit(f"azimuth: nao consegui falar com o painel em {conf['url']}: {getattr(exc, 'reason', exc)}")
+
+
+def show(status: int, text: str) -> int:
+    try:
+        data = json.loads(text)
+    except ValueError:
+        sys.stdout.write(text if text.endswith("\n") else text + "\n")
+        return 0 if status < 400 else 1
+    if isinstance(data, dict) and "erro" in data:
+        print(f"azimuth: {data['erro']}", file=sys.stderr)
+        return 1
+    if isinstance(data, dict) and ("saida" in data or "diff" in data):
+        for key in ("proposta", "saida", "diff", "falta", "proximo"):
+            if data.get(key):
+                print(f"{key}: {data[key]}" if key in ("proposta", "falta", "proximo") else data[key])
+        return 0 if data.get("ok", status < 400) else 1
+    print(json.dumps(data, indent=2, ensure_ascii=False))
+    return 0 if status < 400 else 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="azimuth", description=__doc__.splitlines()[0])
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    for name, help_ in (("quem", "quem voce e' e o que seu nivel alcanca"),
+                        ("estado", "WANs, alertas, servicos, apply e proposta pendentes"),
+                        ("config", "o modelo inteiro (YAML, sem senhas nem chaves)"),
+                        ("leases", "quem pegou IP por DHCP"), ("alertas", "o que pede atencao"),
+                        ("diff", "o que a proposta pendente muda nos arquivos"),
+                        ("aplicar", "aplica a proposta (o confirmar e' do dono, no painel)"),
+                        ("descartar", "joga fora a proposta pendente")):
+        sub.add_parser(name, help=help_)
+    p_logs = sub.add_parser("logs", help="journal do sistema")
+    p_logs.add_argument("unidade", nargs="?", default="")
+    p_logs.add_argument("-n", "--linhas", type=int, default=100)
+    p_diag = sub.add_parser("diag", help="diagnosticos")
+    p_diag.add_argument("ferramenta", choices=["ping", "dns", "traceroute", "rotas", "nft"])
+    p_diag.add_argument("alvo", nargs="?", default="")
+    p_prop = sub.add_parser("propor", help="propoe uma mudanca: JSON Patch sobre o modelo")
+    p_prop.add_argument("arquivo", nargs="?", help="arquivo com a lista de operacoes; sem ele, le da entrada")
+    p_prop.add_argument("-m", "--resumo", default="", help="o que muda, numa frase")
+    p_srv = sub.add_parser("servico", help="age num servico da stack")
+    p_srv.add_argument("acao", choices=["iniciar", "parar", "reiniciar", "recarregar", "instalar"])
+    p_srv.add_argument("servico", help="nftables, fail2ban, dnsmasq, unbound ou wireguard")
+    args = parser.parse_args()
+
+    simple = {"quem": "/api/agente/quem", "estado": "/api/agente/estado", "config": "/api/agente/config",
+              "leases": "/api/agente/leases", "alertas": "/api/agente/alertas", "diff": "/api/agente/diff"}
+    if args.cmd in simple:
+        return show(*call("GET", simple[args.cmd]))
+    if args.cmd == "logs":
+        return show(*call("GET", "/api/agente/logs", query={"unidade": args.unidade, "linhas": args.linhas}))
+    if args.cmd == "diag":
+        return show(*call("POST", "/api/agente/diag", {"ferramenta": args.ferramenta, "alvo": args.alvo}))
+    if args.cmd == "propor":
+        raw = Path(args.arquivo).read_text() if args.arquivo else sys.stdin.read()
+        try:
+            ops = json.loads(raw)
+        except ValueError as exc:
+            sys.exit(f"azimuth: a proposta nao e' JSON: {exc}")
+        if isinstance(ops, dict) and "ops" in ops:
+            ops, args.resumo = ops["ops"], args.resumo or ops.get("resumo", "")
+        return show(*call("POST", "/api/agente/propor", {"ops": ops, "resumo": args.resumo}))
+    if args.cmd == "aplicar":
+        return show(*call("POST", "/api/agente/aplicar", {}))
+    if args.cmd == "descartar":
+        return show(*call("POST", "/api/agente/descartar", {}))
+    if args.cmd == "servico":
+        return show(*call("POST", "/api/agente/servico", {"acao": args.acao, "servico": args.servico}))
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

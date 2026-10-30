@@ -35,7 +35,8 @@ Cmnd_Alias FWADMIN_RW = /usr/local/sbin/fwctl apply, \
                         /usr/local/sbin/fwctl confirm, \
                         /usr/local/sbin/fwctl rollback, \
                         /usr/local/sbin/fwctl f2b, \
-                        /usr/local/sbin/fwctl agente
+                        /usr/local/sbin/fwctl agente, \
+                        /usr/local/sbin/fwctl servico
 
 netadm ALL=(root) NOPASSWD: FWADMIN_RO, FWADMIN_RW
 

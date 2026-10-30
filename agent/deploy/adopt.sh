@@ -89,6 +89,7 @@ install -m 0440 "$SRC/deploy/sudoers-fwadmin" /etc/sudoers.d/fwadmin
 visudo -c -q || { install -m 0440 "$SRC/deploy/sudoers-fwadmin-readonly" /etc/sudoers.d/fwadmin; echo "   sudoers invalido — voltei ao enxuto"; exit 1; }
 echo "   apply, confirm, rollback, seal, inventory"
 install -m 0755 "$SRC/sbin/azimuth-agente-sessao" /usr/local/sbin/azimuth-agente-sessao
+install -m 0755 "$SRC/sbin/azimuth" /usr/local/bin/azimuth
 install -m 0644 "$SRC/deploy/azimuth-agente@.service" /etc/systemd/system/azimuth-agente@.service
 install -m 0644 "$SRC/deploy/azimuth-agente.tmpfiles" /etc/tmpfiles.d/azimuth-agente.conf
 systemd-tmpfiles --create /etc/tmpfiles.d/azimuth-agente.conf

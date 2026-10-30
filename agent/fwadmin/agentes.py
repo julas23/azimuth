@@ -11,8 +11,10 @@ executaria, e o nivel de um vazaria para o outro.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import secrets
 from dataclasses import dataclass
 
 from fwadmin import paths
@@ -76,8 +78,17 @@ LEVELS: dict[str, str] = {
     "root": "tudo, na máquina inteira (sudo sem senha)",
 }
 DEFAULT_LEVEL = "leitura"
-UNAVAILABLE = {"motor": "chega com o comando azimuth, na próxima entrega"}
+UNAVAILABLE: dict[str, str] = {}
 """Niveis que ainda nao funcionam, com o motivo que a tela mostra."""
+
+RANK = {"isolado": 0, "leitura": 1, "motor": 2, "root": 3}
+"""O que cada nivel alcanca no comando azimuth: leitura le, motor (e root) muda."""
+
+CERT = f"{ETC}/painel.crt"
+"""O certificado do painel, copiado para onde o agente le: o comando azimuth
+confia nele e em nenhum outro."""
+
+PANEL_PORT = 8443
 
 
 def user_of(nome: str) -> str:
@@ -140,3 +151,90 @@ def sudoers(nome: str) -> str:
         f"# gerado pelo fwctl agente — nivel root do agente '{nome}', escolhido pelo usuario\n"
         f"{user_of(nome)} ALL=(ALL) NOPASSWD: ALL\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# o comando azimuth: token por agente, do nivel escolhido
+# ---------------------------------------------------------------------------
+
+
+def new_token() -> tuple[str, str]:
+    """(token, sha256). O painel guarda so o hash, no agentes.json."""
+    token = secrets.token_urlsafe(32)
+    return token, token_digest(token)
+
+
+def token_digest(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def client_config(url: str, token: str) -> str:
+    return json.dumps({"url": url, "token": token, "cert": CERT}, indent=1) + "\n"
+
+
+GUIDE = {
+    "isolado": "Neste nível você **não tem acesso ao firewall**: o comando `azimuth` recusa, e as pastas do "
+    "firewall ficam fora do seu alcance. Peça ao dono para subir o nível na página Agentes, se precisar.",
+    "leitura": "Neste nível você **lê**: estado, configuração, leases, alertas, logs, o diff pendente e "
+    "diagnósticos. Não muda nada. Para propor ou aplicar uma mudança, o dono precisa subir o nível para "
+    "**motor** na página Agentes.",
+    "motor": "Neste nível você **lê e muda pelo motor**: propõe uma mudança (JSON Patch sobre o modelo, "
+    "validada antes de virar proposta), aplica (com prova de função e rollback automático) e age sobre os "
+    "serviços da stack. **O confirmar do apply é do dono, no painel**: depois de `azimuth aplicar`, avise que "
+    "ele precisa conferir a rede e clicar em Confirmar em Sistema, senão tudo volta sozinho em 90 segundos.",
+    "root": "Neste nível você tem **a máquina inteira** (`sudo` sem senha). Mesmo assim, **mude a rede pelo "
+    "comando `azimuth`**: o que passa pelo motor é validado, provado e reversível. Edição feita à mão em "
+    "/etc é detectada pelo motor como \"edição à mão\" e trava o próximo apply até alguém decidir.",
+}
+
+
+def guide(nome: str, level: str) -> str:
+    """O AZIMUTH.md do agente: o que e' esta caixa, o nivel e o comando."""
+    return f"""# Você está num firewall Azimuth
+
+Você é o agente `{nome}`, rodando dentro de um firewall doméstico (Azimuth), usado pelo dono no
+navegador. Ajude a diagnosticar, configurar, instalar e ajustar a rede de casa. Responda em
+português do Brasil.
+
+## Seu nível: {level}
+
+{GUIDE[level]}
+
+## Como o firewall funciona
+
+- A configuração inteira é **um modelo declarativo** (YAML). O motor gera os arquivos do sistema
+  (nftables, dnsmasq, unbound, WireGuard, interfaces, PPPoE) a partir dele. Mudar a rede é mudar o
+  modelo, nunca os arquivos em /etc.
+- Toda mudança passa por: **proposta** (validada contra o schema) → **aplicar** (instala, recarrega,
+  prova que o serviço voltou e reverte sozinho se não voltou) → **confirmar** (o dono, no painel,
+  depois de conferir que ainda alcança a caixa).
+- A entrada vinda da internet é fechada: da WAN só passa a porta do WireGuard. A VPN é a porta da casa.
+
+## O comando `azimuth`
+
+```
+azimuth quem                         # quem você é e o que seu nível alcança
+azimuth estado                       # WANs, alertas, serviços, apply/proposta pendentes
+azimuth config                       # o modelo inteiro (YAML, sem senhas nem chaves)
+azimuth leases                       # quem pegou IP por DHCP
+azimuth alertas
+azimuth logs [unidade] [-n linhas]   # journal (ex.: azimuth logs dnsmasq -n 50)
+azimuth diff                         # o que a proposta pendente muda nos arquivos
+azimuth diag ping|dns|traceroute|rotas|nft [alvo]
+azimuth propor [arquivo.json] -m "resumo"   # JSON Patch sobre o modelo (lê da entrada sem arquivo)
+azimuth aplicar                      # o Aplicar de sempre; o confirmar é do dono
+azimuth descartar                    # joga fora a proposta pendente
+azimuth servico iniciar|parar|reiniciar|recarregar|instalar <nome>
+```
+
+Uma proposta é uma lista de operações JSON Patch (RFC 6902) sobre o modelo que `azimuth config`
+mostra, por exemplo:
+
+```json
+[{{"op": "add", "path": "/dhcp/reservations/-",
+  "value": {{"mac": "aa:bb:cc:dd:ee:ff", "ip": "10.0.0.60", "name": "impressora"}}}}]
+```
+
+Antes de propor, leia a configuração; depois de aplicar, confira com `azimuth estado` e os
+diagnósticos, e diga ao dono o que confirmar.
+"""

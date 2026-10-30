@@ -34,7 +34,7 @@ import yaml
 
 sys.path.insert(0, os.environ.get("FWADMIN_CODE", "/opt/fwadmin"))
 
-from fwadmin import acks, agentes, importer, observe, ownership, paths, secretstore, services  # noqa: E402
+from fwadmin import acks, agentes, importer, observe, ownership, paths, secretstore, services, stack  # noqa: E402
 from fwadmin.apply import (  # noqa: E402
     ApplyError,
     Plan,
@@ -658,6 +658,51 @@ def _agente_files(nome: str, kind: str, level: str) -> None:
     run("systemctl", "daemon-reload")
 
 
+def _agente_access(nome: str, level: str) -> str:
+    """O acesso do agente ao comando azimuth, no nivel escolhido. Devolve o
+    sha256 do token novo (o que o painel guarda), ou vazio no nivel isolado.
+
+    O token so existe num arquivo do proprio agente, 0600. Trocar de nivel
+    troca o token: o antigo para de valer na hora.
+    """
+    home = Path(agentes.home_of(nome))
+    user = agentes.user_of(nome)
+    conf_dir = home / ".config" / "azimuth"
+    conf = conf_dir / "agente.json"
+
+    def own(path: Path, mode: int) -> None:
+        path.chmod(mode)
+        shutil.chown(path, user, user)
+
+    # o que esta caixa e', em qualquer nivel: o agente le antes de agir
+    (home / "AZIMUTH.md").write_text(agentes.guide(nome, level))
+    own(home / "AZIMUTH.md", 0o644)
+    claude_md = home / "CLAUDE.md"
+    if not claude_md.exists():  # do usuario depois de criado: so o import
+        claude_md.write_text("@AZIMUTH.md\n")
+        own(claude_md, 0o644)
+
+    if agentes.RANK[level] == 0:
+        conf.unlink(missing_ok=True)
+        return ""
+    crt = paths.VAR / "tls" / "fwadmin.crt"
+    if crt.exists():
+        shutil.copyfile(crt, agentes.CERT)
+        Path(agentes.CERT).chmod(0o644)
+    url = f"https://{load(paths.CONFIG).lan.ipv4.ip}:{agentes.PANEL_PORT}"
+    token, digest = agentes.new_token()
+    conf_dir.mkdir(parents=True, exist_ok=True)
+    for d in (home / ".config", conf_dir):
+        shutil.chown(d, user, user)
+    tmp = conf.with_name(".agente.json.novo")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(agentes.client_config(url, token))
+    shutil.chown(tmp, user, user)
+    tmp.replace(conf)
+    return digest
+
+
 def _agente_state(update) -> None:
     state = agentes.load_state()
     update(state)
@@ -727,8 +772,11 @@ def cmd_agente(args: argparse.Namespace) -> int:
             logs.mkdir(parents=True, exist_ok=True)
             shutil.chown(logs, user, user)
             _agente_files(nome, kind, level)
-            _agente_state(lambda st: st.__setitem__(
-                nome, {"kind": kind, "level": level, "created": datetime.now().isoformat(timespec="seconds")}))
+            digest = _agente_access(nome, level)
+            _agente_state(lambda st: st.__setitem__(nome, {
+                "kind": kind, "level": level, "token_sha256": digest,
+                "created": datetime.now().isoformat(timespec="seconds"),
+            }))
             run("systemctl", "start", unit)
             say(f"agente {nome} criado ({agentes.CATALOG[kind].title}, nivel {level})")
 
@@ -739,7 +787,8 @@ def cmd_agente(args: argparse.Namespace) -> int:
             if level not in agentes.LEVELS or level in agentes.UNAVAILABLE:
                 return fail(f"nivel indisponivel: {level!r}")
             _agente_files(nome, state[nome]["kind"], level)
-            _agente_state(lambda st: st[nome].__setitem__("level", level))
+            digest = _agente_access(nome, level)
+            _agente_state(lambda st: st[nome].update(level=level, token_sha256=digest))
             # o nivel vale na sessao nova: a que esta aberta reinicia
             if run("systemctl", "is-active", "--quiet", unit, mutating=False).ok:
                 run("systemctl", "restart", unit)
@@ -768,6 +817,47 @@ def cmd_agente(args: argparse.Namespace) -> int:
             return fail(f"acao desconhecida: {acao!r}")
     except ApplyError as exc:
         return fail(str(exc))
+    return 0
+
+
+SERVICE_ACTIONS = {"iniciar": "start", "parar": "stop", "reiniciar": "restart", "recarregar": "reload"}
+SERVICE_REQUEST = paths.VAR / "servico-pedido.json"
+
+
+def cmd_servico(args: argparse.Namespace) -> int:
+    """Inicia, para, reinicia, recarrega ou instala um servico da stack.
+
+    Para a tela de Servicos e para o comando azimuth dos agentes. So a stack
+    (fwadmin.stack): o que mais roda na maquina nao e' do portal. O pedido
+    vem por arquivo, como o do fail2ban, e e' revalidado aqui.
+    """
+    require_root()
+    try:
+        raw = SERVICE_REQUEST.read_text()[:1024]
+        SERVICE_REQUEST.unlink()
+        pedido = json.loads(raw)
+    except (OSError, ValueError):
+        return fail("nenhum pedido de servico legivel")
+    if not isinstance(pedido, dict):
+        return fail("pedido de servico malformado")
+    acao, chave = str(pedido.get("action", "")), str(pedido.get("key", ""))
+    svc = stack.by_key(load(paths.CONFIG)).get(chave)
+    if svc is None:
+        return fail(f"servico fora da stack: {chave!r}")
+    if acao == "instalar":
+        result = run(
+            "systemd-run", "--wait", "--pipe", "--quiet", "--collect",
+            "--setenv=DEBIAN_FRONTEND=noninteractive",
+            "apt-get", "install", "-y", "-q", "--no-install-recommends", svc["package"],
+            timeout=900,
+        )
+    elif acao in SERVICE_ACTIONS:
+        result = run("systemctl", SERVICE_ACTIONS[acao], svc["unit"], timeout=120)
+    else:
+        return fail(f"acao desconhecida: {acao!r}")
+    if not result.ok:
+        return fail(f"{svc['name']}: {result.output[-400:]}")
+    say(f"{svc['name']} ({svc['unit']}): {acao} feito")
     return 0
 
 
@@ -976,6 +1066,9 @@ def main() -> int:
     sub.add_parser(
         "agente", help="cria, muda o nivel, inicia, para ou remove um agente no navegador"
     ).set_defaults(fn=cmd_agente)
+    sub.add_parser(
+        "servico", help="inicia, para, reinicia, recarrega ou instala um servico da stack"
+    ).set_defaults(fn=cmd_servico)
 
     p_rb = sub.add_parser("rollback", help="desfaz o ultimo apply")
     p_rb.add_argument("--auto", action="store_true", help="chamado pelo watchdog")

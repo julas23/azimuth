@@ -1,6 +1,6 @@
 # Agentes no navegador — desenho
 
-Status: **primeira entrega em código** (30/10/2026): terminal no navegador, Claude Code e shell livre, níveis isolado, leitura e root. O nível motor espera o comando `azimuth`. As três decisões abertas foram fechadas pela recomendação (ver o fim).
+Status: **em código** (30/10/2026): terminal no navegador, Claude Code e shell livre, os quatro níveis e o comando `azimuth`. Falta: OpenClaw e Hermes no catálogo, e o mesmo conjunto como servidor MCP.
 
 O cliente escolhe um agente (Claude Code, OpenClaw, Hermes…) e o usa **dentro do painel, no
 navegador**, com a mesma tela que teria no terminal do computador dele. O agente é um assistente
@@ -126,3 +126,19 @@ descrever o produto. Redação proposta:
   dá 403.
 - Testado de ponta a ponta fora do fw: o xterm.js no Chrome mostra a sessão tmux, o teclado
   chega, o redimensionamento vale, e fechar solta o cliente sem matar a sessão.
+
+## Feito na segunda entrega: o comando `azimuth`
+
+- `/usr/local/bin/azimuth`, Python só com a biblioteca padrão, fala com o painel por HTTPS local
+  (`/api/agente/*`). Confia exatamente no certificado do painel, copiado para
+  `/etc/azimuth-agente/painel.crt` (o SAN traz o IP da LAN, então o nome também é conferido); um
+  certificado de terceiros derruba a conexão.
+- Um token por agente, gerado pelo `fwctl agente` a cada troca de nível, num arquivo do próprio
+  agente (0600); o painel guarda só o sha256. Isolado não tem token.
+- Leitura: `quem`, `estado`, `config`, `leases`, `alertas`, `logs`, `diff`, `diag`. Motor (e
+  root): também `propor` (JSON Patch validado pelo modelo, vira proposta pendente com o agente
+  como autor no histórico), `aplicar` (o confirmar continua do dono), `descartar` e `servico`.
+- `fwctl servico` (iniciar, parar, reiniciar, recarregar, instalar), restrito à stack
+  (`fwadmin/stack.py`), com o pedido por arquivo; a tela de Serviços passou a usá-lo também.
+- O agente recebe `~/AZIMUTH.md` (o que é a caixa, o nível, o comando), regerado a cada troca de
+  nível, e um `~/CLAUDE.md` que só o importa e é do usuário depois de criado.

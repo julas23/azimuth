@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import fcntl
+import hmac
 import ipaddress
 import json
 import os
@@ -38,7 +39,7 @@ from typing import Annotated, Any, Callable
 from urllib.parse import parse_qs, urlencode
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
@@ -61,6 +62,7 @@ from fwadmin.models import (
     WGPeer,
 )
 from fwadmin.render import base_input, dump, load
+from fwadmin.stack import stack
 
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
@@ -114,7 +116,7 @@ async def form(request: Request) -> FormData:
 Fields = Annotated[FormData, Depends(form)]
 
 FWCTL = "/usr/local/sbin/fwctl"
-ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff", "observe", "f2b", "agente"}
+ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff", "observe", "f2b", "agente", "servico"}
 
 READONLY = os.environ.get("FWADMIN_READONLY", "1") != "0"
 """Ligado por padrao: desligar e' decisao explicita de quem instala."""
@@ -303,12 +305,17 @@ def applicable() -> bool:
     return not READONLY and (has_pending() or adopting())
 
 
-def edit(request: Request, mutate: Callable[[Config], Any], action: str) -> str | None:
+def edit(
+    request: Request, mutate: Callable[[Config], Any], action: str, author: str | None = None
+) -> str | None:
     """Aplica uma mudanca no modelo, valida e grava como pendente.
 
     Devolve None em caso de sucesso, ou a mensagem de erro. Como a validacao
     roda antes de gravar, uma edicao invalida nao chega nem a virar proposta.
+    'author' e' quem fica no historico quando nao e' a sessao do painel (um
+    agente, pelo comando azimuth).
     """
+    who = author or user_of(request)
     cfg = current()
     try:
         mutate(cfg)
@@ -318,9 +325,9 @@ def edit(request: Request, mutate: Callable[[Config], Any], action: str) -> str 
     except (ValueError, KeyError) as exc:
         return str(exc)
 
-    keep_version(action, user_of(request))
+    keep_version(action, who)
     save_pending(validated)
-    db.log(action, username=user_of(request), address=client_ip(request))
+    db.log(action, username=who, address=client_ip(request))
     return None
 
 
@@ -585,27 +592,6 @@ def alerts(cfg: Config, snapshot: live.Snapshot) -> list[dict[str, str]]:
     return out
 
 
-def stack(cfg: Config) -> list[dict[str, str]]:
-    """Os servicos que o portal administra, na ordem da tela de Servicos.
-
-    So a stack do Azimuth: o que mais roda na maquina (zabbix, ssh, nginx)
-    nao e' do portal e nao aparece aqui.
-    """
-    wg = cfg.wireguard.device if cfg.wireguard.enabled else "wg0"
-    return [
-        {"key": "nftables", "name": "Firewall", "role": "filtra o que entra e o que atravessa",
-         "unit": "nftables.service", "package": "nftables", "href": "/firewall"},
-        {"key": "fail2ban", "name": "Fail2Ban", "role": "bane quem erra a senha demais",
-         "unit": "fail2ban.service", "package": "fail2ban", "href": "/fail2ban"},
-        {"key": "dnsmasq", "name": "DHCP e domínio", "role": "entrega IPs e responde os nomes da LAN",
-         "unit": "dnsmasq.service", "package": "dnsmasq", "href": "/dhcp"},
-        {"key": "unbound", "name": "DNS", "role": "resolve na internet o que não é da LAN",
-         "unit": "unbound.service", "package": "unbound", "href": "/dns"},
-        {"key": "wireguard", "name": "VPN", "role": f"túnel WireGuard {wg}",
-         "unit": f"wg-quick@{wg}.service", "package": "wireguard-tools", "href": "/vpn"},
-    ]
-
-
 def service_buttons(info: status.UnitInfo) -> dict[str, str]:
     """Para cada acao, o motivo de ela estar desligada; '' = pode.
 
@@ -815,9 +801,6 @@ async def services_page(request: Request, user: User) -> Response:
         buttons = service_buttons(info)
         if READONLY:
             buttons = {k: v or "somente leitura" for k, v in buttons.items()}
-        else:
-            # as acoes sobre servicos ainda nao existem no fwctl
-            buttons = {k: v or "entra com as ações" for k, v in buttons.items()}
         cards.append(svc | {"info": info, "buttons": buttons})
     return page(request, "services.html", nav="services", cfg=cfg, cards=cards, now=time.time())
 
@@ -1486,6 +1469,231 @@ async def agent_tty(ws: WebSocket, nome: str) -> None:
             os.waitpid(pid, 0)
         except (ProcessLookupError, ChildProcessError):
             pass
+
+
+# ---------------------------------------------------------------------------
+# o comando azimuth: as maos do agente no firewall (AGENTES.md)
+# ---------------------------------------------------------------------------
+
+
+def _agent_auth(request: Request, need: str) -> tuple[str, str] | JSONResponse:
+    """(nome, nivel) do agente dono do token, ou a resposta de recusa.
+
+    O token vem no cabecalho Authorization; o painel compara so o sha256, que
+    o 'fwctl agente' grava no agentes.json a cada troca de nivel.
+    """
+    token = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not token:
+        return JSONResponse({"erro": "sem token: este agente esta no nivel isolado?"}, status_code=401)
+    digest = agentes.token_digest(token)
+    for nome, info in agentes.load_state().items():
+        if info.get("token_sha256") and hmac.compare_digest(info["token_sha256"], digest):
+            level = info.get("level", "isolado")
+            if agentes.RANK.get(level, 0) < agentes.RANK[need]:
+                return JSONResponse(
+                    {"erro": f"o nivel {level} nao alcanca isto; o dono sobe para {need} na pagina Agentes"},
+                    status_code=403,
+                )
+            return nome, level
+    return JSONResponse({"erro": "token invalido ou de um nivel antigo"}, status_code=401)
+
+
+def _service_rows(cfg: Config) -> list[dict[str, Any]]:
+    out = []
+    for svc in stack(cfg):
+        info = status.unit_info(svc["unit"], svc["package"])
+        out.append({"nome": svc["key"], "unidade": svc["unit"], "instalado": info.installed,
+                    "rodando": info.running, "estado": info.active})
+    return out
+
+
+@app.get("/api/agente/quem")
+async def api_whoami(request: Request) -> Response:
+    auth = _agent_auth(request, "leitura")
+    if isinstance(auth, JSONResponse):
+        return auth
+    nome, level = auth
+    return JSONResponse({"agente": nome, "nivel": level, "pode_mudar": agentes.RANK[level] >= agentes.RANK["motor"],
+                         "nivel_explicado": agentes.LEVELS[level]})
+
+
+@app.get("/api/agente/estado")
+async def api_state(request: Request) -> Response:
+    auth = _agent_auth(request, "leitura")
+    if isinstance(auth, JSONResponse):
+        return auth
+    cfg = current()
+    ctx = ai_context(cfg)["state"]
+    return JSONResponse({
+        "maquina": cfg.system.hostname, "versao": version(),
+        "wans": ctx["wans"], "alertas": ctx["alertas"], "servicos": _service_rows(cfg),
+        "proposta_pendente": has_pending(), "apply_aguardando_confirmacao": paths.STATE.exists(),
+    })
+
+
+@app.get("/api/agente/config", response_class=PlainTextResponse)
+async def api_config(request: Request) -> Response:
+    auth = _agent_auth(request, "leitura")
+    if isinstance(auth, JSONResponse):
+        return auth
+    return PlainTextResponse(dump(current()))
+
+
+@app.get("/api/agente/leases")
+async def api_leases(request: Request) -> Response:
+    auth = _agent_auth(request, "leitura")
+    if isinstance(auth, JSONResponse):
+        return auth
+    return JSONResponse(ai_context(current())["state"]["leases_dhcp"])
+
+
+@app.get("/api/agente/alertas")
+async def api_alerts(request: Request) -> Response:
+    auth = _agent_auth(request, "leitura")
+    if isinstance(auth, JSONResponse):
+        return auth
+    return JSONResponse(alerts(current(), snap()))
+
+
+@app.get("/api/agente/logs", response_class=PlainTextResponse)
+async def api_logs(request: Request, unidade: str = "", linhas: int = 100) -> Response:
+    auth = _agent_auth(request, "leitura")
+    if isinstance(auth, JSONResponse):
+        return auth
+    return PlainTextResponse(status.journal(unidade, linhas))
+
+
+@app.get("/api/agente/diff", response_class=PlainTextResponse)
+async def api_diff(request: Request) -> Response:
+    auth = _agent_auth(request, "leitura")
+    if isinstance(auth, JSONResponse):
+        return auth
+    if not has_pending():
+        return PlainTextResponse("nenhuma proposta pendente\n")
+    _, out = fwctl("diff", timeout=60)
+    return PlainTextResponse(out + "\n")
+
+
+@app.post("/api/agente/diag", response_class=PlainTextResponse)
+async def api_diag(request: Request) -> Response:
+    auth = _agent_auth(request, "leitura")
+    if isinstance(auth, JSONResponse):
+        return auth
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except ValueError:
+        return JSONResponse({"erro": "corpo nao e' JSON"}, status_code=400)
+    tool, target = str(body.get("ferramenta", "")), str(body.get("alvo", ""))
+    probes = {
+        "ping": lambda: status.ping(target, ""),
+        "traceroute": lambda: status.traceroute(target),
+        "dns": lambda: status.dns_lookup(target),
+        "rotas": lambda: status.Probe(True, status.routes(), "ip route show"),
+        "nft": lambda: status.Probe(True, status.nft_ruleset(), "nft list ruleset"),
+    }
+    if tool not in probes:
+        return JSONResponse({"erro": f"ferramenta desconhecida: {tool} (use {', '.join(probes)})"}, status_code=400)
+    result = probes[tool]()
+    db.log(f"agente-diag:{auth[0]}:{tool}", username=f"agente:{auth[0]}", address=client_ip(request))
+    return PlainTextResponse((f"$ {result.command}\n" if result.command else "") + result.output + "\n",
+                             status_code=200 if result.ok else 422)
+
+
+@app.post("/api/agente/propor")
+async def api_propose(request: Request) -> Response:
+    auth = _agent_auth(request, "motor")
+    if isinstance(auth, JSONResponse):
+        return auth
+    nome = auth[0]
+    try:
+        body = json.loads(await request.body() or b"{}")
+        ops, summary = body["ops"], str(body.get("resumo", ""))[:80] or "proposta do agente"
+        if not isinstance(ops, list):
+            raise TypeError
+    except (ValueError, KeyError, TypeError):
+        return JSONResponse({"erro": "esperado {\"ops\": [...JSON Patch...], \"resumo\": \"...\"}"}, status_code=400)
+
+    def mutate(cfg: Config) -> None:
+        proposed = _patched(cfg, ops)
+        for field_name in Config.model_fields:
+            setattr(cfg, field_name, getattr(proposed, field_name))
+
+    error = edit(request, mutate, f"agente:{nome}:{summary}", author=f"agente:{nome}")
+    if error:
+        return JSONResponse({"erro": error}, status_code=422)
+    _, diff = fwctl("diff", timeout=60)
+    return JSONResponse({"ok": True, "proposta": summary, "diff": diff,
+                         "proximo": "azimuth aplicar, ou o dono revisa em Sistema"})
+
+
+@app.post("/api/agente/aplicar")
+async def api_apply(request: Request) -> Response:
+    auth = _agent_auth(request, "motor")
+    if isinstance(auth, JSONResponse):
+        return auth
+    nome = auth[0]
+    if not applicable():
+        return JSONResponse({"erro": "nada para aplicar: proponha antes (azimuth propor)"}, status_code=409)
+    paths.NOTE.parent.mkdir(parents=True, exist_ok=True)
+    paths.NOTE.write_text(f"aplicado pelo agente {nome}"[:200])
+    ok, output = fwctl("apply", "--yes")
+    db.log("apply", username=f"agente:{nome}", address=client_ip(request), ok=ok)
+    return JSONResponse(
+        {"ok": ok, "saida": output,
+         "falta": "o dono precisa conferir a rede e clicar em Confirmar em Sistema; sem isso, volta sozinho"
+         if ok and "CONFIRME" in output else ""},
+        status_code=200 if ok else 422,
+    )
+
+
+@app.post("/api/agente/descartar")
+async def api_discard(request: Request) -> Response:
+    auth = _agent_auth(request, "motor")
+    if isinstance(auth, JSONResponse):
+        return auth
+    if not has_pending():
+        return JSONResponse({"ok": True, "saida": "nenhuma proposta pendente"})
+    keep_version("descartar", f"agente:{auth[0]}")
+    paths.PENDING.unlink(missing_ok=True)
+    secretstore.discard()
+    db.log("descartar-pendente", username=f"agente:{auth[0]}", address=client_ip(request))
+    return JSONResponse({"ok": True, "saida": "proposta descartada"})
+
+
+def _service(acao: str, chave: str) -> tuple[bool, str]:
+    """Grava o pedido e chama o 'fwctl servico'. A tela de Servicos e o
+    comando azimuth passam pelo mesmo caminho."""
+    tmp = paths.VAR / f".servico-pedido.json.{os.getpid()}"
+    tmp.write_text(json.dumps({"action": acao, "key": chave}))
+    tmp.replace(paths.VAR / "servico-pedido.json")
+    ok, out = fwctl("servico", timeout=900 if acao == "instalar" else 120)
+    if not ok:
+        (paths.VAR / "servico-pedido.json").unlink(missing_ok=True)
+    return ok, out.removeprefix("erro: ").strip()
+
+
+@app.post("/api/agente/servico")
+async def api_service(request: Request) -> Response:
+    auth = _agent_auth(request, "motor")
+    if isinstance(auth, JSONResponse):
+        return auth
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except ValueError:
+        return JSONResponse({"erro": "corpo nao e' JSON"}, status_code=400)
+    acao, chave = str(body.get("acao", "")), str(body.get("servico", ""))
+    ok, out = _service(acao, chave)
+    db.log(f"servico-{acao}:{chave}", username=f"agente:{auth[0]}", address=client_ip(request), ok=ok)
+    return JSONResponse({"ok": ok, "saida": out}, status_code=200 if ok else 422)
+
+
+@app.post("/services/{chave}/{acao}")
+async def service_action(request: Request, user: User, chave: str, acao: str) -> Response:
+    if acao not in ("iniciar", "parar", "reiniciar", "recarregar", "instalar"):
+        return back("/services", f"acao desconhecida: {acao}")
+    ok, out = _service(acao, chave)
+    db.log(f"servico-{acao}:{chave}", username=user, address=client_ip(request), ok=ok)
+    return done("/services", out.splitlines()[-1] if out else "feito") if ok else back("/services", out)
 
 
 # ---------------------------------------------------------------------------

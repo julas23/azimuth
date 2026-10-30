@@ -62,6 +62,9 @@ install_agentes() {
     if ! cmp -s "$SRC/sbin/azimuth-agente-sessao" /usr/local/sbin/azimuth-agente-sessao; then
         install -m 0755 "$SRC/sbin/azimuth-agente-sessao" /usr/local/sbin/azimuth-agente-sessao; mudou=1
     fi
+    if ! cmp -s "$SRC/sbin/azimuth" /usr/local/bin/azimuth; then
+        install -m 0755 "$SRC/sbin/azimuth" /usr/local/bin/azimuth; mudou=1
+    fi
     if ! cmp -s "$SRC/deploy/azimuth-agente@.service" /etc/systemd/system/azimuth-agente@.service; then
         install -m 0644 "$SRC/deploy/azimuth-agente@.service" /etc/systemd/system/azimuth-agente@.service
         systemctl daemon-reload; mudou=1
