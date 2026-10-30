@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "_icons.html" import actionbar %}
+{% block title %}{{ t.storage }}{% endblock %}
+{% block body %}
+
+<div class="page-h">
+  <div><h1>{{ t.storage }}</h1><p class="lede">Os discos de dados num volume único, opcionalmente espelhado, com quatro pastas fixas servidas por SMB e NFS na LAN e na VPN.</p></div>
+  {% if volume %}<span class="chip ok lg">volume aionas ativo</span>{% else %}<span class="chip mute lg">sem volume de dados</span>{% endif %}
+</div>
+
+<div class="note"><b>Esta página só lê, por enquanto</b>O módulo está desenhado (<span class="mono">STORAGE.md</span>), mas preparar, espelhar e trocar disco são operações sem volta, e o desenho exige verificá-las numa VM antes da primeira linha de código. Nada aqui particiona ou formata.</div>
+
+<div class="grid tiles">
+  <div class="card tile"><div class="top"><span class="lbl">Discos</span></div><span class="big">{{ disks|length }}</span><span class="muted">{{ disks|selectattr('role', 'equalto', 'sistema')|list|length }} de sistema · {{ free|length }} livre{{ 's' if free|length != 1 }}</span></div>
+  <div class="card tile"><div class="top"><span class="lbl">Layout</span></div><span class="big" style="font-size:18px">{{ layout[0] }}</span><span class="muted">o que o desenho escolhe para estes discos</span></div>
+  <div class="card tile"><div class="top"><span class="lbl">Volume</span>{% if not lvm %}<span class="chip mute">LVM ausente</span>{% endif %}</div><span class="big" style="font-size:18px">{{ 'montado' if mounted['/srv/aionas'] else 'não existe' }}</span><span class="muted mono">/srv/aionas</span></div>
+  <div class="card tile"><div class="top"><span class="lbl">Compartilhamento</span></div><span class="big" style="font-size:18px">{% for name, i in shares %}{{ name }}{% if not loop.last %} · {% endif %}{% endfor %}</span><span class="muted">{% for name, i in shares %}{{ name }} {{ 'rodando' if i.running else ('parado' if i.installed else 'não instalado') }}{% if not loop.last %} · {% endif %}{% endfor %}</span></div>
+</div>
+
+<section class="card" aria-labelledby="h-disks">
+  <div class="card-h"><h2 class="h2" id="h-disks">Discos</h2><span class="chip mute">{{ disks|length }}</span><span class="muted">identificados por <span class="mono">/dev/disk/by-id</span>, que não muda de um boot para outro</span></div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Disco</th><th>Modelo · série</th><th class="num">Tamanho</th><th>Tipo</th><th>Partições</th><th>Papel</th></tr></thead>
+      <tbody>
+      {% for d in disks %}
+        <tr><td class="mono">{{ d.path }}<div class="muted" style="font-size:11.5px">{{ d.by_id or '—' }}</div></td>
+          <td>{{ d.model or '—' }}<div class="muted mono" style="font-size:11.5px">{{ d.serial or '' }}</div></td>
+          <td class="num mono">{{ d.size|size }}</td>
+          <td>{{ 'HDD' if d.rotational else 'SSD' }}{% if d.transport %} · {{ d.transport|upper }}{% endif %}{% if d.removable %} · removível{% endif %}</td>
+          <td class="mono" style="font-size:12px">{% for p in d.parts %}{{ p.name }}{% if p.fstype %} {{ p.fstype }}{% endif %}{% if p.mount %} → {{ p.mount }}{% endif %}{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">—</span>{% endfor %}</td>
+          <td>{% if d.role == 'sistema' %}<span class="chip info">sistema</span>{% elif d.role == 'livre' %}<span class="chip ok">livre</span>{% else %}<span class="chip warn">em uso</span>{% endif %}</td></tr>
+      {% else %}
+        <tr><td colspan="6" class="muted">O lsblk não respondeu.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="row muted"><span>Disco "em uso" tem assinatura ou partição de algum sistema de arquivos e nunca é oferecido para dados: o módulo recusa disco com partição montada e mostra o que seria apagado antes de qualquer confirmação.</span></div>
+</section>
+
+<div class="grid two">
+  <section class="card" aria-labelledby="h-layout">
+    <div class="card-h"><h2 class="h2" id="h-layout">Como esta caixa ficaria</h2></div>
+    <div class="card-b"><p><b>{{ layout[0]|capitalize }}.</b> {{ layout[1] }}</p>
+      <p class="muted">Espelho não é backup: arquivo apagado ou cifrado some dos dois discos na mesma hora.</p></div>
+    <ol class="flow steps plain" style="grid-template-columns: repeat(2, minmax(0, 1fr))">
+      <li class="node"><span class="n">1</span><span><b>Pictures</b><span class="muted">também a biblioteca do Immich</span></span></li>
+      <li class="node"><span class="n">2</span><span><b>Videos</b><span class="muted">Jellyfin lê</span></span></li>
+      <li class="node"><span class="n">3</span><span><b>Music</b><span class="muted">Jellyfin e Navidrome leem</span></span></li>
+      <li class="node"><span class="n">4</span><span><b>Documents</b><span class="muted">Nextcloud</span></span></li>
+    </ol>
+  </section>
+  <section class="card" aria-labelledby="h-shares">
+    <div class="card-h"><h2 class="h2" id="h-shares">Compartilhamento</h2><span class="muted">só na LAN e na VPN; a WAN não passa no schema</span></div>
+    {% for name, i in shares %}
+      <div class="row"><span class="dot {{ 'ok' if i.running else ('' if not i.installed else 'bad') }}"></span><span class="grow"><b>{{ name }}</b> <span class="muted mono">{{ i.unit.removesuffix('.service') }}</span></span>
+        <span class="muted">{% if not i.installed %}não instalado{% elif i.running %}rodando{% else %}parado{% endif %}</span></div>
+    {% endfor %}
+    <div class="row muted"><span>SMB sem SMB1 e sem convidado; NFS só v4, numa porta só. Toda escrita sai como o mesmo dono (<span class="mono">aionas-data</span>, uid 2000), para SMB, NFS e os apps enxergarem os mesmos arquivos.</span></div>
+  </section>
+</div>
+
+{{ actionbar('', readonly, applicable, 'o storage ainda não tem operações no painel') }}
+{% endblock %}

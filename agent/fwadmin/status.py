@@ -491,6 +491,98 @@ def dns_answers(name: str, server: str = "127.0.0.1", timeout: float = 2.0) -> b
     return reply is not None and reply.rcode == 0 and reply.answers > 0
 
 
+# ---------------------------------------------------------------------------
+# discos — o que a pagina de Storage mostra (STORAGE.md)
+# ---------------------------------------------------------------------------
+
+SYSTEM_MOUNTS = {"/", "/boot", "/boot/efi", "/usr", "/var", "[SWAP]"}
+
+
+@dataclass
+class Disk:
+    path: str
+    by_id: str
+    """Nome em /dev/disk/by-id: modelo + serie. E' por ele que o modulo
+    identifica disco, porque /dev/sdX muda de um boot para outro."""
+
+    model: str
+    serial: str
+    size: int
+    rotational: bool
+    transport: str
+    removable: bool
+    role: str
+    """'sistema', 'em uso' ou 'livre'."""
+
+    parts: list[dict[str, str]] = field(default_factory=list)
+
+
+def disks() -> list[Disk]:
+    """Discos inteiros, com o papel de cada um. Sem privilegio: o lsblk le o sysfs."""
+    raw = _run(
+        "lsblk", "-J", "-b", "-o",
+        "NAME,PATH,SIZE,TYPE,MODEL,SERIAL,ROTA,TRAN,FSTYPE,MOUNTPOINTS,ID-LINK,RM",
+    )
+    try:
+        devices = json.loads(raw).get("blockdevices", []) if raw else []
+    except ValueError:
+        return []
+
+    def walk(node: dict) -> list[dict]:
+        out = [node]
+        for child in node.get("children") or []:
+            out += walk(child)
+        return out
+
+    out = []
+    for dev in devices:
+        if dev.get("type") != "disk" or str(dev.get("name", "")).startswith(("zram", "ram")):
+            continue
+        nodes = walk(dev)
+        mounts = {m for n in nodes for m in (n.get("mountpoints") or []) if m}
+        parts = [
+            {"name": n.get("name", ""), "fstype": n.get("fstype") or "", "mount": ", ".join(m for m in (n.get("mountpoints") or []) if m)}
+            for n in nodes[1:]
+        ]
+        if mounts & SYSTEM_MOUNTS:
+            role = "sistema"
+        elif mounts or any(n.get("fstype") for n in nodes) or parts:
+            role = "em uso"
+        else:
+            role = "livre"
+        out.append(
+            Disk(
+                path=dev.get("path", ""),
+                by_id=dev.get("id-link") or "",
+                model=(dev.get("model") or "").strip(),
+                serial=(dev.get("serial") or "").strip(),
+                size=int(dev.get("size") or 0),
+                rotational=bool(dev.get("rota")),
+                transport=dev.get("tran") or "",
+                removable=bool(dev.get("rm")),
+                role=role,
+                parts=parts,
+            )
+        )
+    return out
+
+
+def storage_layout(n_free: int, separate_system: bool) -> tuple[str, str]:
+    """(titulo, explicacao) do layout que o STORAGE.md escolhe para estes discos."""
+    if n_free == 0:
+        if separate_system:
+            return ("só o disco do sistema", "Sem disco livre para dados. Com um disco a mais, os dados vão para ele, em volume próprio; com dois, em espelho.")
+        return ("nenhum disco", "Nenhum disco encontrado.")
+    if n_free == 1:
+        return ("linear no disco de dados", "Os dados ficam num disco só, sem redundância. Um segundo disco entra depois sem reformatar nada e vira espelho, com o volume em uso.")
+    if n_free == 2:
+        return ("espelho: matriz + cópia", "Toda escrita vai para os dois discos; as leituras saem da matriz. Se a matriz morre, a cópia assume sem perder nada e sem parar o serviço.")
+    return (
+        f"espelho em dois, {n_free - 2} de reserva",
+        "O espelho usa dois discos; os outros ficam de reserva e entram sozinhos se um do espelho falhar.",
+    )
+
+
 def journal(unit: str = "", lines: int = 100) -> str:
     argv = ["journalctl", "-n", str(min(lines, 500)), "--no-pager", "-o", "short-iso"]
     if unit:

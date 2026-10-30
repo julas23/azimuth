@@ -21,6 +21,7 @@ import ipaddress
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -411,6 +412,9 @@ NAV = [
     ("domain", "/domain", "dnsmasq", False),
     ("dns", "/dns", "unbound", False),
     ("vpn", "/vpn", "WireGuard", False),
+    None,
+    ("storage", "/storage", "LVM · SMB · NFS", False),
+    ("ai", "/ia", "BYOK · local", False),
 ]
 """O menu da esquerda, de cima para baixo. None e' o separador; Sistema fica
 preso no fundo e por isso esta fora da lista."""
@@ -875,6 +879,45 @@ async def dns(request: Request, user: User) -> Response:
         stats=snapshot.unbound_stats,
         preview=preview,
         preview_changes=preview_changes,
+    )
+
+
+@app.get("/storage", response_class=HTMLResponse)
+async def storage(request: Request, user: User) -> Response:
+    """So leitura: o modulo esta desenhado (STORAGE.md), falta a verificacao em
+    VM antes de qualquer codigo que mexa em disco."""
+    found = status.disks()
+    free = [d for d in found if d.role == "livre"]
+    system = [d for d in found if d.role == "sistema"]
+    layout = status.storage_layout(len(free), bool(system))
+    return page(
+        request,
+        "storage.html",
+        nav="storage",
+        cfg=current(),
+        disks=found,
+        free=free,
+        layout=layout,
+        lvm=bool(shutil.which("lvm") or Path("/sbin/lvm").exists()),
+        volume=Path("/dev/aionas").exists(),
+        mounted={m: os.path.ismount(m) for m in ("/srv/aionas", "/var/lib/aionas")},
+        shares=[
+            ("SMB", status.unit_info("smbd.service", "samba")),
+            ("NFS", status.unit_info("nfs-server.service", "nfs-kernel-server")),
+        ],
+    )
+
+
+@app.get("/ia", response_class=HTMLResponse)
+async def ai(request: Request, user: User) -> Response:
+    return page(
+        request,
+        "ia.html",
+        nav="ai",
+        cfg=current(),
+        local=[
+            ("Ollama", status.unit_info("ollama.service", "ollama")),
+        ],
     )
 
 
