@@ -35,6 +35,7 @@ import yaml
 sys.path.insert(0, os.environ.get("FWADMIN_CODE", "/opt/fwadmin"))
 
 from fwadmin.apps import CATALOG as APP_CATALOG  # noqa: E402
+from fwadmin.services.apps import options as app_options  # noqa: E402
 from fwadmin import acks, agentes, importer, observe, ownership, paths, secretstore, services, stack  # noqa: E402
 from fwadmin.apply import (  # noqa: E402
     ApplyError,
@@ -849,15 +850,24 @@ def cmd_servico(args: argparse.Namespace) -> int:
         spec = APP_CATALOG.get(chave)
         if spec is None:
             return fail(f"aplicativo fora do catalogo: {chave!r}")
+        # As opcoes vem da config pendente: o aplicativo acabou de ser ligado
+        # (ou ganhou o ML) e ainda nao foi aplicado.
+        cfg = load(paths.PENDING if paths.PENDING.exists() else paths.CONFIG)
+        imagens = spec.images(app_options(cfg, spec.key))
+        # Uma unidade, um 'docker pull' por imagem, em sequencia: a primeira e'
+        # o comando, as outras ExecStartPost (o systemd-run exige comando). Sem
+        # shell, com referencias que vem do catalogo.
+        posts = [f"--property=ExecStartPost=/usr/bin/docker pull {img}" for img in imagens[1:]]
         result = run(
             "systemd-run", "--no-block", "--quiet", "--collect",
             f"--unit=azimuth-baixar-{spec.key}", "--description", f"Azimuth — baixar {spec.name}",
-            "docker", "pull", spec.image,
+            "--property=Type=oneshot", *posts,
+            "/usr/bin/docker", "pull", imagens[0],
             timeout=30,
         )
         if not result.ok:
             return fail(f"{spec.name}: {result.output[-400:]}")
-        say(f"{spec.name}: a imagem esta baixando em segundo plano")
+        say(f"{spec.name}: {len(imagens)} imagem(ns) baixando em segundo plano")
         return 0
     svc = stack.by_key(load(paths.CONFIG)).get(chave)
     if svc is None:

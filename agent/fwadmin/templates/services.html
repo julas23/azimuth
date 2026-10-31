@@ -79,6 +79,7 @@
             {% else %}<span class="chip warn">ligado, aguardando aplicar</span>{% endif %}
           </td>
           <td><div class="ra">
+            {% if 'ml' in a.spec.options() %}<form method="post" action="/apps/{{ a.key }}/ml"><button class="btn sm" type="submit" title="Busca por conteúdo e reconhecimento de rostos. Pesado: baixa uma imagem grande e usa bastante CPU e memória" {% if readonly %}disabled{% endif %}>{{ 'Busca inteligente ligada' if a.ml else 'Busca inteligente' }}</button></form>{% endif %}
             {% if a.spec.gpu %}<form method="post" action="/apps/{{ a.key }}/hwaccel"><button class="btn sm" type="submit" title="Passa a GPU Intel ou AMD (/dev/dri) ao container, para transcodificar sem gastar CPU" {% if readonly %}disabled{% endif %}>{{ 'GPU ligada' if a.hwaccel else 'Usar GPU' }}</button></form>{% endif %}
             <form method="post" action="/apps/{{ a.key }}/toggle"><button class="btn sm{{ ' danger' if a.enabled }}" type="submit" {% if readonly %}disabled title="Somente leitura"{% endif %}>{% if a.enabled %}{{ icon('pause', 14) }}Desligar{% else %}{{ icon('play', 14) }}Ligar{% endif %}</button></form></div></td>
         </tr>
@@ -86,7 +87,7 @@
       </tbody>
     </table>
   </div>
-  <div class="row muted"><span>A música do Navidrome fica em <span class="mono">/srv/aionas/Music</span>; o estado de cada aplicativo, em <span class="mono">/var/lib/aionas</span>. Desligar não apaga nada disso.</span></div>
+  <div class="row muted"><span>Os arquivos ficam em <span class="mono">/srv/aionas</span> (Music, Videos, Pictures); o estado de cada aplicativo — banco, miniaturas, cache —, em <span class="mono">/var/lib/aionas</span>. Desligar não apaga nada disso.</span></div>
 </section>
 
 {% endblock %}

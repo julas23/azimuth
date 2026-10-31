@@ -80,8 +80,10 @@ nft = out["azimuth.nft"]
 check("forward deixa os containers sairem pela WAN",
       'ip saddr 172.30.0.0/16 oifname $WAN counter accept' in nft, True)
 check("com NAT na WAN", 'oifname $WAN ip saddr 172.30.0.0/16 masquerade' in nft, True)
-check("e so na WAN: nenhuma regra para a LAN",
-      sum(1 for line in nft.splitlines() if "172.30.0.0/16" in line), 2)
+pool_lines = [line for line in nft.splitlines() if "172.30.0.0/16" in line]
+check("tres regras com o pool: saida, NAT e entre containers", len(pool_lines), 3)
+check("nenhuma liga a LAN aos containers",
+      any(f'"{cfg.lan.device}"' in line for line in pool_lines), False)
 
 plan = build_plan(cfg, None, paths.STAGING)
 check("recarga reinicia o Docker",

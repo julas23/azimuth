@@ -32,7 +32,7 @@ from fwadmin import paths, services
 from fwadmin.command import ApplyError, Result, run
 from fwadmin.models import Config
 from fwadmin.render import render_all
-from fwadmin.services import ddns, pppoe
+from fwadmin.services import apps, ddns, pppoe
 from fwadmin.services.base import Prova, Reload
 
 __all__ = [
@@ -273,6 +273,10 @@ def build_plan(cfg: Config, previous: Config | None, staging: Path) -> Plan:
     rendered |= ddns_secrets
     targets |= ddns.secret_targets(cfg)
     secret |= set(ddns_secrets)
+    app_secrets = apps.render_secrets(cfg)
+    rendered |= app_secrets
+    targets |= apps.secret_targets(cfg)
+    secret |= set(app_secrets)
 
     if staging.exists():
         shutil.rmtree(staging)

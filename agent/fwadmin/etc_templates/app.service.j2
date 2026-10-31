@@ -7,12 +7,15 @@ After=docker.service network-online.target
 Wants=network-online.target
 # Os dados moram aqui; quando o modulo de storage montar o volume, a unidade
 # espera por ele.
-RequiresMountsFor={{ spec.mounts | map(attribute='host') | join(' ') }}
+RequiresMountsFor={{ spec.all_mounts | map(attribute='host') | unique | join(' ') }}
 ConditionPathExists={{ compose_file }}
 
 [Service]
 {% for d in spec.media_dirs %}
 ExecStartPre=/usr/bin/install -d -m 0755 {{ d }}
+{% endfor %}
+{% for d in spec.media_dirs_rw %}
+ExecStartPre=/usr/bin/install -d -m 0755 -o {{ spec.uid }} -g {{ spec.uid }} {{ d }}
 {% endfor %}
 ExecStartPre=/usr/bin/install -d -m 0750 -o {{ spec.uid }} -g {{ spec.uid }} {{ spec.state_dir }}
 {% for d in spec.state_dirs %}

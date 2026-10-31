@@ -180,6 +180,10 @@ code -X POST "http://127.0.0.1:$PORT/apps/jellyfin/hwaccel" >/dev/null
 check "Jellyfin aceita GPU" "$(python3 -c "import yaml,sys; d=yaml.safe_load(open(sys.argv[1])); print(d['apps']['jellyfin']['hwaccel'])" "$PEND")" "True"
 code -X POST "http://127.0.0.1:$PORT/apps/navidrome/hwaccel" >/dev/null
 check "Navidrome nao" "$(python3 -c "import yaml,sys; d=yaml.safe_load(open(sys.argv[1])); print(d['apps']['navidrome'].get('hwaccel', False))" "$PEND")" "False"
+code -X POST "http://127.0.0.1:$PORT/apps/immich/ml" >/dev/null
+check "Immich aceita a busca inteligente" "$(python3 -c "import yaml,sys; d=yaml.safe_load(open(sys.argv[1])); print(d['apps']['immich']['ml'])" "$PEND")" "True"
+code -X POST "http://127.0.0.1:$PORT/apps/jellyfin/ml" >/dev/null
+check "Jellyfin nao tem" "$(python3 -c "import yaml,sys; d=yaml.safe_load(open(sys.argv[1])); print(d['apps']['jellyfin'].get('ml', False))" "$PEND")" "False"
 code -X POST "http://127.0.0.1:$PORT/apps/plex/toggle" >/dev/null
 check "fora do catalogo: recusado" "$(grep -c 'plex' "$PEND" || true)" "0"
 echo

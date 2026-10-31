@@ -28,7 +28,7 @@ from pathlib import Path
 import yaml
 
 from fwadmin.apps import CATALOG, AppSpec
-from fwadmin import paths
+from fwadmin import paths, secretstore
 from fwadmin.command import Result, run
 from fwadmin.models import Config
 from fwadmin.services.base import Prova, Reload, ServiceModule, until
@@ -36,11 +36,20 @@ from fwadmin.services.base import Prova, Reload, ServiceModule, until
 COMPOSE = "app-compose-"
 UNIT = "app-unit-"
 VHOST = "app-vhost-"
-PREFIXES = (COMPOSE, UNIT, VHOST)
+SECRET = "app-secret-"
+PREFIXES = (COMPOSE, UNIT, VHOST, SECRET)
 
 
 def compose_path(key: str) -> str:
     return f"/etc/azimuth/apps/{key}/compose.yaml"
+
+
+def secret_path(key: str) -> str:
+    return f"/etc/azimuth/apps/{key}/secrets.env"
+
+
+def secret_ref(key: str) -> str:
+    return f"app-{key}"
 
 
 def unit_name(key: str) -> str:
@@ -107,36 +116,86 @@ def gpu_groups() -> list[int]:
     return out
 
 
-def compose(spec: AppSpec, hwaccel: bool = False) -> dict:
-    """O compose inteiro, montado como dado e serializado — nao texto colado."""
-    body = _compose(spec)
-    if spec.env:
-        body["services"][spec.key]["environment"] = dict(spec.env)
-    if hwaccel and spec.gpu:
-        svc = body["services"][spec.key]
-        svc["devices"] = ["/dev/dri:/dev/dri"]
-        svc["group_add"] = [str(g) for g in gpu_groups()]
-    return body
+def options(cfg: Config | None, key: str) -> set[str]:
+    """As opcoes ligadas de um aplicativo (hoje so 'ml')."""
+    if cfg is None or key not in cfg.apps:
+        return set()
+    return {"ml"} if cfg.apps[key].ml else set()
 
 
-def _compose(spec: AppSpec) -> dict:
+def _volumes(mounts) -> list[str]:
+    return [f"{m.host}:{m.container}{':ro' if m.readonly else ''}" for m in mounts]
+
+
+def _hardened(spec: AppSpec) -> dict:
     return {
-        "name": f"azimuth-{spec.key}",
-        "services": {
-            spec.key: {
-                "image": spec.image,
-                "user": f"{spec.uid}:{spec.uid}",
-                # Quem reinicia e' o systemd: duas politicas brigariam.
-                "restart": "no",
-                "ports": [f"127.0.0.1:{spec.port}:{spec.port}"],
-                "volumes": [
-                    f"{m.host}:{m.container}{':ro' if m.readonly else ''}" for m in spec.mounts
-                ],
-                "security_opt": ["no-new-privileges:true"],
-                "cap_drop": ["ALL"],
-            }
-        },
+        "user": f"{spec.uid}:{spec.uid}",
+        # Quem reinicia e' o systemd: duas politicas brigariam.
+        "restart": "no",
+        "security_opt": ["no-new-privileges:true"],
+        "cap_drop": ["ALL"],
     }
+
+
+def compose(spec: AppSpec, hwaccel: bool = False, enabled: set[str] | frozenset[str] = frozenset()) -> dict:
+    """O compose inteiro, montado como dado e serializado — nao texto colado."""
+    main: dict = {"image": spec.image, **_hardened(spec)}
+    main["ports"] = [f"127.0.0.1:{spec.port}:{spec.port}"]
+    main["volumes"] = _volumes(spec.mounts)
+    env = dict(spec.env)
+    for opt, extra in spec.off_env.items():
+        if opt not in enabled:
+            env.update(extra)
+    if env:
+        main["environment"] = env
+    if spec.secret:
+        main["env_file"] = [secret_path(spec.key)]
+    if hwaccel and spec.gpu:
+        main["devices"] = ["/dev/dri:/dev/dri"]
+        main["group_add"] = [str(g) for g in gpu_groups()]
+
+    services: dict = {spec.key: main}
+    for side in spec.sidecars:
+        if side.optional and side.optional not in enabled:
+            continue
+        svc: dict = {"image": side.image, **_hardened(spec)}
+        if side.command:
+            svc["command"] = list(side.command)
+        if side.mounts:
+            svc["volumes"] = _volumes(side.mounts)
+        if side.env:
+            svc["environment"] = dict(side.env)
+        if side.secret:
+            svc["env_file"] = [secret_path(spec.key)]
+        if side.shm_size:
+            svc["shm_size"] = side.shm_size
+        services[side.name] = svc
+    if len(services) > 1:
+        main["depends_on"] = [n for n in services if n != spec.key]
+    return {"name": f"azimuth-{spec.key}", "services": services}
+
+
+def secret_targets(cfg: Config) -> dict[str, str]:
+    return {f"{SECRET}{k}": secret_path(k) for k in cfg.apps if CATALOG[k].secret_vars}
+
+
+def render_secrets(cfg: Config) -> dict[str, str]:
+    """O env_file de cada aplicativo que tem senha, gerando-a na primeira vez.
+
+    So o fwctl chama, como root, no build_plan. A senha so circula entre os
+    containers do proprio aplicativo; ninguem precisa digita-la, entao ela
+    nasce aleatoria e fica em secrets.yaml, para o banco continuar abrindo
+    depois de um reinstall do compose.
+    """
+    out = {}
+    for key in cfg.apps:
+        spec = CATALOG[key]
+        if not spec.secret_vars:
+            continue
+        value = secretstore.ensure(secret_ref(key))
+        lines = "".join(f"{var}={value}\n" for var in spec.secret_vars)
+        out[f"{SECRET}{key}"] = "# gerado pelo fwadmin a partir de /etc/fwadmin/secrets.yaml\n" + lines
+    return out
 
 
 def context_for(cfg: Config, name: str) -> dict:
@@ -150,7 +209,9 @@ def context_for(cfg: Config, name: str) -> dict:
         "on": _on(cfg, key),
         "compose_file": compose_path(key),
         "compose_body": yaml.safe_dump(
-            compose(spec, key in cfg.apps and cfg.apps[key].hwaccel), sort_keys=False, allow_unicode=True
+            compose(spec, key in cfg.apps and cfg.apps[key].hwaccel, options(cfg, key)),
+            sort_keys=False,
+            allow_unicode=True,
         ),
         "server_name": fqdn(cfg, key),
         "listen_ip": lan_ip(cfg) if cfg.lan.ipv4.address else "127.0.0.1",
@@ -174,7 +235,7 @@ def _state(cfg: Config | None, key: str, files: set[str]) -> list[Reload]:
         out.append(Reload("systemd (daemon-reload)", ["systemctl", "daemon-reload"]))
     unit = unit_name(key)
     if _on(cfg, key):
-        if f"{COMPOSE}{key}" in files or f"{UNIT}{key}" in files:
+        if {f"{COMPOSE}{key}", f"{UNIT}{key}", f"{SECRET}{key}"} & files:
             # A imagem ja esta na caixa: o validate exige. Baixar aqui faria o
             # apply depender da velocidade da internet, e uma imagem de
             # centenas de MB estouraria o tempo do painel no meio da transacao.
@@ -235,7 +296,7 @@ def _nginx_test(vhost: Path) -> Result:
     return Result(result.ok, f"nginx -t {vhost}", result.output)
 
 
-def _image_present(key: str) -> list[Result]:
+def _image_present(key: str, enabled: set[str]) -> list[Result]:
     """A imagem precisa estar na caixa antes do apply.
 
     Quem baixa e' o 'fwctl servico baixar', disparado em segundo plano quando
@@ -246,7 +307,8 @@ def _image_present(key: str) -> list[Result]:
     if docker is None or paths.sandboxed():
         return []
     spec = CATALOG[key]
-    r = run(docker, "image", "inspect", "--format", "{{.Id}}", spec.image, mutating=False, timeout=15)
+    r = run(docker, "image", "inspect", "--format", "{{.Id}}", *spec.images(enabled),
+            mutating=False, timeout=15)
     if r.ok:
         return []
     if "Cannot connect" in r.output:
@@ -259,6 +321,21 @@ def _image_present(key: str) -> list[Result]:
     return [Result(False, f"imagem do {spec.name}", why)]
 
 
+def _compose_config(docker: str, compose_file: Path, secret: Path, key: str) -> Result:
+    """docker compose config, com o env_file apontado para o segredo do staging.
+
+    O compose gerado aponta para /etc, onde o segredo ainda nao existe no
+    primeiro apply — e o compose recusa env_file ausente.
+    """
+    text = compose_file.read_text()
+    if not secret.exists() or secret_path(key) not in text:
+        return run(docker, "compose", "-f", str(compose_file), "config", "--quiet", mutating=False)
+    with tempfile.TemporaryDirectory(prefix="fwadmin-compose.") as tmp:
+        test = Path(tmp) / "compose.yaml"
+        test.write_text(text.replace(secret_path(key), str(secret)))
+        return run(docker, "compose", "-f", str(test), "config", "--quiet", mutating=False)
+
+
 def validate(staging: Path, names: list[str], cfg: Config) -> list[Result]:
     out: list[Result] = []
     for key in _keys(names):
@@ -267,7 +344,7 @@ def validate(staging: Path, names: list[str], cfg: Config) -> list[Result]:
         if cfg.apps[key].hwaccel and not Path("/dev/dri").is_dir():
             out.append(Result(False, f"{CATALOG[key].name}: /dev/dri",
                               "aceleracao de hardware ligada, mas esta caixa nao tem /dev/dri (GPU Intel ou AMD)"))
-        out.extend(_image_present(key))
+        out.extend(_image_present(key, options(cfg, key)))
         compose_file = staging / f"{COMPOSE}{key}"
         if compose_file.exists():
             docker = shutil.which("docker")
@@ -275,7 +352,7 @@ def validate(staging: Path, names: list[str], cfg: Config) -> list[Result]:
                 out.append(Result(False, "docker compose config",
                                   "o Docker nao esta instalado: instale pela tela de Servicos (Containers)"))
             else:
-                r = run(docker, "compose", "-f", str(compose_file), "config", "--quiet", mutating=False)
+                r = _compose_config(docker, compose_file, staging / f"{SECRET}{key}", key)
                 if not r.ok and "is not a docker command" in r.output:
                     r = Result(False, r.command, "falta o docker-compose: apt install docker-compose")
                 out.append(Result(r.ok, f"docker compose config {compose_file}", r.output))
@@ -338,6 +415,7 @@ SERVICE = ServiceModule(
     order=70,  # depois do Docker, que precisa estar no ar
     section="apps",
     targets=targets,
+    secret_targets=secret_targets,
     units=units,
     reloads=reloads,
     rollback=rollback,

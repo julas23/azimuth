@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import pwd
 import re
+import secrets
 from pathlib import Path
 
 import yaml
@@ -96,3 +97,20 @@ def adopt_from_peer(ref: str, peer: str) -> bool:
     data[ref] = found.group(1)
     _write(paths.SECRETS, data)
     return True
+
+
+def ensure(ref: str, length: int = 32) -> str:
+    """A senha de 'ref', gerada e gravada na primeira vez. Root, no fwctl.
+
+    Para senha que ninguem digita (a do banco interno de um aplicativo): so
+    letras e numeros, que e' o que o Postgres do Immich aceita sem escapar.
+    """
+    value = current().get(ref)
+    if value:
+        return value
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    value = "".join(secrets.choice(alphabet) for _ in range(length))
+    data = _read(paths.SECRETS)
+    data[ref] = value
+    _write(paths.SECRETS, data)
+    return value

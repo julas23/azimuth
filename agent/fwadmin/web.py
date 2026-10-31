@@ -893,6 +893,7 @@ async def services_page(request: Request, user: User) -> Response:
             "configured": key in cfg.apps,
             "enabled": key in cfg.apps and cfg.apps[key].enabled,
             "hwaccel": key in cfg.apps and cfg.apps[key].hwaccel,
+            "ml": key in cfg.apps and cfg.apps[key].ml,
             "url": f"http://{key}.{cfg.dns.domain}",
             "info": status.unit_info(f"azimuth-app-{key}.service", "docker.io"),
         }
@@ -915,6 +916,26 @@ async def toggle_hwaccel(request: Request, user: User, key: str) -> Response:
         cfg.apps[key] = state
 
     return back("/services", edit(request, mutate, f"app {key} gpu"))
+
+
+@app.post("/apps/{key}/ml")
+async def toggle_ml(request: Request, user: User, key: str) -> Response:
+    """Liga ou desliga o container de inferencia (busca e rostos no Immich)."""
+
+    def mutate(cfg: Config) -> None:
+        if key not in APP_CATALOG or "ml" not in APP_CATALOG[key].options():
+            raise ValueError(f"{key!r} nao tem modulo de inferencia")
+        state = cfg.apps.get(key) or App()
+        state.ml = not state.ml
+        cfg.apps[key] = state
+
+    error = edit(request, mutate, f"app {key} ml")
+    if error:
+        return back("/services", error)
+    if current().apps[key].ml and current().apps[key].enabled:
+        _service("baixar", key)
+        return done("/services", "inferência ligada: a imagem (grande) está baixando; aplique quando terminar")
+    return done("/services", "inferência desligada; aplique para valer")
 
 
 @app.post("/apps/{key}/toggle")

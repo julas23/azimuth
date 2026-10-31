@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import yaml  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
 
+import stat  # noqa: E402
+
 from fwadmin import paths  # noqa: E402
 from fwadmin.apply import build_plan  # noqa: E402
 from fwadmin.models import Config  # noqa: E402
@@ -41,7 +43,7 @@ def check(label: str, got, want) -> None:
 def build(apps_state: dict, containers: bool = True, keep_host: bool = False) -> Config:
     data = load(ROOT / "config" / "config.yaml").model_dump()
     if not keep_host:
-        data["hosts"] = [h for h in data["hosts"] if h["name"] not in ("navidrome", "jellyfin")]
+        data["hosts"] = [h for h in data["hosts"] if h["name"] not in ("navidrome", "jellyfin", "immich")]
     data["containers"] = {"enabled": containers}
     data["apps"] = apps_state
     return Config.model_validate(data)
@@ -136,6 +138,53 @@ check("sem aceleracao, nada de /dev/dri",
       "devices" in yaml.safe_load(render_all(sem)["app-compose-jellyfin"])["services"]["jellyfin"], False)
 check("dois aplicativos, dois nomes no DNS",
       sorted(n for n, _ in apps.records(jf)), ["jellyfin.home.lan", "navidrome.home.lan"])
+
+print("\n== Immich: varios containers e senha gerada ==")
+check("ML em aplicativo sem inferencia e' recusado",
+      refused(lambda: build({"navidrome": {"enabled": True, "ml": True}}), "inferencia"), True)
+im = build({"immich": {"enabled": True}})
+out = render_all(im)
+comp = yaml.safe_load(out["app-compose-immich"])["services"]
+check("servidor, banco e cache; sem ML por padrao", sorted(comp), ["database", "immich", "redis"])
+check("o servidor sabe que o ML esta desligado",
+      comp["immich"]["environment"].get("IMMICH_MACHINE_LEARNING_ENABLED"), "false")
+check("so o servidor publica porta", [n for n, v in comp.items() if "ports" in v], ["immich"])
+check("todos sem root e sem capability",
+      {(v["user"], tuple(v["cap_drop"])) for v in comp.values()}, {("2003:2003", ("ALL",))})
+check("biblioteca e' o Pictures", "/srv/aionas/Pictures:/data/library" in comp["immich"]["volumes"], True)
+check("miniaturas no estado, nao no Pictures",
+      "/var/lib/aionas/immich/thumbs:/data/thumbs" in comp["immich"]["volumes"], True)
+check("a senha nao esta no compose", "PASSWORD=" in out["app-compose-immich"], False)
+check("servidor e banco leem o env_file",
+      [n for n, v in comp.items() if "env_file" in v], ["immich", "database"])
+unit = out["app-unit-immich"]
+check("Pictures criado com o dono do Immich (ele escreve la)",
+      "install -d -m 0755 -o 2003 -g 2003 /srv/aionas/Pictures" in unit, True)
+check("o banco tem o diretorio dele", "-o 2003 -g 2003 /var/lib/aionas/immich/postgres" in unit, True)
+check("tres imagens sem ML", len(apps.CATALOG["immich"].images()), 3)
+check("quatro com ML", len(apps.CATALOG["immich"].images({"ml"})), 4)
+ml = build({"immich": {"enabled": True, "ml": True}})
+comp_ml = yaml.safe_load(render_all(ml)["app-compose-immich"])["services"]
+check("com ML, o container de inferencia sobe", "machine-learning" in comp_ml, True)
+check("e o servidor nao o desliga",
+      "IMMICH_MACHINE_LEARNING_ENABLED" in comp_ml["immich"].get("environment", {}), False)
+check("containers conversam entre si no firewall",
+      "ip saddr 172.30.0.0/16 ip daddr 172.30.0.0/16 counter accept" in out["azimuth.nft"], True)
+
+plan = build_plan(im, None, paths.STAGING)
+sec = plan.rendered.get("app-secret-immich", "")
+pw = sec.split("DB_PASSWORD=")[1].split("\n")[0] if "DB_PASSWORD=" in sec else ""
+check("a senha nasce no primeiro plano, como segredo", ("app-secret-immich" in plan.secret, len(pw)), (True, 32))
+check("a mesma senha para o servidor e o banco", f"POSTGRES_PASSWORD={pw}" in sec, True)
+check("no staging, 0600", oct(stat.S_IMODE((paths.STAGING / "app-secret-immich").stat().st_mode)), "0o600")
+check("nada que o painel renderiza a tem", any(pw in v for v in render_all(im).values()), False)
+plan2 = build_plan(im, None, paths.STAGING)
+check("e ela nao muda no plano seguinte", pw in plan2.rendered["app-secret-immich"], True)
+if shutil.which("docker"):
+    check("docker compose config aprova, com o segredo do staging",
+          [c.ok for c in plan.checks if c.command.startswith("docker compose") and "immich" in c.command], [True])
+check("so a senha mudou: o aplicativo reinicia",
+      [r.label for r in apps.reloads(im, im, ["app-secret-immich"])], ["Immich (subir)"])
 
 print("\n== desligado depois de ligado ==")
 off = build(OFF)

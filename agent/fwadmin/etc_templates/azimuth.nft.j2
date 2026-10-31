@@ -44,6 +44,10 @@ table inet azimuth {
         # containers saem para a internet; da LAN eles so sao alcancados pelo
         # nginx, no proprio firewall, e isso nao passa por aqui
         ip saddr {{ cfg.containers.pool }} oifname $WAN counter accept comment "containers para a internet"
+        # entre containers do mesmo aplicativo (servidor e banco). Normalmente
+        # isso nem passa aqui, fica na bridge; passa se o br_netfilter estiver
+        # carregado, e ai o drop da politica derrubaria o banco
+        ip saddr {{ cfg.containers.pool }} ip daddr {{ cfg.containers.pool }} counter accept comment "entre containers"
 {% endif %}
 
 {% for rule in firewall.forward_rules %}

@@ -137,11 +137,11 @@ nenhuma chamada de modelo sai da conta dele.
 | **nfs-kernel-server** | Compartilhamento para Linux | GPL-2.0 | ⬜ |
 | **Samba** | Compartilhamento para Windows e celular | GPL-3.0 | ⬜ |
 | **Nextcloud** | Arquivos, calendário, contatos | AGPL-3.0 | ⬜ |
-| **Immich** | Fotos, com ML condicionado a nó de computação | AGPL-3.0 | ⬜ |
+| **Immich** | Fotos, com ML condicionado a nó de computação | AGPL-3.0 | 🟡 |
 | **Jellyfin** | Vídeo, com foco em Direct Play | GPL-2.0 | 🟡 |
 | **Navidrome** | Música | GPL-3.0 | 🟡 |
-| **PostgreSQL** | Banco das aplicações, instância separada por app | PostgreSQL License | ⬜ |
-| **Valkey** | Cache e lock, instância separada por app | BSD-3-Clause | ⬜ |
+| **PostgreSQL** | Banco das aplicações, instância separada por app | PostgreSQL License | 🟡 |
+| **Valkey** | Cache e lock, instância separada por app | BSD-3-Clause | 🟡 |
 | **Docker Engine + Compose** | Substrato único das aplicações desta camada | Apache-2.0 | ⬜ |
 
 ---
@@ -178,6 +178,15 @@ O Jellyfin é o segundo, com aceleração de hardware opcional: o `/dev/dri` ent
 container com os GIDs numéricos dos grupos `render` e `video` do host (um nome no
 `group_add` seria resolvido no `/etc/group` da imagem, com outro número). NVIDIA exige o
 nvidia-container-toolkit e fica de fora por enquanto.
+
+O Immich é o primeiro com vários containers: servidor, Postgres com VectorChord (a imagem
+do próprio projeto) e Valkey, sem porta publicada, na rede interna do compose. O ML é
+opcional e desligado por padrão. A senha do banco nasce aleatória no primeiro apply, fica
+em `secrets.yaml` e chega aos containers por um `env_file` 0600, nunca pelo compose. A
+biblioteca é o próprio `Pictures`; miniaturas, vídeo transcodificado, upload em andamento e
+backup do banco vão para `/var/lib/aionas/immich`, montados por cima das subpastas de
+`/data`. Como o Immich escreve em `Pictures`, a pasta é criada com o dono dele — provisório
+até o módulo de storage dar às pastas um grupo comum aos aplicativos e ao SMB.
 
 **A imagem não baixa dentro do apply.** Ligar um aplicativo no painel dispara um
 `docker pull` em segundo plano (`fwctl servico baixar`), e o `check` reprova enquanto a
