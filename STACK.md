@@ -165,12 +165,15 @@ mínimo; trocar por `PyJWT` ou `joserfc` é a saída melhor.
 `passlib` 1.7.4 quebra com `bcrypt` 4.x. É dívida silenciosa: hash de senha preso a duas
 versões antigas por incompatibilidade, não por escolha.
 
-**O Docker disputa o firewall com o motor.** Ele escreve na tabela `ip nat`, que é a
-mesma que o gerador de nftables recria a cada apply — e a política `drop` da chain de
-forward do motor mata o tráfego dos containers mesmo quando o Docker aceita na chain
-dele. A saída registrada no PLAN é tirar o Docker do firewall (`"iptables": false`) e
-declarar a rede dos containers no schema. LXC ficou fora do v1: as aplicações desta
-camada são imagem OCI, e dois substratos dobrariam gerador, validador e prova de função.
+**O Docker não escreve no firewall.** O `forward` do motor tem policy drop, e entre
+cadeias-base do mesmo gancho um drop é final: o ACCEPT que o Docker põe na chain dele não
+salva o pacote. Por isso o motor gera o `/etc/docker/daemon.json` com `"iptables": false`
+e um pool de redes fixo (`containers.pool`, 172.30.0.0/16 por padrão), e o próprio
+nftables do motor deixa os containers saírem pela WAN, com NAT. Da LAN, os containers só
+são alcançados pelo nginx do firewall, porque escutam em loopback. A prova de função
+confere que nenhuma chain `DOCKER` apareceu no ruleset e que o `docker0` está no endereço
+declarado. LXC ficou fora do v1: as aplicações desta camada são imagem OCI, e dois
+substratos dobrariam gerador, validador e prova de função.
 
 **Open WebUI não é mais BSD puro.** Ganhou cláusula de marca, que restringe remover ou
 alterar o branding em redistribuição. Usar na LAN do usuário é tranquilo; **empacotar

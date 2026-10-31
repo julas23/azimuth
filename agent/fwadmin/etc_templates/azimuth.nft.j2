@@ -39,6 +39,12 @@ table inet azimuth {
         # trafego de volta e ajuste de MSS: precisam vir antes das regras
         ct state established,related accept
         tcp flags syn tcp option maxseg size set rt mtu
+{% if cfg.containers.enabled %}
+
+        # containers saem para a internet; da LAN eles so sao alcancados pelo
+        # nginx, no proprio firewall, e isso nao passa por aqui
+        ip saddr {{ cfg.containers.pool }} oifname $WAN counter accept comment "containers para a internet"
+{% endif %}
 
 {% for rule in firewall.forward_rules %}
 {% for line in rule_to_nft(rule) %}
@@ -70,6 +76,9 @@ table inet azimuth {
 {% endif %}
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;
+{% if cfg.containers.enabled %}
+        oifname $WAN ip saddr {{ cfg.containers.pool }} masquerade comment "NAT dos containers"
+{% endif %}
 
 {% for name in firewall.masquerade %}
         oifname "{{ cfg.iface(name).ppp_device }}" masquerade comment "NAT {{ name }}"

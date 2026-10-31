@@ -1051,6 +1051,55 @@ class DDNS(Base):
         return self
 
 
+# ---------------------------------------------------------------------------
+# containers (Docker) — o substrato dos aplicativos, fora do firewall
+# ---------------------------------------------------------------------------
+
+
+class Containers(Base):
+    """O Docker como substrato dos aplicativos, sem escrever no firewall.
+
+    Com 'iptables: false' no daemon.json o Docker nao cria regra nenhuma, e
+    quem declara o que os containers podem fazer e' o motor. Os dois motivos
+    estao no STACK.md: o forward do motor tem policy drop, e entre cadeias-base
+    do mesmo gancho um drop e' final — o ACCEPT da cadeia do Docker nao salva o
+    pacote. E o ruleset final deixaria de depender de quem reiniciou por ultimo.
+
+    Os containers escutam em loopback e quem fala com a LAN e' o nginx, entao
+    o firewall so precisa de uma coisa: deixar os containers sairem para a
+    internet (imagens de capa, metadados, atualizacoes), com NAT na WAN.
+    """
+
+    enabled: bool = False
+    pool: str = "172.30.0.0/16"
+    """De onde saem as redes dos containers. Fixo e declarado, e nao o padrao
+    do Docker, para a regra do firewall casar por endereco e nao por nome de
+    bridge (as redes do compose ganham nomes aleatorios)."""
+
+    subnet_size: Annotated[int, Field(ge=16, le=28)] = 24
+    """Tamanho de cada rede que o Docker tira do pool."""
+
+    @field_validator("pool")
+    @classmethod
+    def _check_pool(cls, v: str) -> str:
+        net = ipaddress.IPv4Network(v, strict=False)
+        if not net.is_private:
+            raise ValueError(f"o pool dos containers precisa ser privado: {v!r}")
+        return str(net)
+
+    @model_validator(mode="after")
+    def _coerencia(self) -> Containers:
+        if self.subnet_size < ipaddress.IPv4Network(self.pool).prefixlen:
+            raise ValueError("cada rede de container precisa caber no pool (subnet_size >= prefixo do pool)")
+        return self
+
+    @property
+    def bridge_ip(self) -> str:
+        """Endereco do docker0: o primeiro host da primeira rede do pool."""
+        first = next(ipaddress.IPv4Network(self.pool).subnets(new_prefix=self.subnet_size))
+        return f"{first.network_address + 1}/{first.prefixlen}"
+
+
 class System(Base):
     hostname: Annotated[str, Field(pattern=HOSTLABEL_RE.pattern)] = "fw"
     timezone: Annotated[str, Field(max_length=64)] = "America/Sao_Paulo"
@@ -1081,6 +1130,7 @@ class Config(Base):
     wireguard: WireGuard = WireGuard()
     resolver: Resolver = Resolver()
     ddns: DDNS = DDNS()
+    containers: Containers = Containers()
 
     # -- indices de conveniencia -------------------------------------------
 
@@ -1107,6 +1157,17 @@ class Config(Base):
     def _consistent(self) -> Config:
         names = [i.name for i in self.interfaces]
         _reject_dups(names, "nome logico de interface duplicado")
+
+        if self.containers.enabled:
+            pool = ipaddress.IPv4Network(self.containers.pool)
+            redes = [(i.name, i.ipv4.address) for i in self.interfaces if i.ipv4.address]
+            if self.wireguard.enabled and self.wireguard.address:
+                redes.append(("vpn", self.wireguard.address))
+            for nome, addr in redes:
+                if pool.overlaps(ipaddress.IPv4Interface(addr).network):
+                    raise ValueError(
+                        f"o pool dos containers ({pool}) cruza a rede de {nome} ({addr}): escolha outro"
+                    )
 
         # Quem responde ao dnsmasq: o unbound do modelo, ou o upstream escrito.
         # Os dois juntos seriam dois lugares dizendo a mesma coisa, e um dia
