@@ -193,6 +193,12 @@ templates.env.filters["ago"] = _ago
 # ---------------------------------------------------------------------------
 
 
+APPLY_TIMEOUT = 600
+"""Teto do painel para um apply. Folgado de proposito: matar o fwctl no meio
+deixa recarga feita sem prova nem estado gravado. As provas somadas (Docker,
+DDNS, aplicativos subindo pela primeira vez) passam dos 180s do padrao."""
+
+
 def fwctl(*args: str, timeout: int = 180) -> tuple[bool, str]:
     """Executa um subcomando do fwctl via sudo.
 
@@ -886,6 +892,7 @@ async def services_page(request: Request, user: User) -> Response:
             "spec": spec,
             "configured": key in cfg.apps,
             "enabled": key in cfg.apps and cfg.apps[key].enabled,
+            "hwaccel": key in cfg.apps and cfg.apps[key].hwaccel,
             "url": f"http://{key}.{cfg.dns.domain}",
             "info": status.unit_info(f"azimuth-app-{key}.service", "docker.io"),
         }
@@ -894,6 +901,20 @@ async def services_page(request: Request, user: User) -> Response:
     return page(
         request, "services.html", nav="services", cfg=cfg, cards=cards, apps=apps, now=time.time()
     )
+
+
+@app.post("/apps/{key}/hwaccel")
+async def toggle_hwaccel(request: Request, user: User, key: str) -> Response:
+    """Liga ou desliga a aceleracao de hardware (o /dev/dri no container)."""
+
+    def mutate(cfg: Config) -> None:
+        if key not in APP_CATALOG or not APP_CATALOG[key].gpu:
+            raise ValueError(f"{key!r} nao usa aceleracao de hardware")
+        state = cfg.apps.get(key) or App()
+        state.hwaccel = not state.hwaccel
+        cfg.apps[key] = state
+
+    return back("/services", edit(request, mutate, f"app {key} gpu"))
 
 
 @app.post("/apps/{key}/toggle")
@@ -911,7 +932,15 @@ async def toggle_app(request: Request, user: User, key: str) -> Response:
         if state.enabled:
             cfg.containers.enabled = True
 
-    return back("/services", edit(request, mutate, f"app {key}"))
+    error = edit(request, mutate, f"app {key}")
+    if error:
+        return back("/services", error)
+    if current().apps[key].enabled:
+        ok, out = _service("baixar", key)
+        if not ok:
+            return done("/services", f"ligado; a imagem nao comecou a baixar ({out}) — instale os Containers")
+        return done("/services", f"{APP_CATALOG[key].name} ligado: a imagem esta baixando; aplique em alguns minutos")
+    return done("/services", f"{APP_CATALOG[key].name} desligado; aplique para parar")
 
 
 @app.get("/network", response_class=HTMLResponse)
@@ -1750,7 +1779,7 @@ async def api_apply(request: Request) -> Response:
         return JSONResponse({"erro": "nada para aplicar: proponha antes (azimuth propor)"}, status_code=409)
     paths.NOTE.parent.mkdir(parents=True, exist_ok=True)
     paths.NOTE.write_text(f"aplicado pelo agente {nome}"[:200])
-    ok, output = fwctl("apply", "--yes")
+    ok, output = fwctl("apply", "--yes", timeout=APPLY_TIMEOUT)
     db.log("apply", username=f"agente:{nome}", address=client_ip(request), ok=ok)
     return JSONResponse(
         {"ok": ok, "saida": output,
@@ -2430,7 +2459,7 @@ async def do_apply(request: Request, user: User, fields: Fields) -> Response:
     paths.NOTE.write_text(note[:200])
 
     args = ["apply", "--yes"] if fields.flag("yes") else ["apply"]
-    ok, output = fwctl(*args)
+    ok, output = fwctl(*args, timeout=APPLY_TIMEOUT)
     db.log("apply", username=user, address=client_ip(request), ok=ok)
     return page(request, "result.html", nav="system", title="Aplicar", ok=ok, output=output, cfg=current())
 

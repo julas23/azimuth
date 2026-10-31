@@ -15,6 +15,9 @@ ConditionPathExists={{ compose_file }}
 ExecStartPre=/usr/bin/install -d -m 0755 {{ d }}
 {% endfor %}
 ExecStartPre=/usr/bin/install -d -m 0750 -o {{ spec.uid }} -g {{ spec.uid }} {{ spec.state_dir }}
+{% for d in spec.state_dirs %}
+ExecStartPre=/usr/bin/install -d -m 0750 -o {{ spec.uid }} -g {{ spec.uid }} {{ d }}
+{% endfor %}
 ExecStart=/usr/bin/docker compose -f {{ compose_file }} up --remove-orphans --no-color
 ExecStop=/usr/bin/docker compose -f {{ compose_file }} down
 Restart=on-failure

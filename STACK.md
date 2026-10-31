@@ -138,7 +138,7 @@ nenhuma chamada de modelo sai da conta dele.
 | **Samba** | Compartilhamento para Windows e celular | GPL-3.0 | ⬜ |
 | **Nextcloud** | Arquivos, calendário, contatos | AGPL-3.0 | ⬜ |
 | **Immich** | Fotos, com ML condicionado a nó de computação | AGPL-3.0 | ⬜ |
-| **Jellyfin** | Vídeo, com foco em Direct Play | GPL-2.0 | ⬜ |
+| **Jellyfin** | Vídeo, com foco em Direct Play | GPL-2.0 | 🟡 |
 | **Navidrome** | Música | GPL-3.0 | 🟡 |
 | **PostgreSQL** | Banco das aplicações, instância separada por app | PostgreSQL License | ⬜ |
 | **Valkey** | Cache e lock, instância separada por app | BSD-3-Clause | ⬜ |
@@ -173,6 +173,16 @@ prova pedindo o caminho de saúde direto no container e pelo nginx, com o nome. 
 Navidrome é o primeiro (🟡: integrado e testado com o container real, ainda não aplicado
 numa caixa). Os caminhos são os do STORAGE.md: sem o módulo de storage ficam no disco do
 sistema, e quando ele chegar monta o volume nos mesmos lugares.
+
+O Jellyfin é o segundo, com aceleração de hardware opcional: o `/dev/dri` entra no
+container com os GIDs numéricos dos grupos `render` e `video` do host (um nome no
+`group_add` seria resolvido no `/etc/group` da imagem, com outro número). NVIDIA exige o
+nvidia-container-toolkit e fica de fora por enquanto.
+
+**A imagem não baixa dentro do apply.** Ligar um aplicativo no painel dispara um
+`docker pull` em segundo plano (`fwctl servico baixar`), e o `check` reprova enquanto a
+imagem não estiver na caixa. Uma imagem de centenas de MB dentro da transação estouraria
+o tempo do painel, e matar o fwctl no meio deixa recarga feita sem prova nem estado.
 
 **O Docker não escreve no firewall.** O `forward` do motor tem policy drop, e entre
 cadeias-base do mesmo gancho um drop é final: o ACCEPT que o Docker põe na chain dele não

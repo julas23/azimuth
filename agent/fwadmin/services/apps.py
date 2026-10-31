@@ -17,6 +17,7 @@ parada e desabilitada. Os dados em /var/lib/aionas/<app> ficam.
 
 from __future__ import annotations
 
+import grp
 import ipaddress
 import shutil
 import tempfile
@@ -27,6 +28,7 @@ from pathlib import Path
 import yaml
 
 from fwadmin.apps import CATALOG, AppSpec
+from fwadmin import paths
 from fwadmin.command import Result, run
 from fwadmin.models import Config
 from fwadmin.services.base import Prova, Reload, ServiceModule, until
@@ -90,8 +92,34 @@ def template_for(name: str) -> str:
     return "app-nginx.conf.j2"
 
 
-def compose(spec: AppSpec) -> dict:
+def gpu_groups() -> list[int]:
+    """GIDs dos grupos que abrem o /dev/dri no host (render e video).
+
+    Numericos, e lidos do host: um nome no group_add seria resolvido no
+    /etc/group de dentro da imagem, onde o gid do render e' outro.
+    """
+    out = []
+    for name in ("render", "video"):
+        try:
+            out.append(grp.getgrnam(name).gr_gid)
+        except KeyError:
+            pass
+    return out
+
+
+def compose(spec: AppSpec, hwaccel: bool = False) -> dict:
     """O compose inteiro, montado como dado e serializado — nao texto colado."""
+    body = _compose(spec)
+    if spec.env:
+        body["services"][spec.key]["environment"] = dict(spec.env)
+    if hwaccel and spec.gpu:
+        svc = body["services"][spec.key]
+        svc["devices"] = ["/dev/dri:/dev/dri"]
+        svc["group_add"] = [str(g) for g in gpu_groups()]
+    return body
+
+
+def _compose(spec: AppSpec) -> dict:
     return {
         "name": f"azimuth-{spec.key}",
         "services": {
@@ -104,7 +132,6 @@ def compose(spec: AppSpec) -> dict:
                 "volumes": [
                     f"{m.host}:{m.container}{':ro' if m.readonly else ''}" for m in spec.mounts
                 ],
-                "environment": dict(spec.env),
                 "security_opt": ["no-new-privileges:true"],
                 "cap_drop": ["ALL"],
             }
@@ -122,15 +149,13 @@ def context_for(cfg: Config, name: str) -> dict:
         "spec": spec,
         "on": _on(cfg, key),
         "compose_file": compose_path(key),
-        "compose_body": yaml.safe_dump(compose(spec), sort_keys=False, allow_unicode=True),
+        "compose_body": yaml.safe_dump(
+            compose(spec, key in cfg.apps and cfg.apps[key].hwaccel), sort_keys=False, allow_unicode=True
+        ),
         "server_name": fqdn(cfg, key),
         "listen_ip": lan_ip(cfg) if cfg.lan.ipv4.address else "127.0.0.1",
         "allow": allow,
     }
-
-
-def _docker() -> str:
-    return shutil.which("docker") or "/usr/bin/docker"
 
 
 def _keys(changed: list[str]) -> list[str]:
@@ -150,14 +175,9 @@ def _state(cfg: Config | None, key: str, files: set[str]) -> list[Reload]:
     unit = unit_name(key)
     if _on(cfg, key):
         if f"{COMPOSE}{key}" in files or f"{UNIT}{key}" in files:
-            # A imagem baixa aqui, antes de subir: assim a prova mede o
-            # aplicativo, e nao a velocidade do download.
-            out.append(
-                Reload(
-                    f"{CATALOG[key].name} (baixar imagem)",
-                    [_docker(), "compose", "-f", compose_path(key), "pull", "--quiet"],
-                )
-            )
+            # A imagem ja esta na caixa: o validate exige. Baixar aqui faria o
+            # apply depender da velocidade da internet, e uma imagem de
+            # centenas de MB estouraria o tempo do painel no meio da transacao.
             out.append(
                 Reload(
                     f"{CATALOG[key].name} (subir)",
@@ -215,11 +235,39 @@ def _nginx_test(vhost: Path) -> Result:
     return Result(result.ok, f"nginx -t {vhost}", result.output)
 
 
+def _image_present(key: str) -> list[Result]:
+    """A imagem precisa estar na caixa antes do apply.
+
+    Quem baixa e' o 'fwctl servico baixar', disparado em segundo plano quando
+    o aplicativo e' ligado no painel. Em sandbox nao se pergunta ao Docker da
+    maquina de quem testa.
+    """
+    docker = shutil.which("docker")
+    if docker is None or paths.sandboxed():
+        return []
+    spec = CATALOG[key]
+    r = run(docker, "image", "inspect", "--format", "{{.Id}}", spec.image, mutating=False, timeout=15)
+    if r.ok:
+        return []
+    if "Cannot connect" in r.output:
+        why = "o Docker nao esta rodando: inicie-o em Servicos (Containers)"
+    else:
+        why = (
+            f"a imagem do {spec.name} ainda nao esta nesta caixa. Ela comeca a baixar quando o "
+            "aplicativo e' ligado; aguarde alguns minutos e aplique de novo"
+        )
+    return [Result(False, f"imagem do {spec.name}", why)]
+
+
 def validate(staging: Path, names: list[str], cfg: Config) -> list[Result]:
     out: list[Result] = []
     for key in _keys(names):
         if not _on(cfg, key):
             continue
+        if cfg.apps[key].hwaccel and not Path("/dev/dri").is_dir():
+            out.append(Result(False, f"{CATALOG[key].name}: /dev/dri",
+                              "aceleracao de hardware ligada, mas esta caixa nao tem /dev/dri (GPU Intel ou AMD)"))
+        out.extend(_image_present(key))
         compose_file = staging / f"{COMPOSE}{key}"
         if compose_file.exists():
             docker = shutil.which("docker")
@@ -238,10 +286,11 @@ def validate(staging: Path, names: list[str], cfg: Config) -> list[Result]:
 
 
 def _get(url: str, host: str | None = None) -> tuple[int, str]:
+    """(status, corpo) — ou (0, motivo) quando nem conectou."""
     req = urllib.request.Request(url, headers={"Host": host} if host else {})
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 - URL montada aqui
-            return resp.status, ""
+            return resp.status, resp.read(256).decode("utf-8", "replace").strip()
     except urllib.error.HTTPError as exc:
         return exc.code, ""
     except (urllib.error.URLError, OSError) as exc:
@@ -264,20 +313,24 @@ def probe(cfg: Config, previous: Config | None, changed: list[str]) -> Prova | N
         vistos, quebrados = [], []
         for k in keys:
             spec = CATALOG[k]
-            code, why = _get(f"http://127.0.0.1:{spec.port}{spec.health}")
+            code, body = _get(f"http://127.0.0.1:{spec.port}{spec.health}")
             if code != 200:
-                quebrados.append(f"{spec.name} direto: {code or why}")
+                quebrados.append(f"{spec.name} direto: {code or body}")
                 continue
-            code, why = _get(f"http://{lan_ip(cfg)}{spec.health}", host=fqdn(cfg, k))
+            if spec.health_body and body != spec.health_body:
+                quebrados.append(f"{spec.name} direto: respondeu {body!r}, ainda nao {spec.health_body!r}")
+                continue
+            code, body = _get(f"http://{lan_ip(cfg)}{spec.health}", host=fqdn(cfg, k))
             if code != 200:
-                quebrados.append(f"{spec.name} pelo nginx: {code or why}")
+                quebrados.append(f"{spec.name} pelo nginx: {code or body}")
                 continue
             vistos.append(f"{spec.name} 200 direto e pelo nginx")
         if quebrados:
             return Prova.falhou("apps", esperado, "; ".join(quebrados))
         return Prova.passou("apps", esperado, "; ".join(vistos))
 
-    return until(60, olhar, interval=3)
+    # 90s: o Jellyfin roda as migracoes do banco na primeira subida.
+    return until(90, olhar, interval=3)
 
 
 SERVICE = ServiceModule(

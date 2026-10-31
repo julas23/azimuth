@@ -63,7 +63,7 @@ Todos os painéis desse mercado escrevem o arquivo, recarregam o serviço e torc
 BYOK para provedores externos, BYOA para o agente que você escolher, usado no navegador com a tela do terminal e no nível de acesso que você der, motor local via Ollama ou vLLM, e OpenWebUI com Whisper (voz para texto) e Piper (texto para voz) — tudo na LAN, sem dado saindo de casa.
 
 ### 4 — Storage e mídia
-Nextcloud, Immich, Jellyfin e Navidrome sobre volumes gerenciados. **Nada disso é publicado na internet:** respondem na LAN e pela VPN. Cada um se liga com um clique em Serviços e passa a responder por nome — `navidrome.home.lan` —, com prova de função e rollback como qualquer outra mudança. O Navidrome já está no catálogo; os outros entram em seguida.
+Nextcloud, Immich, Jellyfin e Navidrome sobre volumes gerenciados. **Nada disso é publicado na internet:** respondem na LAN e pela VPN. Cada um se liga com um clique em Serviços e passa a responder por nome — `navidrome.home.lan` —, com prova de função e rollback como qualquer outra mudança. Navidrome e Jellyfin (com GPU opcional) já estão no catálogo; Immich e Nextcloud entram em seguida.
 
 ---
 

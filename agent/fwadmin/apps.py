@@ -44,7 +44,14 @@ class AppSpec:
     health: str = "/"
     """Caminho HTTP que responde 200 quando o aplicativo esta de pe."""
 
+    health_body: str | None = None
+    """Corpo exato que conta como de pe, quando 200 nao basta: o Jellyfin
+    responde 200 'Degraded' enquanto ainda esta subindo."""
+
     upload_limit: str = "16m"
+    gpu: bool = False
+    """Aceita aceleracao de hardware pelo /dev/dri (Intel e AMD: VA-API, QSV).
+    NVIDIA exige o nvidia-container-toolkit e fica de fora por enquanto."""
 
     @property
     def state_dir(self) -> str:
@@ -53,6 +60,11 @@ class AppSpec:
     @property
     def media_dirs(self) -> list[str]:
         return [m.host for m in self.mounts if m.host.startswith(MEDIA + "/")]
+
+    @property
+    def state_dirs(self) -> list[str]:
+        """Diretorios de estado montados, criados com o dono do processo."""
+        return [m.host for m in self.mounts if m.host.startswith(self.state_dir + "/")]
 
 
 CATALOG: dict[str, AppSpec] = {
@@ -76,5 +88,26 @@ CATALOG: dict[str, AppSpec] = {
             "ND_LOGLEVEL": "info",
         },
         health="/ping",
+    ),
+    "jellyfin": AppSpec(
+        key="jellyfin",
+        name="Jellyfin",
+        role="Filmes, séries e música, com apps na TV e no celular",
+        image=(
+            "jellyfin/jellyfin:12.4"
+            "@sha256:fea863d0cd9ec445985d9c75fc6ed64e38a1d2766cf0c250a33d553f4fc1b771"
+        ),
+        port=8096,
+        uid=2002,
+        mounts=(
+            Mount(f"{MEDIA}/Videos", "/media/videos", readonly=True),
+            Mount(f"{MEDIA}/Music", "/media/music", readonly=True),
+            Mount(f"{STATE}/jellyfin/config", "/config"),
+            Mount(f"{STATE}/jellyfin/cache", "/cache"),
+        ),
+        health="/health",
+        health_body="Healthy",
+        upload_limit="64m",
+        gpu=True,
     ),
 }

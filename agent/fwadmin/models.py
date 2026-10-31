@@ -1105,6 +1105,8 @@ class App(Base):
     imagem, montagens e porta sao do catalogo."""
 
     enabled: bool = False
+    hwaccel: bool = False
+    """Passa o /dev/dri ao container (so aplicativo com 'gpu' no catalogo)."""
 
 
 class System(Base):
@@ -1172,6 +1174,8 @@ class Config(Base):
         for key, app in self.apps.items():
             if key not in CATALOG:
                 raise ValueError(f"aplicativo fora do catalogo: {key!r}")
+            if app.hwaccel and not CATALOG[key].gpu:
+                raise ValueError(f"{CATALOG[key].name} nao usa aceleracao de hardware")
             if not app.enabled:
                 continue
             if not self.containers.enabled:

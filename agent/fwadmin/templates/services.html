@@ -78,7 +78,9 @@
             {% elif i.running %}<span class="chip ok">rodando</span>
             {% else %}<span class="chip warn">ligado, aguardando aplicar</span>{% endif %}
           </td>
-          <td><div class="ra"><form method="post" action="/apps/{{ a.key }}/toggle"><button class="btn sm{{ ' danger' if a.enabled }}" type="submit" {% if readonly %}disabled title="Somente leitura"{% endif %}>{% if a.enabled %}{{ icon('pause', 14) }}Desligar{% else %}{{ icon('play', 14) }}Ligar{% endif %}</button></form></div></td>
+          <td><div class="ra">
+            {% if a.spec.gpu %}<form method="post" action="/apps/{{ a.key }}/hwaccel"><button class="btn sm" type="submit" title="Passa a GPU Intel ou AMD (/dev/dri) ao container, para transcodificar sem gastar CPU" {% if readonly %}disabled{% endif %}>{{ 'GPU ligada' if a.hwaccel else 'Usar GPU' }}</button></form>{% endif %}
+            <form method="post" action="/apps/{{ a.key }}/toggle"><button class="btn sm{{ ' danger' if a.enabled }}" type="submit" {% if readonly %}disabled title="Somente leitura"{% endif %}>{% if a.enabled %}{{ icon('pause', 14) }}Desligar{% else %}{{ icon('play', 14) }}Ligar{% endif %}</button></form></div></td>
         </tr>
       {% endfor %}
       </tbody>

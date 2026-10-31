@@ -34,6 +34,7 @@ import yaml
 
 sys.path.insert(0, os.environ.get("FWADMIN_CODE", "/opt/fwadmin"))
 
+from fwadmin.apps import CATALOG as APP_CATALOG  # noqa: E402
 from fwadmin import acks, agentes, importer, observe, ownership, paths, secretstore, services, stack  # noqa: E402
 from fwadmin.apply import (  # noqa: E402
     ApplyError,
@@ -841,6 +842,23 @@ def cmd_servico(args: argparse.Namespace) -> int:
     if not isinstance(pedido, dict):
         return fail("pedido de servico malformado")
     acao, chave = str(pedido.get("action", "")), str(pedido.get("key", ""))
+    if acao == "baixar":
+        # A imagem de um aplicativo do catalogo, em segundo plano: o apply exige
+        # a imagem presente, e um download de centenas de MB nao cabe no tempo
+        # do painel. A referencia vem do catalogo, nunca do pedido.
+        spec = APP_CATALOG.get(chave)
+        if spec is None:
+            return fail(f"aplicativo fora do catalogo: {chave!r}")
+        result = run(
+            "systemd-run", "--no-block", "--quiet", "--collect",
+            f"--unit=azimuth-baixar-{spec.key}", "--description", f"Azimuth — baixar {spec.name}",
+            "docker", "pull", spec.image,
+            timeout=30,
+        )
+        if not result.ok:
+            return fail(f"{spec.name}: {result.output[-400:]}")
+        say(f"{spec.name}: a imagem esta baixando em segundo plano")
+        return 0
     svc = stack.by_key(load(paths.CONFIG)).get(chave)
     if svc is None:
         return fail(f"servico fora da stack: {chave!r}")

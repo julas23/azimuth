@@ -176,6 +176,10 @@ check "nome ja usado por um host: recusado" "$(python3 -c "import yaml,sys; d=ya
 code -X POST "http://127.0.0.1:$PORT/dns/host/navidrome/delete" >/dev/null
 code -X POST "http://127.0.0.1:$PORT/apps/navidrome/toggle" >/dev/null
 check "sem o host, o Navidrome liga" "$(python3 -c "import yaml,sys; d=yaml.safe_load(open(sys.argv[1])); print(d['apps']['navidrome']['enabled'], d['containers']['enabled'])" "$PEND")" "True True"
+code -X POST "http://127.0.0.1:$PORT/apps/jellyfin/hwaccel" >/dev/null
+check "Jellyfin aceita GPU" "$(python3 -c "import yaml,sys; d=yaml.safe_load(open(sys.argv[1])); print(d['apps']['jellyfin']['hwaccel'])" "$PEND")" "True"
+code -X POST "http://127.0.0.1:$PORT/apps/navidrome/hwaccel" >/dev/null
+check "Navidrome nao" "$(python3 -c "import yaml,sys; d=yaml.safe_load(open(sys.argv[1])); print(d['apps']['navidrome'].get('hwaccel', False))" "$PEND")" "False"
 code -X POST "http://127.0.0.1:$PORT/apps/plex/toggle" >/dev/null
 check "fora do catalogo: recusado" "$(grep -c 'plex' "$PEND" || true)" "0"
 echo

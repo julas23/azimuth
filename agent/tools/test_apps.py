@@ -41,7 +41,7 @@ def check(label: str, got, want) -> None:
 def build(apps_state: dict, containers: bool = True, keep_host: bool = False) -> Config:
     data = load(ROOT / "config" / "config.yaml").model_dump()
     if not keep_host:
-        data["hosts"] = [h for h in data["hosts"] if h["name"] != "navidrome"]
+        data["hosts"] = [h for h in data["hosts"] if h["name"] not in ("navidrome", "jellyfin")]
     data["containers"] = {"enabled": containers}
     data["apps"] = apps_state
     return Config.model_validate(data)
@@ -99,9 +99,9 @@ check("com a VPN, os peers entram tambem",
 
 plan = build_plan(cfg, None, paths.STAGING)
 labels = [r.label for r in plan.reloads]
-check("recarga: daemon-reload, baixar, subir, nginx",
+check("recarga: daemon-reload, subir, nginx (a imagem nao baixa no apply)",
       [lb for lb in labels if lb.startswith(("systemd", "Navidrome", "nginx"))],
-      ["systemd (daemon-reload)", "Navidrome (baixar imagem)", "Navidrome (subir)", "nginx (reload)"])
+      ["systemd (daemon-reload)", "Navidrome (subir)", "nginx (reload)"])
 check("e o Docker antes do aplicativo",
       labels.index("Docker (restart)") < labels.index("Navidrome (subir)"), True)
 
@@ -114,6 +114,28 @@ if shutil.which("nginx"):
 else:
     check("sem nginx, o plano reprova dizendo isso",
           [("nao esta instalado" in c.output) for c in nginx_checks], [True])
+
+print("\n== Jellyfin, com aceleracao de hardware ==")
+check("aceleracao em aplicativo sem GPU e' recusada",
+      refused(lambda: build({"navidrome": {"enabled": True, "hwaccel": True}}), "aceleracao"), True)
+jf = build({"jellyfin": {"enabled": True, "hwaccel": True}, "navidrome": {"enabled": True}})
+data = jf.model_dump()
+out = render_all(jf)
+svc = yaml.safe_load(out["app-compose-jellyfin"])["services"]["jellyfin"]
+check("videos e musica so leitura",
+      [v for v in svc["volumes"] if v.endswith(":ro")],
+      ["/srv/aionas/Videos:/media/videos:ro", "/srv/aionas/Music:/media/music:ro"])
+check("o /dev/dri entra", svc["devices"], ["/dev/dri:/dev/dri"])
+check("com os gids numericos do host", svc["group_add"], [str(g) for g in apps.gpu_groups()])
+unit = out["app-unit-jellyfin"]
+check("config e cache criados com o dono do processo",
+      ("-o 2002 -g 2002 /var/lib/aionas/jellyfin/config" in unit,
+       "-o 2002 -g 2002 /var/lib/aionas/jellyfin/cache" in unit), (True, True))
+sem = Config.model_validate({**data, "apps": {"jellyfin": {"enabled": True}}})
+check("sem aceleracao, nada de /dev/dri",
+      "devices" in yaml.safe_load(render_all(sem)["app-compose-jellyfin"])["services"]["jellyfin"], False)
+check("dois aplicativos, dois nomes no DNS",
+      sorted(n for n, _ in apps.records(jf)), ["jellyfin.home.lan", "navidrome.home.lan"])
 
 print("\n== desligado depois de ligado ==")
 off = build(OFF)
