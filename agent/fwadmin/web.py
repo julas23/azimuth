@@ -35,7 +35,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Callable
+from typing import Annotated, Any, Callable, get_args
 from urllib.parse import parse_qs, urlencode
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
@@ -49,6 +49,7 @@ from fwadmin.models import (
     AdminChain,
     BlockedDomain,
     Config,
+    DDNSProvider,
     Failover,
     Firewall,
     Forwarder,
@@ -63,6 +64,8 @@ from fwadmin.models import (
     Service,
     WGPeer,
 )
+
+DDNS_PROVIDERS = get_args(DDNSProvider)
 from fwadmin.render import base_input, dump, load
 from fwadmin.stack import stack
 
@@ -1111,6 +1114,9 @@ async def vpn(request: Request, user: User) -> Response:
         observed=bool(snapshot.wireguard),
         outside=outside,
         up=list(snapshot.wireguard),
+        ddns_state=status.unit_info("azimuth-ddns.service", "inadyn"),
+        ddns_token=secretstore.has(cfg.ddns.secret_ref),
+        ddns_providers=DDNS_PROVIDERS,
     )
 
 
@@ -1874,8 +1880,31 @@ async def save_vpn(request: Request, user: User, fields: Fields) -> Response:
         wg.listen_port = fields.number("listen_port", wg.listen_port)
         wg.mtu = _optional_int(fields, "mtu", wg.mtu)
         wg.endpoint = fields.text("endpoint") or None
+        if "ddns_provider" not in fields:
+            return
+        d = cfg.ddns
+        d.enabled = fields.flag("ddns_enabled")
+        d.provider = fields.text("ddns_provider", d.provider)
+        d.hostname = fields.text("ddns_hostname") or None
+        d.username = fields.text("ddns_username") or None
+        token = fields.get("ddns_token", "")
+        if token:
+            if any(c in token for c in "\r\n"):
+                raise ValueError("o token do DDNS nao pode ter quebra de linha")
+            tokens[d.secret_ref] = token
+        elif d.enabled and not secretstore.has(d.secret_ref):
+            raise ValueError("informe o token (ou a senha) da conta no provedor de DDNS")
+        # O nome do DDNS e' o endereco que os aparelhos usam: sem endpoint
+        # escrito a mao, o perfil dos peers sai com ele.
+        if d.enabled and not wg.endpoint:
+            wg.endpoint = d.hostname
 
-    return back("/vpn", edit(request, mutate, "vpn"))
+    tokens: dict[str, str] = {}
+    error = edit(request, mutate, "vpn")
+    if error is None:
+        for ref, value in tokens.items():
+            secretstore.propose(ref, value)
+    return back("/vpn", error)
 
 
 def _wg(*args: str, stdin: str = "") -> str:

@@ -28,6 +28,8 @@ def stack(cfg: Config) -> list[dict[str, str]]:
          "unit": "unbound.service", "package": "unbound", "href": "/dns"},
         {"key": "wireguard", "name": "VPN", "role": f"túnel WireGuard {wg}",
          "unit": f"wg-quick@{wg}.service", "package": "wireguard-tools", "href": "/vpn"},
+        {"key": "ddns", "name": "DDNS", "role": "mantém o nome da caixa no IP público",
+         "unit": "azimuth-ddns.service", "package": "inadyn", "href": "/vpn"},
     ]
 
 

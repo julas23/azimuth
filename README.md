@@ -48,6 +48,7 @@ Todos os painéis desse mercado escrevem o arquivo, recarregam o serviço e torc
 | **nftables** | Firewall, NAT, isolamento entre zonas |
 | **dnsmasq** | DNS local, DHCP, reservas por MAC, bloqueio por lista |
 | **WireGuard** | Acesso remoto; a única porta exposta à internet |
+| **inadyn** | DDNS: um nome estável para a VPN, na conta do próprio usuário |
 | **fail2ban** | Bloqueio ativo contra força bruta |
 | **NFS** e **Samba** | Compartilhamento de arquivos na LAN, sob a mesma política de rede |
 

@@ -35,8 +35,8 @@ if [ "${1:-}" = "--desfazer" ]; then
     fi
     rm -rf /etc/fwadmin
     install -m 0440 "$SRC/deploy/sudoers-fwadmin-readonly" /etc/sudoers.d/fwadmin
-    systemctl disable azimuth-nftables.service 2>/dev/null || true
-    rm -f /etc/systemd/system/azimuth-nftables.service
+    systemctl disable azimuth-nftables.service azimuth-ddns.service 2>/dev/null || true
+    rm -f /etc/systemd/system/azimuth-nftables.service /etc/systemd/system/azimuth-ddns.service
     sed -i -e 's/^Environment=FWADMIN_READONLY=.*/Environment=FWADMIN_READONLY=1/' \
            -e 's|^ReadWritePaths=/var/lib/fwadmin /etc /usr/local/bin$|ReadWritePaths=/var/lib/fwadmin|' "$DROPIN"
     systemctl daemon-reload
@@ -112,6 +112,10 @@ install -m 0644 "$SRC/deploy/azimuth-nftables.service" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable azimuth-nftables.service >/dev/null 2>&1
 echo "   azimuth-nftables.service habilitada; fica quieta ate o primeiro apply"
+# A do DDNS so e' instalada: quem a habilita e' o fwctl, quando o DDNS e'
+# ligado no painel.
+install -m 0644 "$SRC/deploy/azimuth-ddns.service" /etc/systemd/system/
+systemctl daemon-reload
 
 echo "== 5. painel com acoes =="
 # O drop-in do enxuto segue valendo (TLS direto no IP da LAN, origem filtrada);

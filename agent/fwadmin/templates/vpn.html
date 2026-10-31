@@ -32,6 +32,30 @@
   </div>
 </section>
 
+{% set d = cfg.ddns %}
+<section class="card" aria-labelledby="h-ddns">
+  <div class="card-h">
+    <h2 class="h2" id="h-ddns">Nome na internet (DDNS)</h2>
+    {% if not ddns_state.installed %}<span class="chip mute">inadyn não instalado</span>
+    {% elif ddns_state.running %}<span class="chip ok">atualizando</span>
+    {% elif ddns_state.active == 'failed' %}<span class="chip bad">falhou</span>
+    {% elif d.enabled %}<span class="chip warn">parado</span>
+    {% else %}<span class="chip mute">desligado</span>{% endif %}
+  </div>
+  <div class="row muted"><span>A operadora troca o IP da sua casa de tempos em tempos. Um nome no seu próprio provedor de DDNS — DuckDNS, Cloudflare, No-IP — segue o IP sozinho, e os aparelhos continuam achando a VPN. A conta é sua; o Azimuth só mantém o nome atualizado.</span></div>
+  <div class="form-grid">
+    <div class="field"><label class="check"><input type="checkbox" name="ddns_enabled" value="1" form="page-form" {{ 'checked' if d.enabled }} {{ ro }}> Manter um nome DDNS</label></div>
+    <div class="field"><label for="d-prov">Provedor</label>
+      <select id="d-prov" class="input" name="ddns_provider" form="page-form" {{ ro }}>
+        {% for p in ddns_providers %}<option value="{{ p }}" {{ 'selected' if p == d.provider }}>{{ p }}</option>{% endfor %}
+      </select></div>
+    <div class="field" style="grid-column: span 2"><label for="d-host">Nome</label><input id="d-host" class="input mono" name="ddns_hostname" form="page-form" value="{{ d.hostname or '' }}" placeholder="casa.duckdns.org" {{ ro }}></div>
+    <div class="field"><label for="d-user">Usuário</label><input id="d-user" class="input mono" name="ddns_username" form="page-form" value="{{ d.username or '' }}" placeholder="vazio no DuckDNS · a zona no Cloudflare" {{ ro }}></div>
+    <div class="field"><label for="d-tok">Token ou senha</label><input id="d-tok" class="input mono" type="password" name="ddns_token" form="page-form" autocomplete="new-password" placeholder="{{ 'guardado · em branco mantém' if ddns_token else 'da sua conta no provedor' }}" {{ ro }}></div>
+  </div>
+  <div class="row muted"><span>O token fica em arquivo próprio, legível só pelo root, e nunca aparece na configuração, no diff nem no backup. Ao aplicar, o motor faz uma atualização de teste: se o provedor recusar, a mudança volta sozinha.{% if not ddns_state.installed %} Antes de ligar, instale o inadyn em <a href="/services">Serviços</a>.{% endif %}</span></div>
+</section>
+
 <section class="card" aria-labelledby="h-peers">
   <div class="card-h"><h2 class="h2" id="h-peers">Peers</h2><span class="chip mute">{{ peers|length }}</span>{% if not observed %}<span class="muted">sem leitura do <span class="mono">wg show</span></span>{% endif %}</div>
   <form class="addbox" id="novo-peer" method="post" action="/vpn/peer" aria-label="Novo peer">
@@ -41,7 +65,7 @@
       <div class="field"><label for="p-ds">Descrição</label><input id="p-ds" class="input" name="description" maxlength="120" placeholder="Celular da Ana" {{ ro }}></div>
       <div class="field"><label for="p-rt">Pelo túnel passa</label>
         <select id="p-rt" class="input" name="route" {{ ro }}><option value="lan">só a rede de casa</option><option value="all">toda a internet</option></select></div>
-      <div class="field"><label for="p-end">Chega por</label><input id="p-end" class="input mono" name="endpoint" value="{{ wg.endpoint or '' }}" placeholder="casa.exemplo.net" required {{ ro }}></div>
+      <div class="field"><label for="p-end">Chega por</label><input id="p-end" class="input mono" name="endpoint" value="{{ wg.endpoint or cfg.ddns.hostname or '' }}" placeholder="casa.exemplo.net" required {{ ro }}></div>
       <div class="addbox-go">{{ action(icon('plus', 16) ~ 'Criar', readonly or not runtime, 'primary') }}</div>
     </div>
     {% if not runtime %}<div class="row muted"><span>O túnel precisa estar no ar: o perfil leva a chave pública do servidor, lida do <span class="mono">wg show</span>.</span></div>{% endif %}

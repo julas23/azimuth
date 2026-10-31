@@ -1,0 +1,17 @@
+{# gera /etc/inadyn/azimuth.conf #}
+# ATENCAO: arquivo gerado pelo fwadmin a partir de /etc/fwadmin/config.yaml.
+# Edicoes manuais sao perdidas no proximo apply. Edite pelo painel (VPN).
+#
+# O token NAO fica aqui: o include() abaixo o puxa de {{ secret_path }}
+# (0600), que so o fwctl escreve.
+{% if d.enabled %}
+period = {{ d.period }}
+
+provider {{ d.provider }} {
+    hostname = "{{ d.hostname }}"
+{% if d.username %}    username = "{{ d.username }}"
+{% endif %}    include("{{ secret_path }}")
+}
+{% else %}
+# DDNS desligado no painel: a unidade azimuth-ddns fica parada e desabilitada.
+{% endif %}

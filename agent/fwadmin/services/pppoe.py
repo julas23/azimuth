@@ -192,6 +192,7 @@ SERVICE = ServiceModule(
     order=40,
     section="interfaces[].pppoe",
     targets=targets,
+    secret_targets=secret_targets,
     units=units,
     reloads=reloads,
     rollback=rollback,

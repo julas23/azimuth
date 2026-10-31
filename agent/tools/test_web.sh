@@ -142,6 +142,31 @@ check "a proposta voltou ao que era" "$(grep -c 'novo@provedor' "$SANDBOX/etc/fw
 check "nome de versao inventado recusado" "$(code -X POST --data-urlencode 'name=../config.yaml' "http://127.0.0.1:$PORT/system/restore" >/dev/null; grep -c 'novo@provedor' "$SANDBOX/etc/fwadmin/config.pending.yaml" || true)" "0"
 echo
 
+echo "== VPN: DDNS do proprio usuario =="
+PEND="$SANDBOX/etc/fwadmin/config.pending.yaml"
+[ -e "$PEND" ] || cp "$SANDBOX/etc/fwadmin/config.yaml" "$PEND"
+python3 - "$PEND" <<'EOF'
+import sys, yaml
+p = sys.argv[1]; d = yaml.safe_load(open(p))
+d["wireguard"] = {"enabled": True, "address": "10.9.0.1/24"}
+yaml.safe_dump(d, open(p, "w"))
+EOF
+code "http://127.0.0.1:$PORT/vpn" >/dev/null
+check "cartao do DDNS aparece" "$(grep -c 'Nome na internet (DDNS)' "$SANDBOX/body")" "1"
+code -X POST -d 'address=10.9.0.1/24&listen_port=51820&ddns_enabled=1&ddns_provider=duckdns.org&ddns_hostname=casa.duckdns.org' \
+     "http://127.0.0.1:$PORT/vpn" >/dev/null
+check "ligar sem token e' recusado" "$(grep -c 'casa.duckdns.org' "$PEND" || true)" "0"
+code -X POST -d 'address=10.9.0.1/24&listen_port=51820&ddns_enabled=1&ddns_provider=duckdns.org&ddns_hostname=casa.duckdns.org&ddns_token=tok-web-123' \
+     "http://127.0.0.1:$PORT/vpn" >/dev/null
+check "com token, o DDNS entra na proposta" "$(grep -c 'hostname: casa.duckdns.org' "$PEND")" "1"
+check "e vira o endpoint dos peers" "$(grep -c 'endpoint: casa.duckdns.org' "$PEND")" "1"
+check "o token nao esta na config" "$(grep -c 'tok-web-123' "$PEND" || true)" "0"
+check "o token espera o apply em secrets.pending" "$(grep -c 'tok-web-123' "$SANDBOX/etc/fwadmin/secrets.pending.yaml")" "1"
+code "http://127.0.0.1:$PORT/vpn" >/dev/null
+check "a tela diz que o token esta guardado" "$(grep -c 'guardado · em branco mantém' "$SANDBOX/body")" "1"
+check "e nao o mostra" "$(grep -c 'tok-web-123' "$SANDBOX/body" || true)" "0"
+echo
+
 echo "== descartar proposta =="
 code -X POST "http://127.0.0.1:$PORT/system/discard" >/dev/null
 check "proposta sumiu" "$([ -e "$SANDBOX/etc/fwadmin/config.pending.yaml" ] && echo sim || echo nao)" "nao"

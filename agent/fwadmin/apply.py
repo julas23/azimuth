@@ -32,7 +32,7 @@ from fwadmin import paths, services
 from fwadmin.command import ApplyError, Result, run
 from fwadmin.models import Config
 from fwadmin.render import render_all
-from fwadmin.services import pppoe
+from fwadmin.services import ddns, pppoe
 from fwadmin.services.base import Prova, Reload
 
 __all__ = [
@@ -269,6 +269,10 @@ def build_plan(cfg: Config, previous: Config | None, staging: Path) -> Plan:
     rendered |= secrets
     targets |= pppoe.secret_targets(cfg)
     secret = set(secrets)
+    ddns_secrets, ddns_missing = ddns.render_secrets(cfg)
+    rendered |= ddns_secrets
+    targets |= ddns.secret_targets(cfg)
+    secret |= set(ddns_secrets)
 
     if staging.exists():
         shutil.rmtree(staging)
@@ -298,6 +302,14 @@ def build_plan(cfg: Config, previous: Config | None, staging: Path) -> Plan:
                 f"senha do PPPoE '{peer}'",
                 "nenhuma senha em secrets.yaml, nem dentro do /etc/ppp/peers vivo: "
                 "informe a senha em Rede antes de aplicar",
+            )
+        )
+    if ddns_missing:
+        plan.checks.append(
+            Result(
+                False,
+                "token do DDNS",
+                "nenhum token em secrets.yaml: informe o token do provedor em VPN antes de aplicar",
             )
         )
     return plan

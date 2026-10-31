@@ -90,6 +90,7 @@ fi
 echo "== 5. systemd =="
 install -m 0644 "$SRC/deploy/fwadmin.service"          /etc/systemd/system/
 install -m 0644 "$SRC/deploy/azimuth-nftables.service" /etc/systemd/system/
+install -m 0644 "$SRC/deploy/azimuth-ddns.service"     /etc/systemd/system/
 install -d -m 0755 /etc/nftables.d
 install -m 0644 "$SRC/deploy/fwadmin-failover.service" /etc/systemd/system/
 install -m 0644 "$SRC/deploy/fwadmin-failover.timer"   /etc/systemd/system/

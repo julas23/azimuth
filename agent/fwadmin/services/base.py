@@ -114,6 +114,14 @@ class ServiceModule:
     rollback: Rollback
     """Recargas do caminho de volta: nao ha diff, reaplica o que foi tocado."""
 
+    secret_targets: Targets | None = None
+    """Config -> {nome: caminho} dos arquivos de segredo deste servico.
+
+    Ficam fora de 'targets' porque o render_all (o que o painel mostra) nao
+    pode produzi-los: so o fwctl, no build_plan. Mas sao do servico: token
+    trocado sozinho tambem precisa de recarga e de prova de funcao.
+    """
+
     units: Units = lambda cfg: frozenset()  # noqa: E731
     """Config -> unidades do systemd que este servico reivindica.
 

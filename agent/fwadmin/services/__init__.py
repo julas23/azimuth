@@ -16,7 +16,7 @@ from pathlib import Path
 from fwadmin import paths
 from fwadmin.command import Result, run
 from fwadmin.models import Config
-from fwadmin.services import dnsmasq, failover, interfaces, nftables, pppoe, unbound, wireguard
+from fwadmin.services import ddns, dnsmasq, failover, interfaces, nftables, pppoe, unbound, wireguard
 from fwadmin.services.base import Prova, Reload, ServiceModule
 
 REGISTRY: tuple[ServiceModule, ...] = tuple(
@@ -29,6 +29,7 @@ REGISTRY: tuple[ServiceModule, ...] = tuple(
             pppoe.SERVICE,
             wireguard.SERVICE,
             failover.SERVICE,
+            ddns.SERVICE,
         ),
         key=lambda s: s.order,
     )
@@ -164,7 +165,10 @@ def provas(cfg: Config, previous: Config | None, changed: list[str]) -> list[Pro
     for service in REGISTRY:
         if service.probe is None:
             continue
-        if not set(service.targets(cfg)) & set(changed):
+        mine = set(service.targets(cfg))
+        if service.secret_targets is not None:
+            mine |= set(service.secret_targets(cfg))
+        if not mine & set(changed):
             continue
         if paths.sandboxed():
             out.append(

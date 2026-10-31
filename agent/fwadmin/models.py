@@ -995,6 +995,62 @@ class Resolver(Base):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# DDNS (inadyn) — o nome e' do usuario, no provedor que ele escolher
+# ---------------------------------------------------------------------------
+
+DDNSProvider = Literal[
+    "duckdns.org",
+    "cloudflare.com",
+    "noip.com",
+    "dynu.com",
+    "freedns.afraid.org",
+    "desec.io",
+    "namecheap.com",
+    "he.net",
+    "dyndns.org",
+]
+"""Os provedores que a tela oferece. Todos sao plugins nativos do inadyn 2.11
+(inadyn -L); outro provedor do inadyn entra acrescentando o nome aqui."""
+
+
+class DDNS(Base):
+    """O nome estavel da caixa na internet, num provedor do proprio usuario.
+
+    O projeto nao fornece DDNS: o usuario cadastra a conta dele (DuckDNS,
+    Cloudflare, No-IP...) e o inadyn mantem o nome apontando para o IP
+    publico. O segredo (token ou senha) nunca mora aqui: fica em
+    secrets.yaml sob 'secret_ref', como a senha do PPPoE.
+    """
+
+    enabled: bool = False
+    provider: DDNSProvider = "duckdns.org"
+    hostname: Annotated[str, Field(pattern=HOSTNAME_RE.pattern)] | None = None
+    """Nome completo que o provedor atualiza: casa.duckdns.org."""
+
+    username: Annotated[str, Field(pattern=r"^[A-Za-z0-9@._+-]{1,128}$")] | None = None
+    """Usuario da conta, ou a zona no Cloudflare. Vazio = provedor de token
+    (DuckDNS): o token vai como usuario e a senha e' ignorada."""
+
+    secret_ref: Annotated[str, Field(pattern=r"^[a-z0-9_-]{1,32}$")] = "ddns"
+    period: Annotated[int, Field(ge=60, le=86400)] = 300
+    """Segundos entre verificacoes do IP publico. E' esse intervalo que faz o
+    nome seguir a WAN ativa depois de um failover."""
+
+    @field_validator("hostname", mode="before")
+    @classmethod
+    def _lower(cls, v: str | None) -> str | None:
+        return v.strip().lower().rstrip(".") if isinstance(v, str) and v.strip() else None
+
+    @model_validator(mode="after")
+    def _coerencia(self) -> DDNS:
+        if self.enabled and not self.hostname:
+            raise ValueError("DDNS ligado exige o nome (ex: casa.duckdns.org)")
+        if self.enabled and self.provider == "cloudflare.com" and not self.username:
+            raise ValueError("no Cloudflare, o usuario e' a zona (ex: exemplo.com)")
+        return self
+
+
 class System(Base):
     hostname: Annotated[str, Field(pattern=HOSTLABEL_RE.pattern)] = "fw"
     timezone: Annotated[str, Field(max_length=64)] = "America/Sao_Paulo"
@@ -1024,6 +1080,7 @@ class Config(Base):
     firewall: Firewall = Firewall()
     wireguard: WireGuard = WireGuard()
     resolver: Resolver = Resolver()
+    ddns: DDNS = DDNS()
 
     # -- indices de conveniencia -------------------------------------------
 

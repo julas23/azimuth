@@ -1,0 +1,33 @@
+[Unit]
+Description=Azimuth — DDNS do usuário (inadyn)
+Documentation=file:/opt/fwadmin/README.md man:inadyn(8)
+# O pacote do Debian traz só um script SysV, desligado em /etc/default/inadyn.
+# Esta unidade é a do motor: o fwctl a habilita quando o DDNS é ligado no
+# painel e a desabilita quando é desligado. Antes do primeiro apply não há
+# configuração, e ela fica quieta.
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/inadyn/azimuth.conf
+
+[Service]
+ExecStart=/usr/bin/inadyn --foreground --no-pidfile --cache-dir=/var/cache/azimuth-ddns -f /etc/inadyn/azimuth.conf
+# Provedor que recusa (token errado) faz o inadyn sair; tenta de novo depois,
+# sem martelar o provedor.
+Restart=on-failure
+RestartSec=120
+CacheDirectory=azimuth-ddns
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

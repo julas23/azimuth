@@ -39,12 +39,19 @@ usuário sem privilégio e `NoNewPrivileges=no` deliberado, porque o `sudo` para
 | **iproute2** | Rotas, links, estado — base do `status.py` | GPL-2.0 | ✅ |
 | **wireguard-tools** | Túnel de acesso remoto; a única porta exposta | GPL-2.0 | 🟡 |
 | **fail2ban** | Bloqueio ativo contra força bruta | GPL-2.0+ | 🟡 |
+| **inadyn** | DDNS na conta do próprio usuário (DuckDNS, Cloudflare, No-IP…) | GPL-2.0 | ✅ |
 | **iputils / traceroute** | Prova de função e diagnóstico | GPL-2.0 / BSD | ✅ |
 | **bind9-dnsutils** (`dig`) | Consulta ao resolvedor local, na prova de função do DNS | MPL-2.0 | ✅ |
 
 WireGuard e fail2ban estão marcados 🟡 pelo mesmo motivo: rodam em produção, mas fora do
 motor transacional. Enquanto for assim, mudança neles não tem validação, nem manifesto,
 nem rollback.
+
+**O projeto não fornece DDNS.** O nome é do usuário, no provedor que ele escolher, e o
+inadyn só o mantém apontando para o IP público. O token fica em arquivo próprio, 0600,
+puxado por `include()`, pelo mesmo motivo da senha do PPPoE: o arquivo principal aparece
+no diff e no backup. A unidade é do motor (`azimuth-ddns.service`), porque o pacote do
+Debian traz só um script SysV, desligado.
 
 O que protege o banimento ativo do fail2ban num reload de nftables é o gerador **não**
 usar `flush ruleset`: ele recria só as tabelas próprias, pelo idioma `table X; delete
