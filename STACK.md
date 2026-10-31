@@ -136,7 +136,7 @@ nenhuma chamada de modelo sai da conta dele.
 |---|---|---|---|
 | **nfs-kernel-server** | Compartilhamento para Linux | GPL-2.0 | ⬜ |
 | **Samba** | Compartilhamento para Windows e celular | GPL-3.0 | ⬜ |
-| **Nextcloud** | Arquivos, calendário, contatos | AGPL-3.0 | ⬜ |
+| **Nextcloud** | Arquivos, calendário, contatos | AGPL-3.0 | 🟡 |
 | **Immich** | Fotos, com ML condicionado a nó de computação | AGPL-3.0 | 🟡 |
 | **Jellyfin** | Vídeo, com foco em Direct Play | GPL-2.0 | 🟡 |
 | **Navidrome** | Música | GPL-3.0 | 🟡 |
@@ -185,8 +185,15 @@ opcional e desligado por padrão. A senha do banco nasce aleatória no primeiro 
 em `secrets.yaml` e chega aos containers por um `env_file` 0600, nunca pelo compose. A
 biblioteca é o próprio `Pictures`; miniaturas, vídeo transcodificado, upload em andamento e
 backup do banco vão para `/var/lib/aionas/immich`, montados por cima das subpastas de
-`/data`. Como o Immich escreve em `Pictures`, a pasta é criada com o dono dele — provisório
-até o módulo de storage dar às pastas um grupo comum aos aplicativos e ao SMB.
+`/data`. Todo container roda como `aionas-data` (uid/gid 2000), a identidade única do
+STORAGE.md, e as quatro pastas são dele, 2775 com setgid.
+
+O Nextcloud é o quarto, com quatro containers: nginx sem privilégio na frente (a
+configuração oficial do projeto para php-fpm, escutando na 8080), php-fpm, Postgres e um
+laço de cron que roda o `cron.php` e, depois que o usuário termina a instalação no
+navegador, liga as quatro pastas como *External storage* com "verificar mudanças em
+acesso direto". Sem Redis: com `REDIS_HOST` o entrypoint da imagem escreve a config de
+sessão do PHP num diretório do root e, sem root, o container morre na subida.
 
 **A imagem não baixa dentro do apply.** Ligar um aplicativo no painel dispara um
 `docker pull` em segundo plano (`fwctl servico baixar`), e o `check` reprova enquanto a

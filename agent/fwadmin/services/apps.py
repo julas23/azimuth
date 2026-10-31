@@ -27,7 +27,7 @@ from pathlib import Path
 
 import yaml
 
-from fwadmin.apps import CATALOG, AppSpec
+from fwadmin.apps import CATALOG, MEDIA_FOLDERS, AppSpec
 from fwadmin import paths, secretstore
 from fwadmin.command import Result, run
 from fwadmin.models import Config
@@ -37,11 +37,16 @@ COMPOSE = "app-compose-"
 UNIT = "app-unit-"
 VHOST = "app-vhost-"
 SECRET = "app-secret-"
-PREFIXES = (COMPOSE, UNIT, VHOST, SECRET)
+FILE = "app-file-"
+PREFIXES = (COMPOSE, UNIT, VHOST, SECRET, FILE)
 
 
 def compose_path(key: str) -> str:
     return f"/etc/azimuth/apps/{key}/compose.yaml"
+
+
+def file_path(key: str, name: str) -> str:
+    return f"/etc/azimuth/apps/{key}/{name}"
 
 
 def secret_path(key: str) -> str:
@@ -70,9 +75,19 @@ def records(cfg: Config) -> list[tuple[str, str]]:
 
 
 def _key(name: str) -> str | None:
+    """O aplicativo dono de um render. Os de arquivo sao app-file-<app>-<nome>."""
     for prefix in PREFIXES:
         if name.startswith(prefix):
-            return name.removeprefix(prefix)
+            rest = name.removeprefix(prefix)
+            return rest.split("-", 1)[0] if prefix == FILE else rest
+    return None
+
+
+def _config_file(name: str):
+    key = _key(name)
+    for f in CATALOG[key].config_files:
+        if name == f"{FILE}{key}-{f.name}":
+            return f
     return None
 
 
@@ -86,6 +101,8 @@ def targets(cfg: Config) -> dict[str, str]:
         out[f"{COMPOSE}{key}"] = compose_path(key)
         out[f"{UNIT}{key}"] = f"/etc/systemd/system/{unit_name(key)}"
         out[f"{VHOST}{key}"] = f"/etc/nginx/sites-enabled/azimuth-app-{key}"
+        for f in CATALOG[key].config_files:
+            out[f"{FILE}{key}-{f.name}"] = file_path(key, f.name)
     return out
 
 
@@ -94,6 +111,8 @@ def units(cfg: Config) -> frozenset[str]:
 
 
 def template_for(name: str) -> str:
+    if name.startswith(FILE):
+        return _config_file(name).template
     if name.startswith(COMPOSE):
         return "app-compose.yaml.j2"
     if name.startswith(UNIT):
@@ -137,12 +156,35 @@ def _hardened(spec: AppSpec) -> dict:
     }
 
 
-def compose(spec: AppSpec, hwaccel: bool = False, enabled: set[str] | frozenset[str] = frozenset()) -> dict:
+def _files_for(spec: AppSpec, service: str) -> list[str]:
+    return [
+        f"{file_path(spec.key, f.name)}:{f.target}:ro" for f in spec.config_files if f.service == service
+    ]
+
+
+def _subst(env: dict[str, str], values: dict[str, str]) -> dict[str, str]:
+    """{fqdn} e {pool} nos valores: o que depende da caixa, e nao do catalogo."""
+    out = {}
+    for k, v in env.items():
+        for name, value in values.items():
+            v = v.replace("{" + name + "}", value)
+        out[k] = v
+    return out
+
+
+def compose(
+    spec: AppSpec,
+    hwaccel: bool = False,
+    enabled: set[str] | frozenset[str] = frozenset(),
+    values: dict[str, str] | None = None,
+) -> dict:
     """O compose inteiro, montado como dado e serializado — nao texto colado."""
+    values = values or {}
     main: dict = {"image": spec.image, **_hardened(spec)}
     main["ports"] = [f"127.0.0.1:{spec.port}:{spec.port}"]
-    main["volumes"] = _volumes(spec.mounts)
-    env = dict(spec.env)
+    main["volumes"] = _volumes(spec.mounts) + _files_for(spec, spec.key)
+    groups: list[int] = []
+    env = _subst(spec.env, values)
     for opt, extra in spec.off_env.items():
         if opt not in enabled:
             env.update(extra)
@@ -152,7 +194,9 @@ def compose(spec: AppSpec, hwaccel: bool = False, enabled: set[str] | frozenset[
         main["env_file"] = [secret_path(spec.key)]
     if hwaccel and spec.gpu:
         main["devices"] = ["/dev/dri:/dev/dri"]
-        main["group_add"] = [str(g) for g in gpu_groups()]
+        groups += gpu_groups()
+    if groups:
+        main["group_add"] = [str(g) for g in groups]
 
     services: dict = {spec.key: main}
     for side in spec.sidecars:
@@ -161,10 +205,11 @@ def compose(spec: AppSpec, hwaccel: bool = False, enabled: set[str] | frozenset[
         svc: dict = {"image": side.image, **_hardened(spec)}
         if side.command:
             svc["command"] = list(side.command)
-        if side.mounts:
-            svc["volumes"] = _volumes(side.mounts)
+        volumes = _volumes(side.mounts) + _files_for(spec, side.name)
+        if volumes:
+            svc["volumes"] = volumes
         if side.env:
-            svc["environment"] = dict(side.env)
+            svc["environment"] = _subst(side.env, values)
         if side.secret:
             svc["env_file"] = [secret_path(spec.key)]
         if side.shm_size:
@@ -206,10 +251,16 @@ def context_for(cfg: Config, name: str) -> dict:
         allow.append(str(ipaddress.IPv4Interface(cfg.wireguard.address).network))
     return {
         "spec": spec,
+        "media_folders": MEDIA_FOLDERS,
         "on": _on(cfg, key),
         "compose_file": compose_path(key),
         "compose_body": yaml.safe_dump(
-            compose(spec, key in cfg.apps and cfg.apps[key].hwaccel, options(cfg, key)),
+            compose(
+                spec,
+                key in cfg.apps and cfg.apps[key].hwaccel,
+                options(cfg, key),
+                {"fqdn": fqdn(cfg, key), "pool": cfg.containers.pool},
+            ),
             sort_keys=False,
             allow_unicode=True,
         ),
@@ -235,7 +286,9 @@ def _state(cfg: Config | None, key: str, files: set[str]) -> list[Reload]:
         out.append(Reload("systemd (daemon-reload)", ["systemctl", "daemon-reload"]))
     unit = unit_name(key)
     if _on(cfg, key):
-        if {f"{COMPOSE}{key}", f"{UNIT}{key}", f"{SECRET}{key}"} & files:
+        mine = {f"{COMPOSE}{key}", f"{UNIT}{key}", f"{SECRET}{key}"}
+        mine |= {f"{FILE}{key}-{f.name}" for f in CATALOG[key].config_files}
+        if mine & files:
             # A imagem ja esta na caixa: o validate exige. Baixar aqui faria o
             # apply depender da velocidade da internet, e uma imagem de
             # centenas de MB estouraria o tempo do painel no meio da transacao.

@@ -1,0 +1,44 @@
+{# gera /etc/azimuth/apps/nextcloud/azimuth-cron.sh, o laco do container 'cron' #}
+# ATENCAO: arquivo gerado pelo fwadmin. Edicoes manuais sao perdidas.
+#
+# Roda como {{ spec.uid }}, sem cron de sistema (o crond da imagem exige root).
+# A cada volta, depois que a instalacao foi concluida no navegador:
+#   - poe os trabalhos de fundo em modo cron (o padrao, AJAX, so roda com
+#     alguem com a pagina aberta);
+#   - liga as pastas do usuario como External storage, uma vez cada, com
+#     "verificar mudancas em acesso direto" — o que entra pelo SMB ou pelo
+#     Immich aparece no Nextcloud sem reindexar a mao;
+#   - roda o cron.php.
+set -u
+occ() { php /var/www/html/occ "$@"; }
+
+instalado() {
+    [ -f /var/www/html/config/config.php ] &&
+        occ status --output=json 2>/dev/null | grep -q '"installed":true'
+}
+
+montado() {
+    occ files_external:list --output=json 2>/dev/null | grep -Eq "\"mount_point\":\"(\\\\)?/$1\""
+}
+
+preparar() {
+    occ background:cron >/dev/null 2>&1
+    occ app:enable files_external >/dev/null 2>&1 || return 0
+    for pasta in {{ media_folders | join(' ') }}; do
+        montado "$pasta" && continue
+        id=$(occ files_external:create "/$pasta" local null::null -c "datadir=/media/$pasta" --output=json 2>/dev/null)
+        case "$id" in
+            ''|*[!0-9]*) echo "azimuth: nao consegui montar /$pasta: $id" ;;
+            *) occ files_external:option "$id" filesystem_check_changes 1 >/dev/null
+               echo "azimuth: /$pasta montada como External storage ($id)" ;;
+        esac
+    done
+}
+
+while true; do
+    if instalado; then
+        preparar
+        php -f /var/www/html/cron.php
+    fi
+    sleep 300
+done

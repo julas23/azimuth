@@ -97,6 +97,9 @@ mesmos arquivos sem briga de permissão:
   como `aionas-data` (`force user`/`force group`).
 - **NFS:** `all_squash,anonuid=2000,anongid=2000`. Toda escrita vira `aionas-data`.
 - **Containers:** rodam com `--user 2000:2000` (rootless, `keep-id`). Gravam como o mesmo dono.
+  *Já implementado nos aplicativos (31/10/2026): todo container do catálogo roda como
+  `2000:2000` e a unidade de cada aplicativo cria as pastas que ele monta como
+  `2000:2000`, `2775`. Testado com Immich e Nextcloud gravando na mesma pasta.*
 
 Permissão por usuário e por diretório (ACL) fica fora da v1. Na v1, cada usuário SMB tem
 acesso `rw` ou `ro` a tudo.
