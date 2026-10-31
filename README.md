@@ -96,30 +96,21 @@ O código existe porque uma caixa recém-ligada na rede, sem ele, pertence a que
 
 ---
 
-## O que se cobra, e por quê
+## Aberto, por inteiro
 
-Quase nada aqui é desenvolvimento próprio. nftables, dnsmasq, WireGuard, Nextcloud, Jellyfin, Immich e o resto são trabalho de outras pessoas, entregue sob licenças livres. Cobrar por eles seria desonesto. A lista inteira, com papel, licença e crédito de cada peça, está em [STACK.md](STACK.md).
+Quase nada aqui é desenvolvimento próprio. nftables, dnsmasq, WireGuard, Nextcloud, Jellyfin, Immich e o resto são trabalho de outras pessoas, entregue sob licenças livres. A lista inteira, com papel, licença e crédito de cada peça, está em [STACK.md](STACK.md).
 
-O que se vende é conveniência — e só aquilo que tem custo recorrente de verdade: um control plane hospedado que ninguém precisa administrar, um nome estável para a VPN, o perfil guardado fora de casa e listas mantidas e assinadas. A ISO, o repositório de atualização e o produto inteiro rodando dentro de casa são livres, e continuam sendo.
+O que o projeto acrescenta — motor, agente, painel, control plane, ISO e repositório de atualização — é livre do mesmo jeito, sob a [AGPLv3](LICENSE). Não existe plano pago, módulo fechado nem recurso reservado. O control plane é auto-hospedável por princípio de projeto: quem quiser rodar o próprio desde o primeiro dia, roda.
 
-| | Local | Nuvem |
-|---|---|---|
-| **Preço** | grátis, para sempre | **US$ 2/mês** na anual, ou **US$ 150** vitalícia |
-| Firewall, DNS, DHCP, VPN, compartilhamento | ✅ | ✅ |
-| Mídia e IA local | ✅ | ✅ |
-| Painel no próprio appliance | ✅ | ✅ |
-| ISO e repositório de atualização | ✅ | ✅ |
-| Perfil guardado fora de casa | — | ✅ |
-| Multi-site, histórico e diff entre versões | — | ✅ |
-| DDNS gerenciado | — | ✅ |
-| RBL assinada, atualizada todo dia | — | ✅ |
-| Templates e análise agendada | — | ✅ |
+### Quem prefere receber pronto
 
-**A assinatura é anual; cobrança mensal não existe.** A US$ 2 por mês, a taxa do cartão levaria perto de um quinto do valor. Cobrada uma vez por ano, cai para uns 5% — e é essa diferença que permite o preço ser esse.
+Instalar, migrar a rede que já existe e manter tudo funcionando dá trabalho, e esse trabalho é contratável:
 
-**Suporte é sob demanda e avulso, não plano.** Quem nunca precisar, nunca paga por isso. É também o que torna a vitalícia sustentável: o custo que estoura em plano vitalício nunca é servidor, é atendimento.
+- **Implementação** — o Azimuth instalado e configurado em casa, no homelab ou no pequeno escritório, com a migração da rede atual
+- **Gestão** — atualização, monitoramento, VPN e backup acompanhados mês a mês
+- **Projeto sob medida** — firewall, VPN, IA local ou self-hosting para quem não quer o Azimuth inteiro
 
-**Vitalícia é a vida do produto, não a sua.** Se o serviço hospedado um dia fechar, quem comprou recebe a imagem do control plane e o perfil exportado, para seguir rodando por conta própria. Não é concessão de última hora: o control plane é auto-hospedável por princípio de projeto, e quem quiser rodar o próprio desde o primeiro dia, roda.
+Contato pelo perfil [julas23](https://github.com/julas23) no GitHub.
 
 ---
 
@@ -175,4 +166,8 @@ em `/etc/fwadmin/config.yaml`, no appliance — nunca no repositório.
 
 ## Licença
 
-A definir.
+[GNU Affero General Public License v3.0](LICENSE).
+
+Na prática: usar, estudar, modificar e instalar para terceiros é livre, sem obrigação nenhuma. Quem distribuir uma versão modificada, ou oferecê-la como serviço pela rede — um control plane hospedado, por exemplo —, entrega os fontes dessa versão sob a mesma licença. É o que impede alguém de fechar o projeto e concorrer com ele.
+
+Os componentes de terceiros mantêm as próprias licenças; ver [STACK.md](STACK.md).

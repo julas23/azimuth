@@ -2,8 +2,8 @@
 
 Inventário de tudo que o produto empacota, roda ou depende — com papel, licença e estado.
 
-Este arquivo tem três empregos. É a base honesta do preço: quase nada aqui é
-desenvolvimento próprio, e a lista mostra de quem é o trabalho. É o que a ISO precisa
+Este arquivo tem três empregos. É o crédito: quase nada aqui é desenvolvimento
+próprio, e a lista mostra de quem é o trabalho. É o que a ISO precisa
 declarar, porque distribuir software GPL de terceiros obriga a dizer o que vai dentro e
 onde estão os fontes. E é o inventário de dependência, que é por onde se descobre que
 uma biblioteca parou de ser mantida antes de ela virar incidente.
@@ -88,7 +88,7 @@ precisa se justificar.
 | **qrcode + Pillow** | QR do peer e do primeiro acesso | BSD / HPND |
 | **aiosmtplib** | Verificação de e-mail e senha temporária | MIT |
 | **APScheduler** | Tarefas periódicas | MIT |
-| **Stripe** | Cobrança | **serviço comercial** |
+| **Stripe** | Cobrança — código herdado do `vpn-web`, fora do produto | **serviço comercial** |
 | **Docker + Compose** | Substrato de implantação do ACP | Apache-2.0 |
 
 ### Distribuição
@@ -118,8 +118,8 @@ Nada aqui aplica mudança, e nada aqui é obrigatório: tudo degrada sem quebrar
 | **Claude, Gemini, DeepSeek, Kimi** | BYOK — chave do usuário, chamada pelo cliente | **serviços comerciais** | ⬜ |
 
 Provedor externo nunca é dependência do produto: é opção do usuário, com a chave dele.
-Isso não é só privacidade — é o que mantém o custo da assinatura em dois dólares, porque
-nenhuma chamada de modelo sai da conta do projeto.
+Isso não é só privacidade — é o que deixa o projeto sem custo de inferência, porque
+nenhuma chamada de modelo sai da conta dele.
 
 ---
 
@@ -173,9 +173,9 @@ motivo jurídico e não técnico.
 **Nextcloud e Immich são AGPL.** Rodam como processos separados, então não contaminam o
 código do Azimuth — mas a ISO que os distribui precisa oferecer os fontes correspondentes.
 
-**Stripe é a única dependência comercial do produto.** E em Brasil, compra única de
-US$ 150 em cartão internacional tem recusa alta: se a vitalícia for vender de verdade,
-Pix entra na lista, e Pix implica um provedor de pagamento com presença local.
+**Stripe não é dependência do produto.** O código de cobrança veio com o portal herdado
+e fica no repositório como referência (ver [SALVAGE.md](SALVAGE.md)); o Azimuth é
+inteiro livre e não cobra por nada.
 
 ---
 
@@ -183,6 +183,5 @@ Pix entra na lista, e Pix implica um provedor de pagamento com presença local.
 
 A ISO precisa carregar, junto da imagem, a declaração do que vai dentro e o apontamento
 para os fontes de cada componente sob GPL ou AGPL. Não é burocracia evitável: é
-exatamente a mesma honestidade que sustenta o preço. **Cobrar pela conveniência de
-empacotar o trabalho dos outros só é defensável enquanto o crédito e os fontes forem
-dados por escrito.**
+exatamente a mesma honestidade que sustenta o projeto. **Empacotar o trabalho dos outros
+só é honesto enquanto o crédito e os fontes forem dados por escrito.**
