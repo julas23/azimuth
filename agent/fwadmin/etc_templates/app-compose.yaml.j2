@@ -1,0 +1,9 @@
+{# gera /etc/azimuth/apps/<app>/compose.yaml #}
+# ATENCAO: arquivo gerado pelo fwadmin a partir de /etc/fwadmin/config.yaml e
+# do catalogo de aplicativos (fwadmin/apps.py). Edicoes manuais sao perdidas.
+{% if on %}
+{{ compose_body }}
+{%- else %}
+# {{ spec.name }} desligado no painel: a unidade fica parada e desabilitada.
+# Os dados em {{ spec.state_dir }} continuam onde estavam.
+{% endif %}

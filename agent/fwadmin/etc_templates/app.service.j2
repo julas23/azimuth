@@ -1,0 +1,25 @@
+{# gera /etc/systemd/system/azimuth-app-<app>.service #}
+# ATENCAO: arquivo gerado pelo fwadmin. Edicoes manuais sao perdidas.
+[Unit]
+Description=Azimuth — {{ spec.name }}
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+# Os dados moram aqui; quando o modulo de storage montar o volume, a unidade
+# espera por ele.
+RequiresMountsFor={{ spec.mounts | map(attribute='host') | join(' ') }}
+ConditionPathExists={{ compose_file }}
+
+[Service]
+{% for d in spec.media_dirs %}
+ExecStartPre=/usr/bin/install -d -m 0755 {{ d }}
+{% endfor %}
+ExecStartPre=/usr/bin/install -d -m 0750 -o {{ spec.uid }} -g {{ spec.uid }} {{ spec.state_dir }}
+ExecStart=/usr/bin/docker compose -f {{ compose_file }} up --remove-orphans --no-color
+ExecStop=/usr/bin/docker compose -f {{ compose_file }} down
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

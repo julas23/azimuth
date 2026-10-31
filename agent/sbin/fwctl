@@ -848,7 +848,8 @@ def cmd_servico(args: argparse.Namespace) -> int:
         result = run(
             "systemd-run", "--wait", "--pipe", "--quiet", "--collect",
             "--setenv=DEBIAN_FRONTEND=noninteractive",
-            "apt-get", "install", "-y", "-q", "--no-install-recommends", svc["package"],
+            "apt-get", "install", "-y", "-q", "--no-install-recommends",
+            svc["package"], *svc.get("extra", "").split(),
             timeout=900,
         )
     elif acao in SERVICE_ACTIONS:

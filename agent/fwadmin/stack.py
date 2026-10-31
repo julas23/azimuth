@@ -31,7 +31,8 @@ def stack(cfg: Config) -> list[dict[str, str]]:
         {"key": "ddns", "name": "DDNS", "role": "mantém o nome da caixa no IP público",
          "unit": "azimuth-ddns.service", "package": "inadyn", "href": "/vpn"},
         {"key": "docker", "name": "Containers", "role": "roda os aplicativos, fora do firewall",
-         "unit": "docker.service", "package": "docker.io", "href": "/services"},
+         "unit": "docker.service", "package": "docker.io", "extra": "docker-compose",
+         "href": "/services"},
     ]
 
 

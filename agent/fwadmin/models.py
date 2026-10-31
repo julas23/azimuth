@@ -1100,6 +1100,13 @@ class Containers(Base):
         return f"{first.network_address + 1}/{first.prefixlen}"
 
 
+class App(Base):
+    """Um aplicativo do catalogo (fwadmin/apps.py). O usuario so liga e desliga:
+    imagem, montagens e porta sao do catalogo."""
+
+    enabled: bool = False
+
+
 class System(Base):
     hostname: Annotated[str, Field(pattern=HOSTLABEL_RE.pattern)] = "fw"
     timezone: Annotated[str, Field(max_length=64)] = "America/Sao_Paulo"
@@ -1131,6 +1138,8 @@ class Config(Base):
     resolver: Resolver = Resolver()
     ddns: DDNS = DDNS()
     containers: Containers = Containers()
+    apps: dict[str, App] = {}
+    """Aplicativos ja configurados, ligados ou nao. Chave = nome no catalogo."""
 
     # -- indices de conveniencia -------------------------------------------
 
@@ -1157,6 +1166,25 @@ class Config(Base):
     def _consistent(self) -> Config:
         names = [i.name for i in self.interfaces]
         _reject_dups(names, "nome logico de interface duplicado")
+
+        from fwadmin.apps import CATALOG
+
+        for key, app in self.apps.items():
+            if key not in CATALOG:
+                raise ValueError(f"aplicativo fora do catalogo: {key!r}")
+            if not app.enabled:
+                continue
+            if not self.containers.enabled:
+                raise ValueError(f"{CATALOG[key].name} roda em container: ligue os containers antes")
+            if not self.lan.ipv4.address:
+                raise ValueError("aplicativo exige IP fixo na LAN: o nginx atende por ele")
+            fqdn = f"{key}.{self.dns.domain}"
+            for h in self.hosts:
+                if h.fqdn(self.dns.domain) == fqdn:
+                    raise ValueError(
+                        f"o nome {fqdn} ja e' do host {h.name} ({h.ip}): "
+                        f"renomeie o host antes de ligar o {CATALOG[key].name}"
+                    )
 
         if self.containers.enabled:
             pool = ipaddress.IPv4Network(self.containers.pool)

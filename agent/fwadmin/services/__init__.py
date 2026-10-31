@@ -16,7 +16,7 @@ from pathlib import Path
 from fwadmin import paths
 from fwadmin.command import Result, run
 from fwadmin.models import Config
-from fwadmin.services import ddns, dnsmasq, docker, failover, interfaces, nftables, pppoe, unbound, wireguard
+from fwadmin.services import apps, ddns, dnsmasq, docker, failover, interfaces, nftables, pppoe, unbound, wireguard
 from fwadmin.services.base import Prova, Reload, ServiceModule
 
 REGISTRY: tuple[ServiceModule, ...] = tuple(
@@ -31,6 +31,7 @@ REGISTRY: tuple[ServiceModule, ...] = tuple(
             failover.SERVICE,
             ddns.SERVICE,
             docker.SERVICE,
+            apps.SERVICE,
         ),
         key=lambda s: s.order,
     )

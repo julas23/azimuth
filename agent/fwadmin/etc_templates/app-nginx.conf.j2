@@ -1,0 +1,33 @@
+{# gera /etc/nginx/sites-enabled/azimuth-app-<app> #}
+# ATENCAO: arquivo gerado pelo fwadmin. Edicoes manuais sao perdidas.
+{% if on %}
+# {{ spec.name }}: o container escuta em 127.0.0.1:{{ spec.port }}; quem fala
+# com a LAN e a VPN e' este vhost, por nome. Da internet nao chega nada.
+server {
+    listen {{ listen_ip }}:80;
+    server_name {{ server_name }};
+{% for net in allow %}
+    allow {{ net }};
+{% endfor %}
+    deny all;
+
+    client_max_body_size {{ spec.upload_limit }};
+    access_log /var/log/nginx/azimuth-app-{{ spec.key }}.access.log;
+    error_log  /var/log/nginx/azimuth-app-{{ spec.key }}.error.log;
+
+    location / {
+        proxy_pass http://127.0.0.1:{{ spec.port }};
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Connection        $http_connection;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+    }
+}
+{% else %}
+# {{ spec.name }} desligado no painel.
+{% endif %}

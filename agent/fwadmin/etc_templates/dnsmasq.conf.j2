@@ -44,6 +44,13 @@ dhcp-host=00:00:00:00:00:00,{{ ip }}
 address=/{{ h.fqdn(dns.domain) }}/{{ h.ip }}
 {% endif %}
 {% endfor %}
+{% if app_records %}
+
+# --- aplicativos: o nome aponta para o firewall, onde o nginx atende --------
+{% for name, ip in app_records %}
+address=/{{ name }}/{{ ip }}
+{% endfor %}
+{% endif %}
 
 {% if resolver.enabled %}
 # --- quem responde o que nao e' da casa: o unbound do modelo ---------------

@@ -47,6 +47,7 @@ from pydantic import ValidationError
 from fwadmin import acks, agentes, db, dismissed, i18n, ia, importer, live, observe, ownership, paths, secretstore, status
 from fwadmin.models import (
     AdminChain,
+    App,
     BlockedDomain,
     Config,
     DDNSProvider,
@@ -64,6 +65,8 @@ from fwadmin.models import (
     Service,
     WGPeer,
 )
+
+from fwadmin.apps import CATALOG as APP_CATALOG  # noqa: E402
 
 DDNS_PROVIDERS = get_args(DDNSProvider)
 from fwadmin.render import base_input, dump, load
@@ -877,7 +880,38 @@ async def services_page(request: Request, user: User) -> Response:
         if READONLY:
             buttons = {k: v or "somente leitura" for k, v in buttons.items()}
         cards.append(svc | {"info": info, "buttons": buttons})
-    return page(request, "services.html", nav="services", cfg=cfg, cards=cards, now=time.time())
+    apps = [
+        {
+            "key": key,
+            "spec": spec,
+            "configured": key in cfg.apps,
+            "enabled": key in cfg.apps and cfg.apps[key].enabled,
+            "url": f"http://{key}.{cfg.dns.domain}",
+            "info": status.unit_info(f"azimuth-app-{key}.service", "docker.io"),
+        }
+        for key, spec in APP_CATALOG.items()
+    ]
+    return page(
+        request, "services.html", nav="services", cfg=cfg, cards=cards, apps=apps, now=time.time()
+    )
+
+
+@app.post("/apps/{key}/toggle")
+async def toggle_app(request: Request, user: User, key: str) -> Response:
+    """Liga ou desliga um aplicativo do catalogo. Ligar liga os containers junto:
+    aplicativo nenhum roda sem eles, e pedir dois cliques para isso seria so
+    burocracia."""
+
+    def mutate(cfg: Config) -> None:
+        if key not in APP_CATALOG:
+            raise ValueError(f"aplicativo desconhecido: {key!r}")
+        state = cfg.apps.get(key) or App()
+        state.enabled = not state.enabled
+        cfg.apps[key] = state
+        if state.enabled:
+            cfg.containers.enabled = True
+
+    return back("/services", edit(request, mutate, f"app {key}"))
 
 
 @app.get("/network", response_class=HTMLResponse)

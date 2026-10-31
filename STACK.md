@@ -139,7 +139,7 @@ nenhuma chamada de modelo sai da conta dele.
 | **Nextcloud** | Arquivos, calendário, contatos | AGPL-3.0 | ⬜ |
 | **Immich** | Fotos, com ML condicionado a nó de computação | AGPL-3.0 | ⬜ |
 | **Jellyfin** | Vídeo, com foco em Direct Play | GPL-2.0 | ⬜ |
-| **Navidrome** | Música | GPL-3.0 | ⬜ |
+| **Navidrome** | Música | GPL-3.0 | 🟡 |
 | **PostgreSQL** | Banco das aplicações, instância separada por app | PostgreSQL License | ⬜ |
 | **Valkey** | Cache e lock, instância separada por app | BSD-3-Clause | ⬜ |
 | **Docker Engine + Compose** | Substrato único das aplicações desta camada | Apache-2.0 | ⬜ |
@@ -164,6 +164,15 @@ mínimo; trocar por `PyJWT` ou `joserfc` é a saída melhor.
 **`passlib` está parado desde 2020.** O pin de `bcrypt==3.2.2` existe porque
 `passlib` 1.7.4 quebra com `bcrypt` 4.x. É dívida silenciosa: hash de senha preso a duas
 versões antigas por incompatibilidade, não por escolha.
+
+**Aplicativo é catálogo, não formulário.** Imagem por digest, montagens, porta e usuário
+de cada aplicativo moram em `agent/fwadmin/apps.py`; o usuário só liga e desliga. Para
+cada um o motor gera o `compose.yaml`, a unidade `azimuth-app-<app>`, o vhost do nginx e o
+nome `<app>.<domínio>` no dnsmasq, valida com `docker compose config` e `nginx -t`, e
+prova pedindo o caminho de saúde direto no container e pelo nginx, com o nome. O
+Navidrome é o primeiro (🟡: integrado e testado com o container real, ainda não aplicado
+numa caixa). Os caminhos são os do STORAGE.md: sem o módulo de storage ficam no disco do
+sistema, e quando ele chegar monta o volume nos mesmos lugares.
 
 **O Docker não escreve no firewall.** O `forward` do motor tem policy drop, e entre
 cadeias-base do mesmo gancho um drop é final: o ACCEPT que o Docker põe na chain dele não

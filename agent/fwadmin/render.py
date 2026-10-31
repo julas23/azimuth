@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from fwadmin import services
+from fwadmin.services.apps import records as app_records
 from fwadmin.models import Config, IPv4Mode, Proto, Rule, Zone
 
 TEMPLATE_DIR = Path(__file__).parent / "etc_templates"
@@ -194,6 +195,7 @@ def render_all(cfg: Config) -> dict[str, str]:
         "resolver": cfg.resolver,
         "rule_to_nft": lambda r: rule_to_nft(cfg, r),
         "base_input": base_input(cfg),
+        "app_records": app_records(cfg),
         "device_of": lambda name: device_of(cfg, name),
         "IPv4Mode": IPv4Mode,
     }

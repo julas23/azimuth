@@ -59,4 +59,32 @@
 {% endfor %}
 </div>
 
+<section class="card" aria-labelledby="h-apps">
+  <div class="card-h"><h2 class="h2" id="h-apps">Aplicativos</h2><span class="chip mute">{{ apps|length }}</span></div>
+  <div class="row muted"><span>Cada aplicativo roda em container, escuta só no próprio firewall e atende a LAN e a VPN por nome, pelo nginx. Da internet não chega nada. Ligar ou desligar vale no próximo <b>Aplicar</b>, com prova de função e rollback como o resto.</span></div>
+  <div class="scroll">
+    <table class="tbl">
+      <thead><tr><th>Aplicativo</th><th>Endereço</th><th>Situação</th><th><span class="vh">Ações</span></th></tr></thead>
+      <tbody>
+      {% for a in apps %}
+        {% set i = a.info %}
+        <tr class="{{ '' if a.enabled else 'off' }}">
+          <td><b>{{ a.spec.name }}</b><div class="muted">{{ a.spec.role }}</div></td>
+          <td class="mono">{% if a.enabled and i.running %}<a href="{{ a.url }}">{{ a.url }}</a>{% else %}{{ a.url }}{% endif %}</td>
+          <td>
+            {% if not a.enabled %}<span class="chip mute">desligado</span>
+            {% elif i.active == 'failed' %}<span class="chip bad">falhou</span>
+            {% elif i.busy %}<span class="chip warn">subindo</span>
+            {% elif i.running %}<span class="chip ok">rodando</span>
+            {% else %}<span class="chip warn">ligado, aguardando aplicar</span>{% endif %}
+          </td>
+          <td><div class="ra"><form method="post" action="/apps/{{ a.key }}/toggle"><button class="btn sm{{ ' danger' if a.enabled }}" type="submit" {% if readonly %}disabled title="Somente leitura"{% endif %}>{% if a.enabled %}{{ icon('pause', 14) }}Desligar{% else %}{{ icon('play', 14) }}Ligar{% endif %}</button></form></div></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="row muted"><span>A música do Navidrome fica em <span class="mono">/srv/aionas/Music</span>; o estado de cada aplicativo, em <span class="mono">/var/lib/aionas</span>. Desligar não apaga nada disso.</span></div>
+</section>
+
 {% endblock %}
