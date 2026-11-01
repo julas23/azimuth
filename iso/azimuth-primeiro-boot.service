@@ -1,0 +1,14 @@
+[Unit]
+Description=Azimuth: instala o painel no primeiro boot
+Wants=network-online.target
+After=network-online.target
+# Painel ja instalado: nada a fazer, mesmo que a unidade tenha ficado ligada.
+ConditionPathExists=!/opt/fwadmin/VERSION
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/azimuth-primeiro-boot
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,34 @@
+# Pacotes que a ISO instala sem internet. Um por linha ou separados por espaco;
+# linhas com # sao ignoradas. O build baixa o fechamento de dependencias e poe
+# tudo num repositorio dentro da ISO. Os containers dos aplicativos nao entram:
+# baixam pelo painel, quando o aplicativo e' ligado.
+
+# administracao
+openssh-server sudo curl wget ca-certificates less vim-tiny nano htop tmux git rsync lsof strace
+bash-completion locales console-setup keyboard-configuration systemd-timesyncd man-db
+# O build instala sem recomendacoes, entao o que o systemd so recomenda entra
+# aqui: sem dbus, o systemctl de quem nao e' root nao fala com o systemd (e' por
+# ele que o painel le o estado dos servicos); sem libpam-systemd, sessao SSH
+# nao vira sessao do logind.
+dbus libpam-systemd logrotate
+pciutils usbutils dmidecode lm-sensors ethtool
+
+# camada 1: rede
+nftables dnsmasq unbound dns-root-data wireguard-tools fail2ban ppp ifupdown iproute2
+iputils-ping traceroute bind9-dnsutils netcat-openbsd inadyn qrencode nginx ssl-cert
+
+# o agente e o painel
+python3 python3-fastapi python3-uvicorn python3-jinja2 python3-pydantic python3-yaml
+python3-wsproto sqlite3 libjs-htmx
+
+# containers (as imagens nao: so o motor)
+# no Debian 13 o cliente 'docker' saiu do docker.io e virou recomendacao dele
+docker.io docker-cli docker-compose
+
+# storage
+lvm2 samba nfs-kernel-server smartmontools gdisk parted e2fsprogs
+
+# hardware: microcodigo e firmware de placas de rede comuns
+amd64-microcode intel-microcode firmware-misc-nonfree firmware-realtek firmware-linux-free
+# em VM (Proxmox): o instalador tenta instala-lo sozinho quando detecta KVM
+qemu-guest-agent
