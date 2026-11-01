@@ -1,6 +1,7 @@
 # Módulo de Storage — desenho
 
-Status: **desenho aprovado** (decisões fechadas em 28/10/2026). Falta a verificação em VM; nada disto tem código ainda.
+Status: **desenho aprovado** (decisões fechadas em 28/10/2026; revisto em 31/10/2026: o LVM é só
+dos dados, o sistema fica fora). Falta a verificação em VM; nada disto tem código ainda.
 
 O módulo transforma os discos de dados da caixa num volume único, opcionalmente espelhado,
 com quatro diretórios fixos, servidos por SMB e NFS na LAN e na VPN, e montados pelos apps
@@ -26,6 +27,8 @@ com quatro diretórios fixos, servidos por SMB e NFS na LAN e na VPN, e montados
    volta.
 6. **Disco se identifica por `/dev/disk/by-id`** (modelo + número de série), nunca por `/dev/sdX`,
    que muda de um boot para outro.
+7. **LVM só nos dados.** O volume nasce num disco adicional ou numa partição adicional; o disco
+   e as partições do sistema nunca entram no LVM (decidido em 31/10/2026).
 
 ---
 
@@ -33,6 +36,8 @@ com quatro diretórios fixos, servidos por SMB e NFS na LAN e na VPN, e montados
 
 ```
 disco(s) de dados ── GPT, 1 partição "Linux LVM" (alinhada em 1 MiB, disco inteiro)
+                     └── PV
+  ou: partição adicional livre (ex.: o resto do disco do sistema numa caixa de um disco só)
                      └── PV
 VG  aionas
  ├── LV  dados   ext4   /srv/aionas        Pictures/ Videos/ Music/ Documents/
@@ -236,21 +241,12 @@ Travas que não dependem do usuário acertar:
 
 ---
 
-## Sistema no espelho
+## O sistema fica fora do LVM
 
-Sem disco dedicado ao sistema, e com dois discos ou mais, **o próprio sistema vai para o
-espelho**. Num roteador, disco de boot que morre deixa a casa sem internet.
-
-```
-cada disco do espelho ── GPT
-                         ├── ESP (512 MiB, FAT32)    uma em cada disco, mantidas iguais
-                         └── Linux LVM               PV do VG aionas
-VG aionas  +  LV sistema (raid1, ext4, /)  antes de 'apps' e 'dados'
-```
-
-- O GRUB vai instalado nos dois discos, e cada ESP vira uma entrada de boot no firmware.
-  Qualquer um dos dois discos dá boot sozinho.
-- Um hook do `kernel`/`grub` copia a ESP principal para a outra a cada atualização.
+Decidido em 31/10/2026: o disco do sistema não entra no volume, nem em espelho. O LVM existe só
+para os dados, num disco adicional ou numa partição adicional. O "sistema no espelho" do desenho
+de 28/10 sai do escopo e, com ele, as verificações de GRUB e de boot com disco arrancado. Se um
+dia a redundância do sistema voltar à pauta, é outra discussão.
 
 ---
 
@@ -269,11 +265,10 @@ Efeito no storage:
 
 | Discos detectados | Layout |
 |---|---|
-| 1 | sistema e dados no mesmo disco, linear, aviso de "sem redundância" |
+| 1 | dados numa partição adicional do mesmo disco, linear, aviso de "sem redundância" |
 | 1 de sistema + 1 de dados | linear no disco de dados; o painel sugere o segundo disco |
 | 1 de sistema + 2 de dados | espelho matriz + cópia nos dados |
-| 2, sem disco de sistema separado | sistema e dados no espelho |
-| 3 ou mais | espelho em dois, os demais como reserva |
+| 1 de sistema + 3 ou mais | espelho em dois, os demais como reserva |
 
 ---
 
@@ -285,7 +280,5 @@ com discos virtuais, antes da primeira linha do módulo:
 1. `--raidintegrity y` e `--writemostly` funcionam juntos no mesmo LV (Debian 13).
 2. Com integridade ligada, `lvconvert --repair` e a reserva automática (`allocate`) refazem a
    perna perdida. Integridade restringe operações de RAID, e o desenho depende dessas duas.
-3. O GRUB lê `/boot` dentro de um LV `raid1` com integridade. Se não ler, `/boot` sai para uma
-   partição própria em cada disco, sincronizada como a ESP.
-4. A caixa dá boot com um dos dois discos arrancado, nos dois sentidos (matriz morta, cópia
-   morta).
+3. O volume de dados volta montado no boot com um dos dois discos arrancado, nos dois sentidos
+   (matriz morta, cópia morta), sem segurar o boot do sistema (`nofail`, modo degradado).
