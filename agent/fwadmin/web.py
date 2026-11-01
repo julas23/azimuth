@@ -771,10 +771,37 @@ def done(path: str, message: str) -> RedirectResponse:
 # ---------------------------------------------------------------------------
 
 
+LOGIN_TIMEOUT = 30
+
+
+def pam_login(username: str, password: str, address: str) -> bool:
+    """Usuario e senha do sistema, conferidos pelo `fwctl login` via sudo: so
+    root consegue perguntar ao PAM pela senha de outro usuario. O pedido vai
+    pelo stdin, nunca como argumento. Root e quem esta fora do grupo sudo sao
+    recusados la.
+
+    No sandbox dos testes nao ha PAM: FWADMIN_TEST_LOGIN="usuario:senha" faz o
+    papel dele. Fora do sandbox a variavel e' ignorada."""
+    if paths.sandboxed():
+        expected = os.environ.get("FWADMIN_TEST_LOGIN", "")
+        return bool(expected) and expected == f"{username}:{password}"
+    pedido = json.dumps({"usuario": username, "senha": password, "origem": address})
+    try:
+        proc = subprocess.run(
+            ["sudo", "-n", FWCTL, "login"],
+            input=pedido,
+            capture_output=True,
+            text=True,
+            timeout=LOGIN_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_form(request: Request) -> Response:
-    if db.user_count() == 0:
-        return page(request, "setup.html")
     return page(request, "login.html")
 
 
@@ -783,14 +810,7 @@ async def login(request: Request, fields: Fields) -> Response:
     username = fields.text("username")
     password = fields.get("password", "")
 
-    if db.user_count() == 0:
-        if len(password) < 10:
-            return page(request, "setup.html", error="a senha precisa de ao menos 10 caracteres")
-        db.create_user(username, password)
-        db.log("setup", username=username, address=client_ip(request))
-
-    user_id = db.verify(username, password)
-    if user_id is None:
+    if not pam_login(username, password, client_ip(request)):
         db.log("login-negado", username=username, address=client_ip(request))
         # A linha que o jail azimuth-panel le no journal. So o IP: o usuario e'
         # texto digitado por quem tenta, e numa linha que o fail2ban casa por
@@ -799,6 +819,7 @@ async def login(request: Request, fields: Fields) -> Response:
         time.sleep(1)  # desacelera tentativa em massa; o fail2ban cuida do resto
         return page(request, "login.html", error="usuário ou senha inválidos")
 
+    user_id = db.ensure_user(username)
     token = db.open_session(user_id, client_ip(request))
     db.log("login", username=username, address=client_ip(request))
     response = RedirectResponse("/", status_code=303)

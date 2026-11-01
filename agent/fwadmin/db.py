@@ -21,7 +21,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id         INTEGER PRIMARY KEY,
     username   TEXT NOT NULL UNIQUE,
-    password   TEXT NOT NULL,          -- hash argon2id
+    password   TEXT NOT NULL,          -- 'pam': a senha e' a do sistema
     created_at REAL NOT NULL,
     last_login REAL
 );
@@ -74,57 +74,19 @@ def init() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _hasher():
-    from argon2 import PasswordHasher
-
-    return PasswordHasher()
-
-
-def create_user(username: str, password: str) -> None:
+def ensure_user(username: str) -> int:
+    """O id do usuario, criando a linha no primeiro login. A senha nao mora
+    aqui: quem confere e' o PAM (fwctl login). A tabela so ancora sessoes e o
+    ultimo acesso."""
+    now = time.time()
     with connect() as conn:
         conn.execute(
-            "INSERT INTO users (username, password, created_at) VALUES (?, ?, ?)",
-            (username, _hasher().hash(password), time.time()),
+            "INSERT INTO users (username, password, created_at) VALUES (?, 'pam', ?)"
+            " ON CONFLICT(username) DO NOTHING",
+            (username, now),
         )
-
-
-def set_password(username: str, password: str) -> bool:
-    with connect() as conn:
-        cur = conn.execute(
-            "UPDATE users SET password = ? WHERE username = ?",
-            (_hasher().hash(password), username),
-        )
-        return cur.rowcount > 0
-
-
-def user_count() -> int:
-    with connect() as conn:
-        return conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
-
-
-def verify(username: str, password: str) -> int | None:
-    """Devolve o id do usuario, ou None. Custo constante contra enumeracao."""
-    from argon2.exceptions import VerificationError, VerifyMismatchError
-
-    with connect() as conn:
-        row = conn.execute(
-            "SELECT id, password FROM users WHERE username = ?", (username,)
-        ).fetchone()
-
-    hasher = _hasher()
-    if row is None:
-        # gasta o mesmo tempo de um hash real para nao vazar quem existe
-        hasher.hash("usuario-inexistente")
-        return None
-
-    try:
-        hasher.verify(row["password"], password)
-    except (VerifyMismatchError, VerificationError):
-        return None
-
-    with connect() as conn:
-        conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (time.time(), row["id"]))
-    return row["id"]
+        conn.execute("UPDATE users SET last_login = ? WHERE username = ?", (now, username))
+        return conn.execute("SELECT id FROM users WHERE username = ?", (username,)).fetchone()["id"]
 
 
 # ---------------------------------------------------------------------------

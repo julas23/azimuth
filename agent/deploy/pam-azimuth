@@ -1,0 +1,6 @@
+# /etc/pam.d/azimuth — login do painel (fwctl login)
+#
+# A mesma senha do console e do SSH: o painel nao guarda senha nenhuma. Root
+# e quem esta fora do grupo sudo sao recusados antes, pelo fwctl.
+@include common-auth
+@include common-account

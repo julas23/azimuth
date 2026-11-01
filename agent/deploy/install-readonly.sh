@@ -13,7 +13,8 @@
 #   /opt/fwadmin/                          codigo
 #   /usr/local/sbin/fwctl
 #   /var/lib/fwadmin/                      banco de usuarios e certificado
-#   /etc/sudoers.d/fwadmin                 so o observe
+#   /etc/sudoers.d/fwadmin                 so o observe e o login
+#   /etc/pam.d/azimuth                     login do painel pela senha do sistema
 #   /etc/systemd/system/fwadmin.service    e o drop-in readonly.conf
 #   o usuario de sistema netadm
 #
@@ -53,6 +54,13 @@ install_f2b() {
         done
         echo "   fail2ban: config nova invalida — mantida a anterior"
     fi
+}
+
+# O login do painel e' o usuario do sistema, conferido pelo PAM (fwctl login).
+install_pam() {
+    cmp -s "$SRC/deploy/pam-azimuth" /etc/pam.d/azimuth && return 0
+    install -m 0644 "$SRC/deploy/pam-azimuth" /etc/pam.d/azimuth
+    echo "   PAM: /etc/pam.d/azimuth (login do painel pela senha do sistema)"
 }
 
 # Os agentes no navegador (AGENTES.md): o script que abre a sessao, a unidade
@@ -100,6 +108,7 @@ if [ -e /etc/fwadmin/config.yaml ] && grep -q '^Environment=FWADMIN_READONLY=0' 
             echo "   sudoers novo invalido — mantido o anterior"
         fi
     fi
+    install_pam
     install_f2b
     install_agentes
     VERSION="$(git -C "$SRC" describe --always --dirty 2>/dev/null || cat "$SRC/VERSION" 2>/dev/null || echo dev)"
@@ -121,7 +130,7 @@ fi
 if [ "${1:-}" = "--remover" ]; then
     echo "== removendo o painel somente leitura =="
     systemctl disable --now fwadmin.service 2>/dev/null || true
-    rm -f "$DROPIN" "$UNIT" /etc/sudoers.d/fwadmin /usr/local/sbin/fwctl
+    rm -f "$DROPIN" "$UNIT" /etc/sudoers.d/fwadmin /usr/local/sbin/fwctl /etc/pam.d/azimuth
     rmdir /etc/systemd/system/fwadmin.service.d 2>/dev/null || true
     systemctl daemon-reload
     rm -rf /opt/fwadmin /var/lib/fwadmin /run/fwadmin
@@ -133,7 +142,7 @@ fi
 echo "== 1. dependencias =="
 missing=()
 for mod in fastapi:python3-fastapi uvicorn:python3-uvicorn jinja2:python3-jinja2 \
-           pydantic:python3-pydantic yaml:python3-yaml argon2:python3-argon2; do
+           pydantic:python3-pydantic yaml:python3-yaml; do
     python3 -c "import ${mod%%:*}" 2>/dev/null || missing+=("${mod#*:}")
 done
 command -v sudo    >/dev/null || missing+=(sudo)
@@ -206,7 +215,8 @@ fi
 echo "== 6. sudoers =="
 install -m 0440 "$SRC/deploy/sudoers-fwadmin-readonly" /etc/sudoers.d/fwadmin
 visudo -c -q || { rm -f /etc/sudoers.d/fwadmin; echo "   sudoers invalido — removido"; exit 1; }
-echo "   so o fwctl observe"
+echo "   so o fwctl observe e o login"
+install_pam
 
 echo "== 7. systemd =="
 install -m 0644 "$SRC/deploy/fwadmin.service" "$UNIT"
@@ -225,7 +235,7 @@ echo "== 8. primeira fotografia =="
 /usr/local/sbin/fwctl observe || echo "   o observe falhou; o painel vai mostrar o motivo na tela"
 
 echo
-echo "pronto: https://$LAN_IP:$PORT — o primeiro acesso cria o usuario administrador."
+echo "pronto: https://$LAN_IP:$PORT — entra quem esta no grupo sudo, com a senha do sistema (root nao)."
 echo "nenhum arquivo de configuracao do firewall foi alterado."
 echo
 systemctl --no-pager --lines=5 status fwadmin.service || true

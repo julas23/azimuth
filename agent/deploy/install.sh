@@ -68,6 +68,7 @@ chown -R netadm:netadm /etc/fwadmin/.git
 echo "== 4. sudoers =="
 install -m 0440 "$SRC/deploy/sudoers-fwadmin" /etc/sudoers.d/fwadmin
 visudo -c -q || { rm -f /etc/sudoers.d/fwadmin; echo "sudoers invalido — removido"; exit 1; }
+install -m 0644 "$SRC/deploy/pam-azimuth" /etc/pam.d/azimuth
 echo "   validado com visudo"
 install -m 0755 "$SRC/sbin/azimuth-agente-sessao" /usr/local/sbin/azimuth-agente-sessao
 install -m 0755 "$SRC/sbin/azimuth" /usr/local/bin/azimuth
@@ -147,7 +148,7 @@ systemctl enable --now fwadmin-failover.timer
 systemctl restart nginx
 
 echo
-echo "pronto. abra https://fw.home.lan e crie o usuario administrador."
+echo "pronto. abra https://fw.home.lan e entre com um usuario do grupo sudo (senha do sistema)."
 echo "o /etc do firewall NAO foi alterado: nenhuma config foi aplicada ainda."
 echo
 echo "adocao de uma caixa que ja estava rodando, na ordem:"

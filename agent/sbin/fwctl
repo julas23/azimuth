@@ -15,6 +15,7 @@ da UI vira caminho, argumento de shell ou nome de arquivo.
     fwctl seal       sela o /etc atual como referencia de posse
     fwctl observe    fotografa o /etc vivo, sem segredos, para o painel ler
     fwctl ack        lista as mudancas da adocao e marca as intencionais
+    fwctl login      confere usuario e senha do painel pelo PAM (pedido no stdin)
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ import ipaddress
 import json
 import os
 import pwd
+import re
 import shutil
 import sys
 import time
@@ -578,6 +580,60 @@ def cmd_observe(args: argparse.Namespace) -> int:
     return 0
 
 
+ADMIN_GROUP = "sudo"
+"""Quem entra no painel: quem ja administra a maquina. O instalador poe o
+usuario criado neste grupo."""
+
+USERNAME = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+
+
+def login_refusal(username: str) -> str:
+    """Por que este usuario nao entra no painel, ou vazio. Antes da senha: root
+    e conta de servico nem chegam ao PAM."""
+    import grp
+
+    if not USERNAME.match(username):
+        return "nome de usuario invalido"
+    try:
+        entry = pwd.getpwnam(username)
+    except KeyError:
+        return "usuario inexistente"
+    if entry.pw_uid == 0:
+        return "root nao entra no painel"
+    try:
+        admins = grp.getgrnam(ADMIN_GROUP)
+    except KeyError:
+        return f"grupo {ADMIN_GROUP} inexistente"
+    if username not in admins.gr_mem and entry.pw_gid != admins.gr_gid:
+        return f"fora do grupo {ADMIN_GROUP}"
+    return ""
+
+
+def cmd_login(args: argparse.Namespace) -> int:
+    """Confere a senha do painel. O pedido vem pelo stdin, em JSON
+    ({"usuario", "senha", "origem"}), e nunca como argumento: o sudoers fica
+    sem curinga e a senha nao aparece no ps. Saida 0 entra, 1 nao; o motivo
+    so vai para o journal, a tela diz sempre a mesma coisa."""
+    require_root()
+    from fwadmin import pam
+
+    try:
+        pedido = json.loads(sys.stdin.read(8192))
+        username, password = str(pedido["usuario"]), str(pedido["senha"])
+        origem = str(pedido.get("origem", ""))[:64]
+    except (ValueError, KeyError, TypeError):
+        return fail("pedido de login malformado")
+    motivo = login_refusal(username)
+    if not motivo and not password:
+        motivo = "senha vazia"
+    if not motivo and not pam.authenticate(username, password, origem):
+        motivo = "senha recusada pelo PAM"
+    if motivo:
+        print(f"fwctl login: recusado ({motivo})", file=sys.stderr)
+        return 1
+    return 0
+
+
 def f2b_refusal(ip, cfg) -> str:
     """Por que este IP nao pode ser banido, ou vazio.
 
@@ -1089,6 +1145,9 @@ def main() -> int:
     p_confirm = sub.add_parser("confirm", help="confirma o apply e versiona")
     p_confirm.set_defaults(fn=cmd_confirm)
 
+    sub.add_parser(
+        "login", help="confere usuario e senha do painel pelo PAM (pedido no stdin)"
+    ).set_defaults(fn=cmd_login)
     sub.add_parser(
         "f2b", help="bane ou desbane um IP, conforme o pedido gravado pelo painel"
     ).set_defaults(fn=cmd_f2b)

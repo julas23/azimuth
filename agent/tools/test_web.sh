@@ -24,6 +24,8 @@ export FWADMIN_SYSROOT="$SANDBOX"
 export FWADMIN_CODE="$REPO"
 export PYTHONPATH="$REPO"
 export FWADMIN_READONLY=0
+# No sandbox nao ha PAM: este par faz o papel da senha do sistema.
+export FWADMIN_TEST_LOGIN="admin:senha-bem-longa-123"
 
 pass=0; fail=0
 check() {
@@ -51,10 +53,12 @@ echo
 echo "== autenticacao =="
 check "sem sessao redireciona"  "$(code "http://127.0.0.1:$PORT/")" "303"
 code "http://127.0.0.1:$PORT/login" >/dev/null
-check "tela de setup aparece"   "$(grep -qi 'primeiro acesso' "$SANDBOX/body" && echo sim || echo nao)" "sim"
-code -X POST -d 'username=admin&password=curta' "http://127.0.0.1:$PORT/login" >/dev/null
-check "senha curta e' recusada" "$(grep -qi '10 caracteres' "$SANDBOX/body" && echo sim || echo nao)" "sim"
-check "cria usuario e entra"    "$(code -X POST -d 'username=admin&password=senha-bem-longa-123' "http://127.0.0.1:$PORT/login")" "303"
+check "tela de login, sem setup" "$(grep -qi 'criados na instalação' "$SANDBOX/body" && echo sim || echo nao)" "sim"
+code -X POST -d 'username=admin&password=errada' "http://127.0.0.1:$PORT/login" >/dev/null
+check "senha errada e' recusada" "$(grep -qi 'inválidos' "$SANDBOX/body" && echo sim || echo nao)" "sim"
+code -X POST -d 'username=root&password=senha-bem-longa-123' "http://127.0.0.1:$PORT/login" >/dev/null
+check "outro usuario e' recusado" "$(grep -qi 'inválidos' "$SANDBOX/body" && echo sim || echo nao)" "sim"
+check "usuario do sistema entra" "$(code -X POST -d 'username=admin&password=senha-bem-longa-123' "http://127.0.0.1:$PORT/login")" "303"
 check "agora o painel abre"     "$(code "http://127.0.0.1:$PORT/")" "200"
 echo
 

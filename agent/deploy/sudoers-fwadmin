@@ -20,12 +20,17 @@
 # nota do commit, o pedido vai por arquivo (/var/lib/fwadmin/f2b-pedido.json)
 # e o fwctl o revalida como root. O 'fwctl agente' segue o mesmo trato
 # (/var/lib/fwadmin/agente-pedido.json).
+#
+# O 'fwctl login' confere a senha do painel pelo PAM: so root pode perguntar
+# pela senha de outro usuario. Usuario e senha vao pelo stdin, nunca como
+# argumento. Fica no RO porque o painel somente leitura tambem precisa entrar.
 
 Cmnd_Alias FWADMIN_RO = /usr/local/sbin/fwctl check, \
                         /usr/local/sbin/fwctl status, \
                         /usr/local/sbin/fwctl diff, \
                         /usr/local/sbin/fwctl inventory, \
-                        /usr/local/sbin/fwctl observe
+                        /usr/local/sbin/fwctl observe, \
+                        /usr/local/sbin/fwctl login
 
 Cmnd_Alias FWADMIN_RW = /usr/local/sbin/fwctl apply, \
                         /usr/local/sbin/fwctl apply --yes, \

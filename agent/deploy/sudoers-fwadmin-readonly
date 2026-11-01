@@ -2,9 +2,11 @@
 #
 # O painel so precisa fotografar o sistema. Nenhum comando que escreve esta
 # liberado: nem apply, nem seal, nem confirm. Quando as acoes forem ligadas,
-# este arquivo da lugar ao sudoers-fwadmin completo.
+# este arquivo da lugar ao sudoers-fwadmin completo. O 'login' confere a senha
+# do painel pelo PAM (usuario e senha pelo stdin).
 
-Cmnd_Alias FWADMIN_OBSERVE = /usr/local/sbin/fwctl observe
+Cmnd_Alias FWADMIN_OBSERVE = /usr/local/sbin/fwctl observe, \
+                            /usr/local/sbin/fwctl login
 
 netadm ALL=(root) NOPASSWD: FWADMIN_OBSERVE
 
