@@ -5,9 +5,11 @@ imagens dos containers dos aplicativos ficam para depois: baixam pelo painel, qu
 é ligado.
 
 No primeiro boot o painel se instala sozinho e atende em `https://<endereço>:8443`, com o usuário
-e a senha criados na instalação. **Ainda não abre nenhuma tela além do login:** o painel é feito
-sobre um `config.yaml` com LAN, WAN e DHCP, e uma caixa nova não tem nenhum dos três. A
-configuração da rede pelo painel, que gera esse primeiro config, é a fase 2 do PLAN.
+e a senha criados na instalação. Numa caixa nova ele abre direto em **Configurar a rede**: lista as
+placas, e o dono diz qual é a WAN (DHCP, PPPoE ou IP fixo) e qual é a LAN (endereço da caixa,
+faixa de DHCP, domínio). Salvar gera o primeiro `config.yaml` e abre o resto do painel; a rede só
+muda no primeiro apply, em Sistema, com o rollback automático de sempre. Depois disso, cada
+componente se liga pelo painel.
 
 ## Gerar
 
@@ -31,7 +33,9 @@ que se usa para instalar numa VM sem ninguém olhando.
   (`/etc/sudoers.d/azimuth-admin`). Idioma pt_BR, teclado ABNT2, fuso de São Paulo, hostname
   `azimuth`.
 - **Painel no primeiro boot:** a `azimuth-primeiro-boot.service` roda o
-  `deploy/install-readonly.sh` do agente uma vez, na placa da rota padrão, e se desliga. O login é o do sistema, conferido pelo PAM
+  `deploy/install-readonly.sh` do agente uma vez, na placa da rota padrão, marca a caixa como nova
+  (`/var/lib/fwadmin/caixa-nova`) e se desliga. Salvar "Configurar a rede" chama o
+  `fwctl inicial`, que roda o `deploy/adopt.sh --config` com o config do formulário. O login é o do sistema, conferido pelo PAM
   (`/etc/pam.d/azimuth`): entra quem está no grupo `sudo`, e root nunca. O painel roda sem
   privilégio (usuário `netadm`) e faz tudo pelo `sudo fwctl`, numa lista fechada de comandos.
 - **Disco:** até 32 GiB de sistema e 4 GiB de swap. O resto fica livre para uma partição de dados,

@@ -17,8 +17,13 @@
 # primeiro apply e' uma decisao a parte, e trava enquanto houver mudanca que
 # ninguem marcou como intencional. Nao toca em nginx, crontab nem failover.
 #
-#   ./deploy/adopt.sh              adota
-#   ./deploy/adopt.sh --desfazer   volta ao painel somente leitura
+#   ./deploy/adopt.sh                  adota
+#   ./deploy/adopt.sh --config <arq>   adota com um config pronto, em vez de importar
+#   ./deploy/adopt.sh --desfazer       volta ao painel somente leitura
+#
+# O --config e' o da caixa nova (fwctl inicial): uma maquina recem-instalada
+# nao tem LAN, WAN nem DHCP para o importador ler, e o config sai do que o dono
+# respondeu na configuracao da rede do painel.
 set -euo pipefail
 
 [ "$(id -u)" -eq 0 ] || { echo "rode como root"; exit 1; }
@@ -45,19 +50,36 @@ if [ "${1:-}" = "--desfazer" ]; then
     exit 0
 fi
 
+PRONTO=""
+if [ "${1:-}" = "--config" ]; then
+    PRONTO="${2:?--config precisa do arquivo}"
+    [ -r "$PRONTO" ] || { echo "nao consigo ler $PRONTO"; exit 1; }
+fi
+
 if [ -e "$CONFIG" ]; then
     echo "esta maquina ja foi adotada ($CONFIG existe)"
     exit 1
 fi
 
 echo "== 1. painel enxuto =="
-"$SRC/deploy/install-readonly.sh" | grep -E "https://|versao|faltam|apt install" || true
+# Rodando da copia instalada (/opt/fwadmin, pelo fwctl inicial), o painel ja
+# esta no lugar: reinstalar de si mesmo apagaria a origem antes de copiar.
+if [ "$SRC" != /opt/fwadmin ]; then
+    "$SRC/deploy/install-readonly.sh" | grep -E "https://|versao|faltam|apt install" || true
+fi
 systemctl is-active --quiet fwadmin.service || { echo "o painel nao subiu; pare aqui"; exit 1; }
 
-echo "== 2. config a partir da maquina =="
 install -d -m 0755 -o netadm -g netadm /etc/fwadmin
-/usr/local/sbin/fwctl observe >/dev/null
 GERADO="$(mktemp /etc/fwadmin/.config.XXXXXX)"
+if [ -n "$PRONTO" ]; then
+echo "== 2. config da configuracao inicial =="
+cp "$PRONTO" "$GERADO"
+MENSAGEM="caixa nova: config da configuracao inicial da rede, pelo painel"
+echo "   $(grep -c '^- name:' "$GERADO" 2>/dev/null || echo 2) interfaces, do formulario"
+else
+echo "== 2. config a partir da maquina =="
+MENSAGEM="adocao: config importada da maquina em producao"
+/usr/local/sbin/fwctl observe >/dev/null
 PYTHONPATH=/opt/fwadmin python3 - "$GERADO" <<'PY'
 import sys
 from pathlib import Path
@@ -72,6 +94,7 @@ Path(sys.argv[1]).write_text(dump(
 print(f"   {len(cfg.interfaces)} interfaces · {len(cfg.dhcp.reservations)} reservas · "
       f"{len(cfg.firewall.forward_rules)} regras de encaminhamento · {len(changes)} mudancas na adocao")
 PY
+fi
 chown netadm:netadm "$GERADO"
 chmod 0644 "$GERADO"
 mv "$GERADO" "$CONFIG"
@@ -80,7 +103,7 @@ GIT="git -c safe.directory=/etc/fwadmin -C /etc/fwadmin"
 [ -d /etc/fwadmin/.git ] || $GIT init -q
 printf 'secrets.yaml\nsecrets.pending.yaml\nconfig.pending.yaml\napply-note\n' > /etc/fwadmin/.gitignore
 $GIT add config.yaml .gitignore
-$GIT -c user.name=fwadmin -c user.email=fwadmin@localhost commit -q -m "adocao: config importada da maquina em producao"
+$GIT -c user.name=fwadmin -c user.email=fwadmin@localhost commit -q -m "$MENSAGEM"
 chown -R netadm:netadm /etc/fwadmin
 echo "   $CONFIG e o primeiro commit"
 
@@ -123,6 +146,17 @@ echo "== 5. painel com acoes =="
 # conseguir gravar em /etc.
 sed -i -e 's/^Environment=FWADMIN_READONLY=.*/Environment=FWADMIN_READONLY=0/' \
        -e 's|^ReadWritePaths=/var/lib/fwadmin$|ReadWritePaths=/var/lib/fwadmin /etc /usr/local/bin|' "$DROPIN"
+# Caixa nova: o endereco da LAN de agora (DHCP, da instalacao) some no
+# primeiro apply, e o novo ainda nao existe. O painel passa a escutar em
+# todas as placas e aceita as duas redes; a porta continua fechada do lado da
+# WAN pelo nftables.
+if [ -n "$PRONTO" ]; then
+    NOVA="$(sed -n 's/^ *admin_cidr: *//p' "$CONFIG" | head -1)"
+    ATUAL="$(sed -n 's/^Environment=FWADMIN_ALLOW=//p' "$DROPIN")"
+    sed -i -e "s|--host [0-9.]* |--host 0.0.0.0 |" \
+           -e "s|^Environment=FWADMIN_ALLOW=.*|Environment=FWADMIN_ALLOW=${ATUAL:+$ATUAL,}$NOVA|" "$DROPIN"
+    echo "   painel em todas as placas, aceitando ${ATUAL:+$ATUAL e }$NOVA"
+fi
 systemctl daemon-reload
 systemctl restart fwadmin.service
 sleep 1

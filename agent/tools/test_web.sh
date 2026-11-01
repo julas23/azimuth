@@ -279,5 +279,28 @@ done
 check "origem fora da lista recusada" "$(code "http://127.0.0.1:$PORT/login")" "403"
 echo
 
+echo "== caixa nova: sem config, toda tela leva a configuracao da rede =="
+kill "$APP_PID" 2>/dev/null; wait "$APP_PID" 2>/dev/null
+NOVA="$SANDBOX/nova"
+mkdir -p "$NOVA/var/lib/fwadmin"
+touch "$NOVA/var/lib/fwadmin/caixa-nova"
+rm -f "$JAR"
+FWADMIN_SYSROOT="$NOVA" FWADMIN_READONLY=1 python3 -m uvicorn fwadmin.web:app --host 127.0.0.1 --port "$PORT" --log-level warning &
+APP_PID=$!
+for _ in $(seq 1 50); do
+    [ "$(code "http://127.0.0.1:$PORT/login")" != "000" ] && break
+    sleep 0.2
+done
+code -X POST -d 'username=admin&password=senha-bem-longa-123' "http://127.0.0.1:$PORT/login" >/dev/null
+check "Status leva a configuracao" "$(curl -s -o /dev/null -w '%{redirect_url}' -b "$JAR" "http://127.0.0.1:$PORT/")" "http://127.0.0.1:$PORT/inicial"
+check "Rede tambem"               "$(curl -s -o /dev/null -w '%{redirect_url}' -b "$JAR" "http://127.0.0.1:$PORT/network")" "http://127.0.0.1:$PORT/inicial"
+check "a tela abre"               "$(code "http://127.0.0.1:$PORT/inicial")" "200"
+check "lista as placas"           "$(grep -c 'Placas desta máquina' "$SANDBOX/body")" "1"
+code -X POST -d 'wan_device=xx0&lan_device=xx0&wan_mode=dhcp&lan_address=10.0.0.1/24&dhcp_start=10.0.0.100&dhcp_end=10.0.0.199&domain=lan' "http://127.0.0.1:$PORT/inicial" >/dev/null
+check "pedido invalido volta com o erro" "$(grep -c 'Não dá para salvar assim' "$SANDBOX/body")" "1"
+check "e nao grava pedido"        "$([ -e "$NOVA/var/lib/fwadmin/inicial-pedido.json" ] && echo gravou || echo nao)" "nao"
+check "outros POST seguem barrados" "$(code -X POST -d 'x=1' "http://127.0.0.1:$PORT/network")" "403"
+echo
+
 printf '\033[1m%d passaram, %d falharam\033[0m\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

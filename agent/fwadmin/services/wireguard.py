@@ -33,7 +33,8 @@ def _recreate(device: str) -> Reload:
     """Derruba e resobe. Unica forma de mudar endereco, porta ou MTU."""
     return Reload(
         f"WireGuard {device} (recriar)",
-        ["sh", "-c", f"wg-quick down {device} || true; wg-quick up {device}"],
+        # O enable e' so para o boot: quem sobe agora e' o wg-quick.
+        ["sh", "-c", f"systemctl enable -q wg-quick@{device}; wg-quick down {device} || true; wg-quick up {device}"],
         disruptive=True,
     )
 
@@ -63,7 +64,7 @@ def _sync(device: str, key_file: str) -> Reload:
             "sh",
             "-c",
             f"if ip link show {device} >/dev/null 2>&1; then {sync}; "
-            f"else wg-quick up {device}; fi",
+            f"else systemctl enable -q wg-quick@{device}; wg-quick up {device}; fi",
         ],
     )
 

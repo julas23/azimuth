@@ -19,9 +19,13 @@ def units(cfg: Config) -> frozenset[str]:
 
 
 def _bounce(device: str) -> Reload:
+    """Derruba e sobe pelo ifupdown. Os enderecos globais sao limpos entre os
+    dois: placa que o ifupdown nao conhece como ligada (caixa nova, ou
+    endereco deixado por um rollback) passa pelo ifdown com sucesso e sem
+    tirar nada, e o ifup para em 'Address already assigned'."""
     return Reload(
         f"interface {device}",
-        ["sh", "-c", f"ifdown {device} || true; ifup {device}"],
+        ["sh", "-c", f"ifdown {device} || true; ip addr flush dev {device} scope global; ifup {device}"],
         disruptive=True,
     )
 
@@ -32,9 +36,17 @@ def changed_devices(cfg: Config, previous: Config) -> list[str]:
     return [i.device for i in cfg.interfaces if old.get(i.device) != i.ipv4.model_dump()]
 
 
+def _managed(cfg: Config) -> list[str]:
+    return [i.device for i in cfg.interfaces if i.role is not IfRole.unused]
+
+
 def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Reload]:
-    if FILE not in changed or previous is None:
+    """Sobe de novo so o que mudou. Sem config anterior (caixa nova, primeiro
+    apply), nada do que esta no arquivo foi aplicado ainda: sobe todas."""
+    if FILE not in changed:
         return []
+    if previous is None:
+        return [_bounce(d) for d in _managed(cfg)]
     return [_bounce(d) for d in changed_devices(cfg, previous)]
 
 
@@ -51,10 +63,10 @@ def probe(cfg: Config, previous: Config | None, changed: list[str]) -> Prova | N
     So o que mudou e' verificado. Provar o que nao foi tocado faria uma WAN
     reserva ja desconectada derrubar um apply que so mexeu em DNS.
     """
-    if FILE not in changed or previous is None:
+    if FILE not in changed:
         return None
 
-    mexidos = set(changed_devices(cfg, previous))
+    mexidos = set(_managed(cfg) if previous is None else changed_devices(cfg, previous))
     alvos = [
         i
         for i in cfg.interfaces
@@ -94,7 +106,7 @@ def probe(cfg: Config, previous: Config | None, changed: list[str]) -> Prova | N
 
 SERVICE = ServiceModule(
     name="interfaces",
-    order=30,
+    order=12,  # antes do dnsmasq e do unbound, que escutam nas placas; depois do firewall
     section="interfaces",
     targets=targets,
     units=units,

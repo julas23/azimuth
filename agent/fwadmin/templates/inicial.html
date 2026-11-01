@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Configurar a rede{% endblock %}
+{% block body %}
+
+<div class="page-h">
+  <div><h1>Configurar a rede</h1><p class="lede">Caixa nova: diga qual placa vai para a internet e qual atende a casa. O resto do painel abre depois disto.</p></div>
+</div>
+
+{% if status and status.estado == 'rodando' %}
+  <meta http-equiv="refresh" content="3">
+  <div class="note"><b>Configurando</b><span>Gravando a configuração e reiniciando o painel. Esta página se atualiza sozinha.</span></div>
+{% else %}
+
+{% if status and status.estado == 'erro' %}
+  <div class="note bad"><b>A configuração não terminou</b><span class="mono" style="white-space:pre-wrap">{{ status.detalhe }}</span></div>
+{% endif %}
+{% if error %}<div class="note bad"><b>Não dá para salvar assim</b><span>{{ error }}</span></div>{% endif %}
+
+{% if placas|length < 2 %}
+  <div class="note bad"><b>Só {{ placas|length }} placa de rede</b><span>Um firewall precisa de duas: uma para a internet (WAN) e outra para a casa (LAN). Ligue a segunda placa e recarregue esta página.</span></div>
+{% endif %}
+
+<section class="card">
+  <div class="card-h"><h2 class="h2">Placas desta máquina</h2></div>
+  <table class="tbl">
+    <thead><tr><th>Placa</th><th>MAC</th><th>Cabo</th><th>Endereço agora</th></tr></thead>
+    <tbody>
+    {% for p in placas %}
+      <tr>
+        <td class="mono">{{ p.device }}{% if p.device == acesso %} <span class="chip info">você está acessando por ela</span>{% endif %}</td>
+        <td class="mono">{{ p.mac }}</td>
+        <td>{% if p.carrier %}<span class="chip ok">ligado</span>{% else %}<span class="chip mute">sem cabo</span>{% endif %}</td>
+        <td class="mono">{{ p.ipv4 or '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<form class="stack" method="post" action="/inicial" autocomplete="off">
+<div class="grid two">
+  <section class="card wan-card">
+    <div class="card-h"><h2 class="h2">Internet</h2><span class="chip mute">WAN</span></div>
+    <div class="form-grid">
+      <div class="field"><label for="wan-dev">Placa</label>
+        <select id="wan-dev" class="input mono" name="wan_device">
+          {% for p in placas %}<option value="{{ p.device }}" {% if form.wan_device == p.device %}selected{% endif %}>{{ p.device }}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="wan-mode">Como conecta</label>
+        <select id="wan-mode" class="input" name="wan_mode">
+          {% for v, label in [('dhcp', 'DHCP do provedor'), ('pppoe', 'PPPoE (usuário e senha)'), ('static', 'IP fixo')] %}
+            <option value="{{ v }}" {% if form.wan_mode == v %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select></div>
+    </div>
+    <div class="subpanel only-pppoe">
+      <div class="subpanel-h">PPPoE <span class="muted">· usuário e senha do provedor</span></div>
+      <div class="form-grid">
+        <div class="field"><label for="ppp-user">Usuário</label><input id="ppp-user" class="input mono" name="pppoe_user" value="{{ form.pppoe_user or '' }}"></div>
+        <div class="field"><label for="ppp-pass">Senha</label><input id="ppp-pass" class="input" type="password" name="pppoe_password" autocomplete="new-password"></div>
+      </div>
+    </div>
+    <div class="subpanel only-static">
+      <div class="subpanel-h">IP fixo <span class="muted">· o que o provedor entregou</span></div>
+      <div class="form-grid">
+        <div class="field"><label for="wan-addr">IP (CIDR)</label><input id="wan-addr" class="input mono" name="wan_address" value="{{ form.wan_address or '' }}" placeholder="203.0.113.10/29"></div>
+        <div class="field"><label for="wan-gw">Gateway</label><input id="wan-gw" class="input mono" name="wan_gateway" value="{{ form.wan_gateway or '' }}"></div>
+        <div class="field"><label for="wan-dns">DNS</label><input id="wan-dns" class="input mono" name="wan_dns" value="{{ form.wan_dns or '' }}" placeholder="1.1.1.1, 8.8.8.8"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-h"><h2 class="h2">Casa</h2><span class="chip info">LAN</span></div>
+    <div class="form-grid">
+      <div class="field"><label for="lan-dev">Placa</label>
+        <select id="lan-dev" class="input mono" name="lan_device">
+          {% for p in placas %}<option value="{{ p.device }}" {% if form.lan_device == p.device %}selected{% endif %}>{{ p.device }}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="lan-addr">Endereço da caixa (CIDR)</label><input id="lan-addr" class="input mono" name="lan_address" value="{{ form.lan_address }}"></div>
+      <div class="field"><label for="dhcp-start">DHCP de</label><input id="dhcp-start" class="input mono" name="dhcp_start" value="{{ form.dhcp_start }}"></div>
+      <div class="field"><label for="dhcp-end">até</label><input id="dhcp-end" class="input mono" name="dhcp_end" value="{{ form.dhcp_end }}"></div>
+      <div class="field"><label for="domain">Domínio da casa</label><input id="domain" class="input mono" name="domain" value="{{ form.domain }}"></div>
+    </div>
+  </section>
+</div>
+
+<div class="note"><b>Nada muda na rede agora</b><span>Salvar grava a configuração e abre o resto do painel. A rede só muda no primeiro apply, em Sistema, que mostra antes tudo o que vai trocar e desfaz sozinho se você perder o acesso. Se você acessa por uma placa que vai virar WAN, ou se o endereço da LAN mudar, depois do apply o painel passa a atender no endereço novo da LAN.</span></div>
+
+<div><button class="btn primary" type="submit" {% if placas|length < 2 %}disabled{% endif %}>Salvar a configuração</button></div>
+</form>
+{% endif %}
+{% endblock %}

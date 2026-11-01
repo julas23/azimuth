@@ -86,9 +86,9 @@ check("nenhuma liga a LAN aos containers",
       any(f'"{cfg.lan.device}"' in line for line in pool_lines), False)
 
 plan = build_plan(cfg, None, paths.STAGING)
-check("recarga reinicia o Docker",
+check("recarga liga no boot e reinicia o Docker (a ISO o deixa desligado)",
       [r.argv for r in plan.reloads if r.label.startswith("Docker")],
-      [["systemctl", "restart", "docker.service"]])
+      [["sh", "-c", "systemctl enable docker.service && systemctl restart docker.service"]])
 check("e o nftables antes dele",
       [r.label for r in plan.reloads].index("Docker (restart)")
       > min(i for i, r in enumerate(plan.reloads) if "nft" in " ".join(r.argv)), True)

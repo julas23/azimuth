@@ -10,7 +10,8 @@
 #   - libera no sudoers so o `fwctl observe`.
 #
 # O que ele escreve, e nada alem disso:
-#   /opt/fwadmin/                          codigo
+#   /opt/fwadmin/                          codigo, e deploy/ e sbin/ (a caixa nova
+#                                          se adota sozinha, pelo fwctl inicial)
 #   /usr/local/sbin/fwctl
 #   /var/lib/fwadmin/                      banco de usuarios e certificado
 #   /etc/sudoers.d/fwadmin                 so o observe e o login
@@ -63,6 +64,16 @@ install_pam() {
     echo "   PAM: /etc/pam.d/azimuth (login do painel pela senha do sistema)"
 }
 
+# O codigo, e o deploy/ e o sbin/ ao lado: e' de la que o fwctl inicial roda o
+# adopt.sh numa caixa nova. Rodando da propria copia, nao ha o que copiar.
+install_code() {
+    [ "$SRC" = /opt/fwadmin ] && return 0
+    install -d -m 0755 /opt/fwadmin
+    rm -rf /opt/fwadmin/fwadmin /opt/fwadmin/deploy /opt/fwadmin/sbin
+    cp -r "$SRC/fwadmin" "$SRC/deploy" "$SRC/sbin" /opt/fwadmin/
+    find /opt/fwadmin -name __pycache__ -prune -exec rm -rf {} +
+}
+
 # Os agentes no navegador (AGENTES.md): o script que abre a sessao, a unidade
 # do systemd e a limpeza de 30 dias do registro. Instala so o que mudou.
 install_agentes() {
@@ -90,9 +101,7 @@ install_agentes() {
 if [ -e /etc/fwadmin/config.yaml ] && grep -q '^Environment=FWADMIN_READONLY=0' "$DROPIN" 2>/dev/null; then
     [ "${1:-}" = "--remover" ] && { echo "maquina adotada: use deploy/adopt.sh --desfazer antes"; exit 1; }
     echo "== maquina adotada: atualizando so o codigo =="
-    rm -rf /opt/fwadmin/fwadmin
-    cp -r "$SRC/fwadmin" /opt/fwadmin/
-    find /opt/fwadmin -name __pycache__ -prune -exec rm -rf {} +
+    install_code
     install -m 0755 "$SRC/sbin/fwctl" /usr/local/sbin/fwctl
     # O sudoers do motor acompanha o fwctl: subcomando novo sem a linha dele
     # no sudoers e' botao que da erro de permissao. Validado antes de valer, e
@@ -187,10 +196,7 @@ fi
 usermod -aG systemd-journal netadm
 
 echo "== 4. codigo =="
-install -d -m 0755 /opt/fwadmin
-rm -rf /opt/fwadmin/fwadmin
-cp -r "$SRC/fwadmin" /opt/fwadmin/
-find /opt/fwadmin -name __pycache__ -prune -exec rm -rf {} +
+install_code
 install -m 0755 "$SRC/sbin/fwctl" /usr/local/sbin/fwctl
 VERSION="$(git -C "$SRC" describe --always --dirty 2>/dev/null || cat "$SRC/VERSION" 2>/dev/null || echo dev)"
 echo "$VERSION" > /opt/fwadmin/VERSION

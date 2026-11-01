@@ -16,6 +16,7 @@ da UI vira caminho, argumento de shell ou nome de arquivo.
     fwctl observe    fotografa o /etc vivo, sem segredos, para o painel ler
     fwctl ack        lista as mudancas da adocao e marca as intencionais
     fwctl login      confere usuario e senha do painel pelo PAM (pedido no stdin)
+    fwctl inicial    caixa nova: o config da configuracao da rede, e a adocao
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import os
 import pwd
 import re
 import shutil
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -155,6 +157,13 @@ def load_configs(source: Path) -> tuple[object, object]:
         raise ApplyError(f"nada para aplicar: {source} nao existe")
     proposed = load(source)
     current = load(paths.CONFIG) if paths.CONFIG.exists() else None
+    # Caixa nova antes do primeiro apply: o config.yaml existe (veio do
+    # formulario), mas nada dele esta no /etc. Compara-lo consigo mesmo diria
+    # que nenhuma interface mudou, e a LAN nova nunca subiria.
+    from fwadmin import inicial
+
+    if inicial.MARKER.exists() and not ownership.read_seal():
+        current = None
     return proposed, current
 
 
@@ -530,7 +539,15 @@ def adoption_changes() -> list[str] | None:
 
     Le o /etc vivo do mesmo jeito que o painel — fotografia e importador —,
     para que a lista que trava aqui seja a mesma que a pessoa viu na tela.
+
+    Caixa nova (a marca do primeiro boot da ISO): o config nao veio do
+    importador, veio do formulario de "Configurar a rede". Nao havia nada
+    montado para preservar, e tudo o que o apply troca foi pedido ali.
     """
+    from fwadmin import inicial
+
+    if inicial.MARKER.exists():
+        return []
     try:
         observe.collect()
         _, _, changes = importer.run(observe.LIVE)
@@ -632,6 +649,71 @@ def cmd_login(args: argparse.Namespace) -> int:
         print(f"fwctl login: recusado ({motivo})", file=sys.stderr)
         return 1
     return 0
+
+
+def _inicial_status(estado: str, detalhe: str = "") -> None:
+    from fwadmin import inicial
+
+    inicial.STATUS.write_text(json.dumps({"estado": estado, "detalhe": detalhe[-4000:], "em": time.time()}))
+    owner = pwd.getpwnam(secretstore.PANEL_USER)
+    os.chown(inicial.STATUS, owner.pw_uid, owner.pw_gid)
+
+
+def cmd_inicial(args: argparse.Namespace) -> int:
+    """Caixa nova: le o formulario que o painel gravou, monta o config de novo
+    (o que vale e' o daqui, como root) e adota a maquina com ele.
+
+    Chamado pelo painel, so confere e dispara a adocao numa unidade
+    transitoria: o painel roda num sandbox que o sudo herda, e a adocao
+    instala sudoers e units e reinicia o proprio painel. --executar e' a
+    unidade, e nao esta no sudoers. Nada e' aplicado: o primeiro apply
+    continua sendo decisao do dono, na tela Sistema."""
+    require_root()
+    from fwadmin import inicial
+
+    if paths.CONFIG.exists():
+        return fail(f"esta maquina ja tem config ({paths.CONFIG}); a configuracao inicial e' so para caixa nova")
+    try:
+        pedido = json.loads(inicial.REQUEST.read_text())
+        if not isinstance(pedido, dict):
+            raise ValueError
+    except (OSError, ValueError):
+        return fail("nenhum pedido de configuracao inicial legivel")
+    try:
+        cfg = inicial.validate(pedido, inicial.nics())
+    except ValueError as exc:
+        return fail(str(exc))
+
+    if not args.executar:
+        _inicial_status("rodando")
+        r = run(
+            "systemd-run", "--no-block", "--quiet", "--collect", "--unit", "azimuth-inicial",
+            "--description", "Azimuth: configuracao inicial da rede",
+            "/usr/local/sbin/fwctl", "inicial", "--executar",
+        )
+        if not r.ok:
+            _inicial_status("erro", r.output)
+            return fail(f"nao consegui disparar a configuracao inicial: {r.output}")
+        say("configuracao inicial disparada (azimuth-inicial.service)")
+        return 0
+
+    pronto = paths.VAR / "inicial-config.yaml"
+    pronto.write_text(dump(cfg, header="# Config da caixa nova, da configuracao inicial da rede pelo painel.\n"
+                                       "# Alterada pela UI; versionada em git. Nada aplicado ainda.\n"))
+    adopt = paths.CODE / "deploy" / "adopt.sh"
+    try:
+        proc = subprocess.run([str(adopt), "--config", str(pronto)], capture_output=True, text=True, timeout=600)
+        saida, ok = (proc.stdout + proc.stderr).strip(), proc.returncode == 0
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        saida, ok = str(exc), False
+    pronto.unlink(missing_ok=True)
+    say(saida)
+    if ok and cfg.wans[0].pppoe:
+        # A senha do provedor espera o primeiro apply, como qualquer senha nova.
+        secretstore.propose(inicial.PPPOE_REF, str(pedido.get("pppoe_password", "")))
+    inicial.REQUEST.unlink(missing_ok=True)
+    _inicial_status("ok" if ok else "erro", saida)
+    return 0 if ok else 1
 
 
 def f2b_refusal(ip, cfg) -> str:
@@ -1148,6 +1230,9 @@ def main() -> int:
     sub.add_parser(
         "login", help="confere usuario e senha do painel pelo PAM (pedido no stdin)"
     ).set_defaults(fn=cmd_login)
+    p_ini = sub.add_parser("inicial", help="caixa nova: config da configuracao da rede, e a adocao")
+    p_ini.add_argument("--executar", action="store_true", help=argparse.SUPPRESS)
+    p_ini.set_defaults(fn=cmd_inicial)
     sub.add_parser(
         "f2b", help="bane ou desbane um IP, conforme o pedido gravado pelo painel"
     ).set_defaults(fn=cmd_f2b)

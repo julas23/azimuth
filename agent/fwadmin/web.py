@@ -44,7 +44,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
-from fwadmin import acks, agentes, db, dismissed, i18n, ia, importer, live, observe, ownership, paths, secretstore, status
+from fwadmin import acks, agentes, db, dismissed, i18n, ia, importer, inicial, live, observe, ownership, paths, secretstore, status
 from fwadmin.models import (
     AdminChain,
     App,
@@ -124,13 +124,14 @@ async def form(request: Request) -> FormData:
 Fields = Annotated[FormData, Depends(form)]
 
 FWCTL = "/usr/local/sbin/fwctl"
-ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff", "observe", "f2b", "agente", "servico"}
+ALLOWED_FWCTL = {"check", "apply", "confirm", "rollback", "status", "diff", "observe", "f2b", "agente", "servico", "inicial"}
 
 READONLY = os.environ.get("FWADMIN_READONLY", "1") != "0"
 """Ligado por padrao: desligar e' decisao explicita de quem instala."""
 
 READONLY_ALLOWED = {
     "/login",
+    "/inicial",
     "/logout",
     "/system/diag",
     "/system/ack",
@@ -229,6 +230,10 @@ class Unavailable(Exception):
     """Nao ha modelo para mostrar: a pagina vira a explicacao do porque."""
 
 
+class FreshBox(Unavailable):
+    """Caixa nova, sem config: toda tela leva a configuracao da rede."""
+
+
 def snap() -> live.Snapshot:
     """A fotografia do sistema vivo. Tambem serve ao modo de edicao, que tira
     dela o estado de execucao (handshakes, banidos, contadores)."""
@@ -241,6 +246,8 @@ def current() -> Config:
     Somente leitura: o sistema vivo, pelo importador. Edicao: a proposta
     pendente, se houver, senao a config aplicada pelo motor.
     """
+    if inicial.fresh_box():
+        raise FreshBox("caixa nova: falta a configuracao da rede")
     if READONLY:
         snapshot = snap()
         if snapshot.cfg is None:
@@ -388,6 +395,11 @@ async def redirect_unauthenticated(request: Request, exc: HTTPException) -> Resp
     if exc.status_code == 303 and "Location" in (exc.headers or {}):
         return RedirectResponse(exc.headers["Location"], status_code=303)
     return HTMLResponse(f"<h1>{exc.status_code}</h1><p>{exc.detail}</p>", status_code=exc.status_code)
+
+
+@app.exception_handler(FreshBox)
+async def to_first_setup(request: Request, exc: FreshBox) -> Response:
+    return RedirectResponse("/inicial", status_code=303)
 
 
 @app.exception_handler(Unavailable)
@@ -832,6 +844,67 @@ async def login(request: Request, fields: Fields) -> Response:
         path="/",
     )
     return response
+
+
+# ---------------------------------------------------------------------------
+# caixa nova: a configuracao da rede (fwadmin/inicial.py)
+# ---------------------------------------------------------------------------
+
+
+INICIAL_FIELDS = (
+    "wan_device", "wan_mode", "pppoe_user", "wan_address", "wan_gateway", "wan_dns",
+    "lan_device", "lan_address", "dhcp_start", "dhcp_end", "domain",
+)
+
+
+def inicial_status() -> dict[str, Any] | None:
+    try:
+        return json.loads(inicial.STATUS.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def inicial_view(request: Request, form: dict[str, str] | None = None, error: str = "") -> HTMLResponse:
+    placas = inicial.nics()
+    # A placa que tem o endereco por onde este navegador chegou.
+    host = request.url.hostname or ""
+    acesso = next((p["device"] for p in placas if p["ipv4"].split("/")[0] == host), "")
+    return page(
+        request, "inicial.html", placas=placas, acesso=acesso,
+        form=form or inicial.defaults(placas), error=error, status=inicial_status(),
+    )
+
+
+@app.get("/inicial", response_class=HTMLResponse)
+async def inicial_page(request: Request, user: User) -> Response:
+    if not inicial.fresh_box():
+        return RedirectResponse("/system", status_code=303)
+    return inicial_view(request)
+
+
+@app.post("/inicial", response_class=HTMLResponse)
+async def inicial_save(request: Request, user: User, fields: Fields) -> Response:
+    """Valida aqui para mostrar o erro na tela; o fwctl valida de novo, como
+    root, e e' ele quem grava. A senha do PPPoE so passa pelo arquivo do
+    pedido (0600), que o fwctl apaga."""
+    if not inicial.fresh_box():
+        return RedirectResponse("/system", status_code=303)
+    form = {k: fields.text(k) for k in INICIAL_FIELDS}
+    pedido = dict(form, pppoe_password=fields.get("pppoe_password", ""))
+    try:
+        inicial.validate(pedido, inicial.nics())
+    except ValueError as exc:
+        return inicial_view(request, form, str(exc))
+    fd = os.open(inicial.REQUEST, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        json.dump(pedido, fh)
+    ok, out = fwctl("inicial", timeout=60)
+    db.log("configuracao-inicial", username=user, address=client_ip(request),
+           detail=f"WAN {form['wan_device']} ({form['wan_mode']}) · LAN {form['lan_device']} {form['lan_address']}")
+    if not ok:
+        inicial.REQUEST.unlink(missing_ok=True)
+        return inicial_view(request, form, out or "o fwctl recusou a configuração")
+    return RedirectResponse("/inicial", status_code=303)
 
 
 @app.post("/logout")

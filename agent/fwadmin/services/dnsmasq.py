@@ -20,7 +20,9 @@ def units(cfg: Config) -> frozenset[str]:
 
 def _reload() -> Reload:
     # reload do dnsmasq so rele /etc/hosts e leases; mudanca de conf exige restart
-    return Reload("dnsmasq", ["systemctl", "restart", "dnsmasq"])
+    # enable junto: numa caixa nova o pacote veio desligado da ISO, e um
+    # restart sem enable some no proximo boot.
+    return Reload("dnsmasq", ["sh", "-c", "systemctl enable dnsmasq && systemctl restart dnsmasq"])
 
 
 def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Reload]:

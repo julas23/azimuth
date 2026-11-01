@@ -6,7 +6,8 @@
 # do painel pelo PAM (usuario e senha pelo stdin).
 
 Cmnd_Alias FWADMIN_OBSERVE = /usr/local/sbin/fwctl observe, \
-                            /usr/local/sbin/fwctl login
+                            /usr/local/sbin/fwctl login, \
+                            /usr/local/sbin/fwctl inicial
 
 netadm ALL=(root) NOPASSWD: FWADMIN_OBSERVE
 

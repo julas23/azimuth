@@ -63,7 +63,9 @@ def context_for(cfg: Config, name: str) -> dict:
 
 
 def _restart() -> Reload:
-    return Reload("unbound (restart)", ["systemctl", "restart", "unbound"])
+    # enable junto: numa caixa nova o pacote veio desligado da ISO, e um
+    # restart sem enable some no proximo boot.
+    return Reload("unbound (restart)", ["sh", "-c", "systemctl enable unbound && systemctl restart unbound"])
 
 
 def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Reload]:

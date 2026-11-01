@@ -24,7 +24,10 @@ def units(cfg: Config) -> frozenset[str]:
 
 def _rearm() -> Reload:
     # o script e' lido a cada disparo do timer; nada a recarregar de fato
-    return Reload("failover (rearmar timer)", ["systemctl", "restart", "fwadmin-failover.timer"])
+    return Reload(
+        "failover (rearmar timer)",
+        ["sh", "-c", "systemctl enable fwadmin-failover.timer && systemctl restart fwadmin-failover.timer"],
+    )
 
 
 def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Reload]:

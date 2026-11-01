@@ -82,7 +82,8 @@ def context(cfg: Config, name: str) -> dict:
 def _restart() -> Reload:
     # Reinicia os containers junto (voltam pela restart policy deles), mas
     # nao mexe na rede da casa: nao e' disruptivo no sentido do motor.
-    return Reload("Docker (restart)", ["systemctl", "restart", UNIT])
+    # enable junto: a ISO deixa o Docker desligado ate o motor configurar.
+    return Reload("Docker (restart)", ["sh", "-c", f"systemctl enable {UNIT} && systemctl restart {UNIT}"])
 
 
 def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Reload]:
