@@ -547,5 +547,16 @@ check("'ip saddr' antes do oifname e' traduzido", fw["forward_rules"][0]["source
 check("a base da entrada nao vira mudanca nem regra", (fw["input_rules"], [c for c in imp.CHANGES if "input" in c]), ([], []))
 check("a placa de baixo do PPPoE no $WAN nao e' mudanca", [c for c in imp.CHANGES if "$WAN" in c], [])
 
+# --- peer do WireGuard: o comentario que o template escreve volta igual ------
+with tempfile.TemporaryDirectory() as d:
+    (Path(d) / "wireguard").mkdir()
+    (Path(d) / "wireguard" / "wghome.conf").write_text(
+        "[Interface]\nAddress = 10.80.0.1/24\nListenPort = 51820\n\n"
+        "# celular — Celular\n[Peer]\nPublicKey = bRthRr2lXs07NrsgH4/ShLwaQ9g6JpqLosdqgox2Nks=\nAllowedIPs = 10.80.0.2/32\n"
+    )
+    wg = imp.build_wireguard(Path(d))
+check("'# nome — descricao' separa nome e descricao",
+      [(p["name"], p["description"]) for p in wg["peers"]], [("celular", "Celular")])
+
 print(f"\n\033[1m{pass_n} passaram, {fail_n} falharam\033[0m")
 sys.exit(1 if fail_n else 0)

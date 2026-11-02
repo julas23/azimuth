@@ -1102,11 +1102,14 @@ def build_wireguard(live: Path) -> dict[str, Any] | None:
         for key, value in p.items():
             if key not in WG_PEER_MODELED:
                 change(f"wireguard/{server}: '{key}' do peer '{p['#'] or n}' sai do arquivo")
+        # O template escreve '# <nome> — <descricao>'; sem o travessao, o
+        # comentario inteiro e' o nome e tambem a descricao, como antes.
+        nome, sep, descricao = p["#"].partition(" — ")
         peer: dict[str, Any] = {
-            "name": label(p["#"]) or f"peer{n}",
+            "name": label(nome) or f"peer{n}",
             "public_key": p["PublicKey"],
             "allowed_ips": [a.strip() for a in p.get("AllowedIPs", "").split(",") if a.strip()],
-            "description": p["#"],
+            "description": descricao.strip() if sep else p["#"],
         }
         if "Endpoint" in p:
             peer["endpoint"] = p["Endpoint"]
