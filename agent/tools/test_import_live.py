@@ -513,5 +513,39 @@ check("senha ja no arquivo do motor continua com o motor",
 check("senha no chap-secrets continua com o administrador",
       motor_secret(parse_ppp_peer('user "x"\n'), "vivo"), False)
 
+# --- o ruleset no formato que o proprio motor escreve (incidente 2026-11-02) --
+from fwadmin import importer as imp  # noqa: E402
+
+imp.CHANGES.clear()
+fw = imp.build_firewall(imp.parse_nft('''define WAN = { "enp3s0", "ppp0" }
+table inet filter {
+    chain input {
+        type filter hook input priority 0; policy drop;
+        iifname "lo" accept
+        ct state established,related accept
+        meta l4proto { icmp, ipv6-icmp } accept
+        iifname "enp2s0" accept
+        iifname "enp2s0" udp sport 67 udp dport 68 accept
+    }
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+        ip saddr 10.80.0.4/32 oifname $WAN counter accept comment "so internet"
+        iifname "ppp0" ip daddr 10.0.0.102 tcp dport 8096 counter accept comment "fwd: Jellyfin"
+    }
+}
+table ip nat {
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+        iifname "ppp0" tcp dport 23578 counter dnat ip to 10.0.0.102:8096 comment "Jellyfin"
+    }
+}
+'''), "enp2s0", {"ppp0": "wan_vivo"}, carriers={"enp3s0"})
+check("'dnat ip to' vira port-forward", [(p["wan_port"], p["to_ip"], p["to_port"]) for p in fw["port_forwards"]],
+      [(23578, "10.0.0.102", 8096)])
+check("e o accept dele e' absorvido", [r["description"] for r in fw["forward_rules"]], ["so internet"])
+check("'ip saddr' antes do oifname e' traduzido", fw["forward_rules"][0]["source"], "10.80.0.4/32")
+check("a base da entrada nao vira mudanca nem regra", (fw["input_rules"], [c for c in imp.CHANGES if "input" in c]), ([], []))
+check("a placa de baixo do PPPoE no $WAN nao e' mudanca", [c for c in imp.CHANGES if "$WAN" in c], [])
+
 print(f"\n\033[1m{pass_n} passaram, {fail_n} falharam\033[0m")
 sys.exit(1 if fail_n else 0)

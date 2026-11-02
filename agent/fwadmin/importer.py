@@ -218,7 +218,7 @@ NFT_RULE = re.compile(
 NFT_DNAT = re.compile(
     r'^iifname "(?P<dev>[^"]+)" (?:ip saddr (?P<saddr>[\d./]+) )?'
     r"(?P<proto>tcp|udp) dport (?P<port>\d+) "
-    rf"{COUNTER}?dnat to (?P<ip>[\d.]+):(?P<to_port>\d+)" + COMMENT + "$"
+    rf"{COUNTER}?dnat (?:ip )?to (?P<ip>[\d.]+):(?P<to_port>\d+)" + COMMENT + "$"
 )
 
 NFT_MASQ = re.compile(
@@ -230,6 +230,13 @@ FORWARD_FIXED = {
     "tcp flags syn tcp option maxseg size set rt mtu",
 }
 """O template escreve estas duas no topo da forward; nao viram regra do modelo."""
+
+INPUT_BASE = {
+    'iifname "lo" accept',
+    "ct state established,related accept",
+    "meta l4proto { icmp, ipv6-icmp } accept",
+}
+"""Da render.base_input, sem dependencia do config: o motor sempre as escreve."""
 
 
 def expand_defines(rule: str, defines: dict[str, list[str]]) -> str:
@@ -758,8 +765,12 @@ def build_firewall(
     wan_by_dev: dict[str, str],
     vpn_dev: str | None = None,
     other_devs: list[str] | None = None,
+    carriers: set[str] | None = None,
 ) -> dict[str, Any]:
     """Traduz o ruleset vivo para o modelo, regra a regra.
+
+    'carriers' sao as placas de baixo do PPPoE (enp3s0 sob o ppp0): no $WAN
+    elas nao mudam nada, porque o trafego IP passa todo pelo ppp.
 
     'wan_by_dev' mapeia o device que aparece no nft (ppp0, ens17) para o nome
     logico da WAN. 'vpn_dev' e' o tunel do modelo (zona vpn); 'other_devs' sao
@@ -769,11 +780,21 @@ def build_firewall(
     other_by_dev = {dev: label(dev) for dev in other_devs or []}
     wan_devs = set(wan_by_dev)
     defined = set(nft["defines"].get("WAN", []))
-    if defined and defined != wan_devs:
-        change(
-            f"nftables: define WAN = {sorted(defined)}, mas as WANs do modelo sao "
-            f"{sorted(wan_devs)}; toda regra com $WAN muda de alcance"
-        )
+    if defined:
+        mudos = defined & (carriers or set())
+        if mudos:
+            note(
+                f"nftables: {', '.join(sorted(mudos))} no $WAN e' a placa de baixo do PPPoE; "
+                "o trafego IP passa pelo ppp, e ela sai do $WAN sem mudar nada"
+            )
+        entram, saem = wan_devs - defined, defined - wan_devs - mudos
+        for dev in sorted(entram):
+            change(
+                f"nftables: {dev} ({wan_by_dev[dev]}) entra no $WAN — tudo o que hoje vale para "
+                "$WAN (saida da LAN, VPN, NAT) passa a valer por ela tambem"
+            )
+        for dev in sorted(saem):
+            change(f"nftables: {dev} sai do $WAN — o que hoje vale para $WAN deixa de valer por ela")
 
     def zone(expr: str | None, cidr: str | None) -> str | None:
         """iifname/oifname ou CIDR -> zona do modelo. None = sem traducao."""
@@ -794,6 +815,13 @@ def build_firewall(
         return None
 
     def to_rule(line: str, chain: str) -> dict[str, Any] | None:
+        # o nft aceita o endereco antes da interface; o padrao, na ordem do
+        # rule_to_nft, so o depois
+        line = re.sub(
+            r'^(ip saddr [\d./]+ )((?:iifname (?:\$\w+|"[^"]+") )?(?:oifname (?:\$\w+|"[^"]+") )?)',
+            r"\2\1",
+            line,
+        )
         m = NFT_RULE.match(line)
         if not m or m.group("ctdnat"):
             return None
@@ -891,6 +919,13 @@ def build_firewall(
         if (m and m.group("action") in ("drop", "reject")) or re.search(r"\b(drop|reject)\b", line):
             note(f"nftables/input: bloqueio redundante com a entrada fechada, sai: {line}")
             continue
+        if line in INPUT_BASE or line.startswith(f'iifname "{lan_dev}" '):
+            # a LAN entra inteira pela base (iifname "<lan>" accept)
+            note(f"nftables/input: ja faz parte da base que o motor sempre escreve, sai: {line}")
+            continue
+        if vpn_dev and line == f'iifname "{vpn_dev}" accept':
+            note(f"nftables/input: ja faz parte da base do WireGuard, sai: {line}")
+            continue
         rule = to_rule(line, "input")
         if rule is None:
             keep(("inet filter", "input"), line)
@@ -904,18 +939,16 @@ def build_firewall(
     forward_rules = []
     for line in merge_per_wan([r for r in filter_forward["rules"] if r not in FORWARD_FIXED]):
         m = NFT_RULE.match(line)
-        if m and m.group("ctdnat"):
-            # o template gera o accept do port-forward sozinho, a partir do DNAT
+        if m and m.group("action") == "accept" and m.group("daddr"):
+            # o template gera o accept do port-forward sozinho, a partir do
+            # DNAT — com 'ct status dnat' (formato antigo) ou sem (o de hoje)
             if any(
                 pf["interface"] == wan_by_dev.get((m.group("iif") or "").strip('"'))
                 and pf["to_ip"] == m.group("daddr")
                 and str(pf["to_port"]) == m.group("ports")
                 for pf in port_forwards
             ):
-                note(
-                    "accept do port-forward absorvido pelo DNAT correspondente (o gerado "
-                    f"nao exige 'ct status dnat'): {line}"
-                )
+                note(f"accept do port-forward absorvido pelo DNAT correspondente: {line}")
                 continue
         rule = to_rule(line, "forward")
         if rule is None:
@@ -1468,7 +1501,8 @@ def build(live: Path, portal_html: Path | None = None) -> dict[str, Any]:
     vpn_dev = wireguard["device"] if wireguard else None
     others = [c.stem for c in sorted((live / "wireguard").glob("*.conf")) if c.stem != vpn_dev]
     firewall = build_firewall(
-        parse_nft((live / "nftables.conf").read_text()), lan_dev, wan_by_dev, vpn_dev, others
+        parse_nft((live / "nftables.conf").read_text()), lan_dev, wan_by_dev, vpn_dev, others,
+        carriers={pppoe_dev},
     )
 
     config: dict[str, Any] = {
