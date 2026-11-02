@@ -86,11 +86,15 @@ def adopt_from_peer(ref: str, peer: str) -> bool:
     para o secrets.yaml. Root, no fwctl. Devolve True se achou."""
     if has(ref):
         return True
-    try:
-        text = paths.sys_path(f"/etc/ppp/peers/{peer}").read_text()
-    except OSError:
-        return False
-    found = PEER_PASSWORD.search(text)
+    found = None
+    # dentro do peer, ou ja no arquivo do motor (copiado de outra caixa)
+    for source in (f"/etc/ppp/peers/{peer}", f"/etc/ppp/azimuth-{peer}.secret"):
+        try:
+            found = PEER_PASSWORD.search(paths.sys_path(source).read_text())
+        except OSError:
+            continue
+        if found and found.group(1):
+            break
     if not found or not found.group(1):
         return False
     data = _read(paths.SECRETS)

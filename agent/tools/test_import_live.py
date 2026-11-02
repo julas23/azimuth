@@ -209,7 +209,7 @@ with tempfile.TemporaryDirectory(prefix="fwadmin-import.") as tmp:
     from fwadmin.services import pppoe as pppoe_svc
     recarga = pppoe_svc.reloads(cfg, None, ["ppp-peers-vivo"])[0].argv[-1]
     check("e o reinicio passa pelo systemctl, sem pon/poff",
-          ("systemctl restart ppp@provider.service" in recarga, "pon " in recarga), (True, False))
+          ("restart ppp@provider.service" in recarga, "pon " in recarga), (True, False))
     peer = render_all(cfg)["ppp-peers-vivo"]
     check("o peer gerado pede a rota como o vivo",
           ["defaultroute" in peer.split(), "replacedefaultroute" in peer.split(), "nodefaultroute" in peer.split()],
@@ -495,6 +495,23 @@ try:
 except ValidationError:
     recusou = True
 check("chain de forward com policy drop e' recusada", recusou, True)
+
+# --- ppp 2.5: a placa como argumento do plugin -------------------------------
+from fwadmin.importer import build_interfaces, parse_interfaces, parse_ppp_peer  # noqa: E402
+
+iface_txt = "auto enp2s0\niface enp2s0 inet static\n    address 10.0.0.1/24\nauto enp3s0\niface enp3s0 inet manual\n"
+_, dev, _ = build_interfaces(
+    parse_interfaces(iface_txt), iface_txt, "enp2s0",
+    parse_ppp_peer('plugin pppoe.so enp3s0\nuser "cliente@cliente"\n'),
+)
+check("'plugin pppoe.so enp3s0' identifica a placa do PPPoE", dev, "enp3s0")
+
+from fwadmin.importer import motor_secret  # noqa: E402
+
+check("senha ja no arquivo do motor continua com o motor",
+      motor_secret(parse_ppp_peer("file /etc/ppp/azimuth-vivo.secret\n"), "vivo"), True)
+check("senha no chap-secrets continua com o administrador",
+      motor_secret(parse_ppp_peer('user "x"\n'), "vivo"), False)
 
 print(f"\n\033[1m{pass_n} passaram, {fail_n} falharam\033[0m")
 sys.exit(1 if fail_n else 0)

@@ -390,6 +390,10 @@ def build_interfaces(
         # o device do rp-pppoe vem numa linha sozinha, sem valor
         pppoe_dev = next((f for f in ppp_raw["flags"] if f in ifaces_raw), None)
     if pppoe_dev is None:
+        # ou como argumento do plugin: 'plugin pppoe.so enp3s0' (ppp 2.5)
+        args = ppp_raw.get("plugin", "").split()[1:]
+        pppoe_dev = next((a for a in args if a in ifaces_raw), None)
+    if pppoe_dev is None:
         raise ValueError(f"nao consegui identificar o device do PPPoE em peers/{peer}")
 
     # A placa do PPPoE pode estar como 'inet dhcp' no ifupdown; quem decide o
@@ -488,18 +492,27 @@ def build_interfaces(
                 and "nodefaultroute" not in ppp_raw["flags"],
                 "carrier": carrier,
                 "unit": ppp_unit,
-                # senha dentro do peer: o motor passa a cuidar dela num arquivo
-                # proprio; senha no chap-secrets: continua la, com o administrador
-                "password_file": "password" in ppp_raw,
+                # senha dentro do peer, ou ja no arquivo do motor: o motor cuida
+                # dela; senha no chap-secrets: continua la, com o administrador
+                "password_file": motor_secret(ppp_raw, peer),
             },
         }
     )
     return interfaces, pppoe_dev, dhcp_wan
 
 
+def motor_secret(ppp_raw: dict[str, Any], peer: str) -> bool:
+    """A senha fica com o motor: dentro do peer, ou ja no arquivo dele
+    ('file /etc/ppp/azimuth-<peer>.secret', de um apply anterior ou copiado
+    a mao de outra caixa Azimuth)."""
+    return "password" in ppp_raw or ppp_raw.get("file") == f"/etc/ppp/azimuth-{peer}.secret"
+
+
 def check_ppp(ppp_raw: dict[str, Any], peer: str, pppoe_dev: str) -> None:
     """A senha. O resto do peer e' conferido contra o gerado, em compare_ppp."""
-    if "password" in ppp_raw:
+    if "password" not in ppp_raw and motor_secret(ppp_raw, peer):
+        note(f"a senha do PPPoE ja esta em /etc/ppp/azimuth-{peer}.secret, o arquivo do motor; continua la")
+    elif "password" in ppp_raw:
         note(
             f"a senha do PPPoE sai de dentro do peers/{peer} e vai para "
             f"/etc/ppp/azimuth-{peer}.secret (0600), que o peer gerado inclui com 'file'; "
@@ -555,6 +568,14 @@ def compare_ppp(cfg: Config, live: Path) -> None:
             change(f"peers/{wan.pppoe.peer}: '{line}' sai do arquivo")
         for line in sorted(gerado - vivo):
             change(f"peers/{wan.pppoe.peer}: '{line}' entra no arquivo")
+        # _ppp_lines ignora o 'file' da senha (senha no peer -> arquivo a parte
+        # e' a mesma coisa); perder o 'file' que o vivo tem, nao: o pppd fica
+        # sem senha
+        def inclui(text: str) -> bool:
+            return any(SECRET_INCLUDE.match(raw.split("#", 1)[0].strip()) for raw in text.splitlines())
+
+        if inclui(source.read_text()) and not inclui(rendered[name]):
+            change(f"peers/{wan.pppoe.peer}: o 'file' com a senha sai do arquivo e o pppd fica sem senha")
 
 
 def build_dns(dns_raw: dict[str, list[str]], domain: str) -> dict[str, Any]:

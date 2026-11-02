@@ -415,6 +415,11 @@ def cmd_confirm(args: argparse.Namespace) -> int:
     seal_now("confirm")
     # a senha proposta pelo painel vira a definitiva junto com a config
     secretstore.commit()
+    # O primeiro apply confirmado encerra a caixa nova: dali em diante a
+    # maquina e' do motor, e a isencao da adocao nao tem mais razao de existir.
+    from fwadmin import inicial
+
+    inicial.MARKER.unlink(missing_ok=True)
 
     git_commit(state.note or "apply via fwadmin")
     return 0
@@ -547,14 +552,55 @@ def adoption_changes() -> list[str] | None:
     from fwadmin import inicial
 
     if inicial.MARKER.exists():
-        return []
+        mexidos = edited_since_fresh_box()
+        if not mexidos:
+            return []
+        # Caixa nova que alguem montou a mao depois (incidente de 2026-11-02:
+        # o apply revertia, o dono trouxe os arquivos do firewall antigo, e o
+        # config da caixa nova apagaria tudo isso sem trava nenhuma).
+        say(f"{YELLOW}caixa nova editada a mao depois do primeiro boot:{OFF} {', '.join(mexidos)}")
+        say(f"{DIM}a isencao da caixa nova cai; vale a conferencia da adocao{OFF}")
     try:
         observe.collect()
         _, _, changes = importer.run(observe.LIVE)
     except Exception as exc:  # noqa: BLE001 — root: diz o motivo, nao trava em traceback
         say(f"{YELLOW}leitura da maquina falhou: {type(exc).__name__}: {exc}{OFF}")
         return None
+    # O importador le o /etc/nftables.conf do administrador; a tabela do motor
+    # e' reescrita do config.yaml. Sem selo, quem escreveu o azimuth.nft nao
+    # foi o motor, e o que so existe nele se perderia sem aparecer na lista.
+    if MOTOR_NFT.exists():
+        changes.append(
+            f"nftables: {MOTOR_NFT} existe e nao foi escrito pelo motor (sem selo); "
+            "o apply o reescreve a partir do config.yaml e o que so existe nele se perde"
+        )
     return changes
+
+
+MOTOR_NFT = Path("/etc/nftables.d/azimuth.nft")
+
+
+def edited_since_fresh_box() -> list[str]:
+    """Arquivos que o apply escreveria e que mudaram depois da marca da caixa
+    nova. A isencao da adocao so vale para o que a ISO deixou: o que o dono
+    montou a mao depois e' maquina em producao, como qualquer outra."""
+    from fwadmin import inicial
+
+    try:
+        since = inicial.MARKER.stat().st_mtime
+        cfg = load(paths.CONFIG)
+    except Exception:  # noqa: BLE001 — sem config legivel o apply nem chega aqui
+        return []
+    alvos = {*services.targets(cfg).values(), str(MOTOR_NFT)}
+    out = []
+    for alvo in sorted(alvos):
+        try:
+            # folga de um minuto: o primeiro boot escreve logo depois da marca
+            if Path(alvo).stat().st_mtime > since + 60:
+                out.append(alvo)
+        except OSError:
+            continue
+    return out
 
 
 def adoption_pending() -> list[tuple[str, str]] | None:

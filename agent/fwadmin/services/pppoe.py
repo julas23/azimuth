@@ -51,12 +51,21 @@ def render_secrets(cfg: Config) -> tuple[dict[str, str], list[str]]:
     return out, missing
 
 
+def unit_for(peer: str, unit: str | None) -> str:
+    """A unidade que mantem o link: a importada, ou ppp@<peer> do pacote ppp.
+
+    O pppd e' sempre do systemd, nunca filho do apply. Lancado pelo 'pon'
+    dentro do fwctl, ele herdava o sandbox do painel (o seccomp do
+    RestrictAddressFamilies recusava o socket AF_PPPOX, e o apply revertia
+    sempre: incidente de 2026-11-02), morava no cgroup do painel (um restart
+    do painel derrubava a WAN) e nao voltava no boot, porque o interfaces do
+    motor nao tem 'provider'.
+    """
+    return unit or f"ppp@{peer}.service"
+
+
 def units(cfg: Config) -> frozenset[str]:
-    # Sem pppoe.unit, quem sobe o link e' o 'pon', chamado pelo ifup da
-    # interface fisica, e nao ha unidade para reivindicar — a linha do
-    # inventario e' do interfaces. Com ela (ppp@provider no Debian), o link
-    # e' do systemd, e a unidade e' deste modulo.
-    return frozenset(w.pppoe.unit for w in cfg.wans if w.pppoe and w.pppoe.unit)
+    return frozenset(unit_for(w.pppoe.peer, w.pppoe.unit) for w in cfg.wans if w.pppoe)
 
 
 def _peers(files: list[str]) -> list[str]:
@@ -100,12 +109,21 @@ def _restart(peer: str, device: str | None, unit: str | None = None) -> Reload:
         if device
         else []
     )
-    if unit:
-        # pon/poff ao lado de um ppp@ do systemd subiria um segundo pppd na
-        # mesma placa: com a unidade, quem reinicia e' o systemctl.
-        steps = [*wait, f"systemctl restart {unit}"]
-    else:
-        steps = [f"poff {peer} || true", *wait, f"pon {peer}"]
+    unit = unit_for(peer, unit)
+    steps = [
+        # um pppd do 'pon' (o 'provider' do ifupdown) ao lado da unidade seria
+        # um segundo pppd na mesma placa
+        f"poff {peer} 2>/dev/null || true",
+        *wait,
+        # No boot, quem disca e' a unidade — a menos que o interfaces em disco
+        # (o de antes, num rollback da adocao) ainda tenha o 'provider': ai o
+        # ifupdown disca no boot, e a unidade so sobe o link agora.
+        f"if grep -Eq '^[[:space:]]*provider[[:space:]]+{peer}[[:space:]]*$' /etc/network/interfaces; "
+        f"then systemctl disable -q {unit}; else systemctl enable -q {unit}; fi",
+        # --no-block: o ppp@ e' Type=notify e so fica pronto com o link no ar;
+        # quem espera o endereco e' a prova de funcao, com prazo proprio.
+        f"systemctl --no-block restart {unit}",
+    ]
     return Reload(f"PPPoE {peer}", ["sh", "-c", "; ".join(steps)], disruptive=True)
 
 
