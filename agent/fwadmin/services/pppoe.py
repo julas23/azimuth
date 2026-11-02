@@ -110,10 +110,16 @@ def _restart(peer: str, device: str | None, unit: str | None = None) -> Reload:
         else []
     )
     unit = unit_for(peer, unit)
+    # Um pppd do 'pon' ao lado da unidade seria um segundo pppd na mesma placa.
+    # O poff so acha o pppd pelo nome com que foi chamado, e o do Debian e'
+    # 'pon provider' — um link para o peer (incidente de 2026-11-02: 'pppd
+    # call provider' rodando, peers/provider -> vivo). Derruba o peer e cada
+    # apelido dele, e espera sair antes de a unidade discar.
+    nomes = f"{peer} $(find /etc/ppp/peers -maxdepth 1 -type l -lname {peer} -printf '%f ' 2>/dev/null)"
     steps = [
-        # um pppd do 'pon' (o 'provider' do ifupdown) ao lado da unidade seria
-        # um segundo pppd na mesma placa
-        f"poff {peer} 2>/dev/null || true",
+        f"for p in {nomes}; do poff $p 2>/dev/null || true; done",
+        f"for i in $(seq 1 10); do pidof pppd >/dev/null || break; "
+        f"for p in {nomes}; do pgrep -f \"pppd call $p( |$)\" >/dev/null && sleep 1 && continue 2; done; break; done",
         *wait,
         # No boot, quem disca e' a unidade — a menos que o interfaces em disco
         # (o de antes, num rollback da adocao) ainda tenha o 'provider': ai o
