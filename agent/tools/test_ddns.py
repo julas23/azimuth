@@ -125,5 +125,23 @@ print("\n== so o token mudou: a recarga acontece ==")
 check("segredo sozinho no 'changed' recarrega",
       [r.label for r in ddns.reloads(cfg, cfg, [ddns.SECRET])], ["DDNS (inadyn)"])
 
+print("\n== arquivos iguais, unidade fora do lugar: o apply conserta ==")
+real_state = ddns._unit_state
+try:
+    ddns._unit_state = lambda: ("disabled", "inactive")
+    check("ligado com a unidade desabilitada habilita e reinicia",
+          [r.label for r in ddns.reloads(cfg, cfg, [])], ["DDNS (inadyn)"])
+    ddns._unit_state = lambda: ("enabled", "active")
+    check("ligado com a unidade rodando nao mexe", ddns.reloads(cfg, cfg, []), [])
+    ddns._unit_state = lambda: ("enabled", "activating")
+    check("esperando o RestartSec nao reinicia", ddns.reloads(cfg, cfg, []), [])
+    check("desligado com a unidade rodando para",
+          [r.label for r in ddns.reloads(off, off, [])], ["DDNS (desligar)"])
+    ddns._unit_state = lambda: ("disabled", "inactive")
+    check("desligado e parado nao mexe", ddns.reloads(off, off, []), [])
+    check("nunca configurado nem pergunta", ddns.reloads(Config.model_validate(cfg.model_dump() | {"ddns": {}}), None, []), [])
+finally:
+    ddns._unit_state = real_state
+
 print(f"\n\033[1m{pass_n} passaram, {fail_n} falharam\033[0m")
 raise SystemExit(1 if fail_n else 0)

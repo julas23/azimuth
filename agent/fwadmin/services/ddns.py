@@ -112,8 +112,38 @@ def _apply_state(cfg: Config | None) -> list[Reload]:
     return [Reload("DDNS (desligar)", ["systemctl", "disable", "--now", UNIT])]
 
 
+def _unit_state() -> tuple[str, str] | None:
+    """(is-enabled, is-active) da unidade; None no sysroot de teste."""
+    if paths.sandboxed():
+        return None
+    return (
+        run("systemctl", "is-enabled", UNIT, mutating=False).output.strip(),
+        run("systemctl", "is-active", UNIT, mutating=False).output.strip(),
+    )
+
+
+def _unit_drifted(cfg: Config) -> bool:
+    """A unidade discorda da config, mesmo com os arquivos iguais aos de /etc.
+
+    Caixa reinstalada com o /etc ja certo, um 'systemctl disable' na mao, a
+    unidade instalada depois do apply: em todos o diff nao ve nada, e sem esta
+    conferencia o nome ficaria parado com o painel dizendo que esta ligado.
+    'activating' conta como rodando: e' o inadyn esperando o RestartSec depois
+    de o provedor recusar, e reiniciar a cada apply so martelaria o provedor.
+    """
+    state = _unit_state()
+    if state is None:
+        return False
+    enabled, active = state
+    if _on(cfg):
+        return enabled != "enabled" or active not in ("active", "activating")
+    return enabled == "enabled" or active in ("active", "activating")
+
+
 def reloads(cfg: Config, previous: Config | None, changed: list[str]) -> list[Reload]:
-    if not _configured(cfg) or not _ours(changed):
+    if not _configured(cfg):
+        return []
+    if not _ours(changed) and not _unit_drifted(cfg):
         return []
     return _apply_state(cfg)
 

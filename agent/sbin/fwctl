@@ -169,7 +169,12 @@ def load_configs(source: Path) -> tuple[object, object]:
 
 def show_plan(plan: Plan) -> None:
     if not plan.changed:
-        say(f"{GREEN}nada a fazer{OFF} — /etc ja esta igual a config")
+        if plan.reloads:
+            say(f"{BOLD}/etc ja esta igual a config{OFF}, mas unidades estao fora do lugar:")
+            for action in plan.reloads:
+                say(f"  {action.label}")
+        else:
+            say(f"{GREEN}nada a fazer{OFF} — /etc ja esta igual a config")
         return
 
     say(f"{BOLD}arquivos que mudam ({len(plan.changed)}){OFF}")
@@ -265,6 +270,16 @@ def cmd_apply(args: argparse.Namespace) -> int:
 
     show_plan(plan)
     if not plan.changed:
+        # Nenhum arquivo para instalar, e portanto nada para reverter: o que
+        # sobra e' unidade discordando da config (o DDNS desabilitado numa
+        # caixa reinstalada com o /etc ja certo). Acertar e' idempotente.
+        for action in plan.reloads:
+            result = run(*action.argv, timeout=120)
+            mark = f"{GREEN}OK{OFF}" if result.ok else f"{RED}FALHOU{OFF}"
+            say(f"  [{mark}] {action.label}")
+            if not result.ok and result.output:
+                for line in result.output.splitlines()[:5]:
+                    say(f"       {RED}{line}{OFF}")
         paths.PENDING.unlink(missing_ok=True)
         return 0
     if not plan.valid:
